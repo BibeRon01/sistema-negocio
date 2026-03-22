@@ -1,11 +1,14 @@
 import streamlit as st
 import pandas as pd
-
+from supabase import create_client
 from utils import cargar, guardar, subir_excel, filtrar_busqueda, descargar_excel
 from dashboard import mostrar_dashboard
 
 st.set_page_config(page_title="Sistema de Negocio", layout="wide")
-
+# 🔗 Conexión a Supabase
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
 # -------------------------------------------------
 # FUNCIONES DE APOYO
 # -------------------------------------------------
@@ -121,18 +124,21 @@ elif menu == "Productos":
         cantidad = st.number_input("Cantidad", min_value=0, step=1)
 
     if st.button("Guardar producto"):
-        if not nombre.strip():
-            st.warning("Debes escribir el nombre del producto.")
-        else:
-            nuevo = pd.DataFrame([{
+    if not nombre.strip():
+        st.warning("Debes escribir el nombre del producto.")
+    else:
+        try:
+            supabase.table("productos").insert({
                 "nombre": nombre.strip(),
                 "costo": float(costo),
                 "precio": float(precio),
-                "cantidad": int(cantidad),
-            }])
-            productos = pd.concat([productos, nuevo], ignore_index=True)
-            guardar(productos, "productos.xlsx")
-            st.success("Producto guardado correctamente.")
+                "cantidad": float(cantidad)
+            }).execute()
+
+            st.success("Producto guardado correctamente en la nube ☁️")
+
+        except Exception as e:
+            st.error(f"Error al guardar: {e}")
 
     st.subheader("Editar o eliminar producto")
     if not productos.empty:
