@@ -847,4 +847,31 @@ from supabase import create_client
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
+def backup_nube(tabla, df):
+    try:
+        # Limpia tabla en Supabase
+        supabase.table(tabla).delete().neq("id", 0).execute()
 
+        # Inserta datos nuevos
+        if not df.empty:
+            datos = df.fillna("").to_dict(orient="records")
+            supabase.table(tabla).insert(datos).execute()
+
+    except Exception as e:
+        st.warning(f"Error en backup nube: {e}")
+        guardar(productos, "productos.xlsx")
+backup_nube("productos", productos)
+guardar(ventas, "ventas.xlsx")
+backup_nube("ventas", ventas)
+guardar(compras, "compras.xlsx")
+backup_nube("compras", compras)
+guardar(gastos, "gastos.xlsx")
+backup_nube("gastos", gastos)
+guardar(perdidas, "perdidas.xlsx")
+backup_nube("perdidas", perdidas)
+guardar(gastos_dueno, "gastos_dueno.xlsx")
+backup_nube("gastos_dueno", gastos_dueno)
+guardar(empleados, "empleados.xlsx")
+backup_nube("empleados", empleados)
+guardar(empleados, "empleados.xlsx")
+backup_nube("empleados", empleados)
