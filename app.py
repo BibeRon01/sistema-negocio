@@ -841,4 +841,10 @@ elif menu == "Cierre de Caja":
     cierre_filtrado = filtrar_busqueda(cierre_caja)
     st.dataframe(cierre_filtrado, use_container_width=True)
     descargar_excel(cierre_filtrado, "cierre_caja.xlsx")
+from supabase import create_client
+
+# 🔗 CONEXIÓN SUPABASE
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
 
