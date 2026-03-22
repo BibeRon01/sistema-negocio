@@ -116,8 +116,11 @@ def convertir_fecha(df, columna="fecha"):
 # -----------------------------
 # SUMA SEGURA (CLAVE DEL SISTEMA)
 # -----------------------------
+
 def suma_segura(df, columna):
     if df.empty or columna not in df.columns:
         return 0.0
     return float(pd.to_numeric(df[columna], errors="coerce").fillna(0).sum())
+    SUPABASE_URL = "PEGA_AQUI_LA_URL_DE_API"
+SUPABASE_KEY = "PEGA_AQUI_LA_CLAVE_PUBLICABLE"
     
