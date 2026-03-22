@@ -849,13 +849,23 @@ key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
 def backup_nube(tabla, df):
     try:
-        # Limpia tabla en Supabase
-        supabase.table(tabla).delete().neq("id", 0).execute()
+        if df is None or df.empty:
+            return
 
-        # Inserta datos nuevos
-        if not df.empty:
-            datos = df.fillna("").to_dict(orient="records")
-            supabase.table(tabla).insert(datos).execute()
+        df_backup = df.copy()
+
+        # No mandar id a Supabase si viene vacío o si la tabla lo genera sola
+        if "id" in df_backup.columns:
+            df_backup = df_backup.drop(columns=["id"])
+
+        # Limpiar valores NaN
+        df_backup = df_backup.fillna("")
+
+        datos = df_backup.to_dict(orient="records")
+
+        # Borrar contenido anterior y volver a insertar
+        supabase.table(tabla).delete().neq("id", 0).execute()
+        supabase.table(tabla).insert(datos).execute()
 
     except Exception as e:
         st.warning(f"Error en backup nube: {e}")
