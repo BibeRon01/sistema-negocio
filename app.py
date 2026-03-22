@@ -844,8 +844,8 @@ elif menu == "Cierre de Caja":
 from supabase import create_client
 
 # 🔗 CONEXIÓN SUPABASE
-url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_KEY"]
+url = st.secrets["https://dmpwpoyulkbhfjcdsbpt.supabase.co"]
+key = st.secrets["sb_publishable_CNX69DYPonTYoy297Qqxyw__Vwmi5-T"]
 supabase = create_client(url, key)
 def backup_nube(tabla, df):
     try:
