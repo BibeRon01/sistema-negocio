@@ -14,7 +14,7 @@ def asegurar_columnas(df, columnas):
         return pd.DataFrame(columns=columnas)
 
     for col in columnas:
-        if col not in df.columns:
+        if col not in df.columns
             df[col] = ""
 
     return df[columnas]
@@ -869,19 +869,4 @@ def backup_nube(tabla, df):
 
     except Exception as e:
         st.warning(f"Error en backup nube: {e}")
-        guardar(productos, "productos.xlsx")
-backup_nube("productos", productos)
-guardar(ventas, "ventas.xlsx")
-backup_nube("ventas", ventas)
-guardar(compras, "compras.xlsx")
-backup_nube("compras", compras)
-guardar(gastos, "gastos.xlsx")
-backup_nube("gastos", gastos)
-guardar(perdidas, "perdidas.xlsx")
-backup_nube("perdidas", perdidas)
-guardar(gastos_dueno, "gastos_dueno.xlsx")
-backup_nube("gastos_dueno", gastos_dueno)
-guardar(empleados, "empleados.xlsx")
-backup_nube("empleados", empleados)
-guardar(empleados, "empleados.xlsx")
-backup_nube("empleados", empleados)
+        
