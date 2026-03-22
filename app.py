@@ -2,9 +2,12 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client
 
+from utils import cargar, guardar, subir_excel, filtrar_busqueda, descargar_excel
+from dashboard import mostrar_dashboard
+
 st.set_page_config(page_title="Sistema de Negocio", layout="wide")
 
-# 🔗 Supabase
+# 🔗 SUPABASE (solo productos por ahora)
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
@@ -12,76 +15,71 @@ supabase = create_client(url, key)
 # -------------------------------------------------
 # FUNCIONES GENERALES
 # -------------------------------------------------
-def limpiar_nan(df):
-    return df.fillna(0)
+def asegurar(df, cols):
+    if df is None or df.empty:
+        return pd.DataFrame(columns=cols)
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    return df
 
-def obtener(nombre):
-    try:
-        data = supabase.table(nombre).select("*").order("id").execute()
-        return pd.DataFrame(data.data)
-    except:
-        return pd.DataFrame()
+def fecha(df):
+    if "fecha" in df.columns:
+        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+    return df
 
-def insertar(nombre, data):
-    supabase.table(nombre).insert(data).execute()
-
-def insertar_masivo(nombre, df):
-    df = limpiar_nan(df)
-    supabase.table(nombre).insert(df.to_dict(orient="records")).execute()
-
-def actualizar(nombre, data, id):
-    supabase.table(nombre).update(data).eq("id", id).execute()
-
-def eliminar(nombre, id):
-    supabase.table(nombre).delete().eq("id", id).execute()
-
-def descargar(df, nombre):
-    return st.download_button(
-        "📥 Descargar Excel",
-        df.to_csv(index=False).encode("utf-8"),
-        f"{nombre}.csv",
-        "text/csv"
-    )
+# -------------------------------------------------
+# CARGA (EXCEL)
+# -------------------------------------------------
+ventas = fecha(asegurar(cargar("ventas.xlsx"), ["fecha","producto","cantidad","precio","total"]))
+compras = fecha(asegurar(cargar("compras.xlsx"), ["fecha","producto","cantidad","costo"]))
+gastos = fecha(asegurar(cargar("gastos.xlsx"), ["fecha","descripcion","monto","tipo"]))
+perdidas = fecha(asegurar(cargar("perdidas.xlsx"), ["fecha","producto","cantidad","motivo"]))
+gastos_dueno = fecha(asegurar(cargar("gastos_dueno.xlsx"), ["fecha","descripcion","monto"]))
+empleados = asegurar(cargar("empleados.xlsx"), ["nombre","cargo","salario"])
+cierre = fecha(asegurar(cargar("cierre_caja.xlsx"), ["fecha","efectivo","banco"]))
 
 # -------------------------------------------------
 # MENÚ
 # -------------------------------------------------
 menu = st.sidebar.selectbox("Menú", [
-    "Dashboard","Productos","Ventas","Compras",
-    "Gastos","Pérdidas","Gastos Dueño","Empleados","Cierre de Caja"
+    "Dashboard","Productos","Ventas","Compras","Gastos",
+    "Pérdidas","Gastos Dueño","Empleados","Cierre de Caja"
 ])
 
 # -------------------------------------------------
 # DASHBOARD
 # -------------------------------------------------
 if menu == "Dashboard":
-    st.title("📊 Dashboard")
-    st.info("Aquí verás resumen cuando cargues datos")
+    mostrar_dashboard(ventas, gastos, compras, perdidas, gastos_dueno, cierre)
 
 # -------------------------------------------------
-# PRODUCTOS
+# PRODUCTOS (SUPABASE + EXCEL MASIVO)
 # -------------------------------------------------
 elif menu == "Productos":
 
     st.header("📦 Productos")
 
-    # SUBIR EXCEL
-    archivo = st.file_uploader("Subir productos Excel", type=["xlsx"])
+    # 🔹 SUBIR EXCEL
+    st.subheader("Subir productos por Excel")
+    archivo = st.file_uploader("Archivo Excel", type=["xlsx"])
+
     if archivo:
         df = pd.read_excel(archivo)
         df.columns = df.columns.str.lower()
+        df = df.fillna(0)
 
         if "nombre" in df.columns:
             if "costo" not in df: df["costo"] = 0
             if "precio" not in df: df["precio"] = 0
             if "cantidad" not in df: df["cantidad"] = 0
 
-            insertar_masivo("productos", df)
+            supabase.table("productos").insert(df.to_dict(orient="records")).execute()
             st.success("Subido correctamente ☁️")
         else:
             st.error("Debe tener columna nombre")
 
-    # AGREGAR MANUAL
+    # 🔹 AGREGAR
     st.subheader("Agregar producto")
     nombre = st.text_input("Nombre")
     costo = st.number_input("Costo", 0.0)
@@ -89,87 +87,97 @@ elif menu == "Productos":
     cantidad = st.number_input("Cantidad", 0.0)
 
     if st.button("Guardar producto"):
-        insertar("productos", {
-            "nombre": nombre,
-            "costo": costo,
-            "precio": precio,
-            "cantidad": cantidad
-        })
-        st.success("Guardado")
-        st.rerun()
+        if nombre.strip():
+            supabase.table("productos").insert({
+                "nombre": nombre,
+                "costo": costo,
+                "precio": precio,
+                "cantidad": cantidad
+            }).execute()
+            st.success("Guardado ☁️")
+            st.rerun()
+        else:
+            st.warning("Ingrese nombre")
 
-    # LISTADO
-    df = obtener("productos")
-    st.dataframe(df)
-    descargar(df, "productos")
+    # 🔹 LISTADO
+    try:
+        data = supabase.table("productos").select("*").order("id").execute()
+        productos = pd.DataFrame(data.data)
+    except:
+        productos = pd.DataFrame()
 
-    # EDITAR / ELIMINAR
-    if not df.empty:
-        sel = st.selectbox("Editar", df["nombre"])
-        fila = df[df["nombre"] == sel].iloc[0]
+    st.subheader("Listado")
+    st.dataframe(productos, width="stretch")
+    descargar_excel(productos, "productos.xlsx")
 
-        nuevo_precio = st.number_input("Precio", value=float(fila["precio"]))
-        nueva_cantidad = st.number_input("Cantidad", value=float(fila["cantidad"]))
+    # 🔹 EDITAR / ELIMINAR
+    if not productos.empty:
+        sel = st.selectbox("Selecciona producto", productos["nombre"])
+        fila = productos[productos["nombre"] == sel].iloc[0]
 
-        if st.button("Actualizar"):
-            actualizar("productos", {
+        nuevo_precio = st.number_input("Nuevo precio", float(fila["precio"]))
+        nueva_cantidad = st.number_input("Nueva cantidad", float(fila["cantidad"]))
+
+        col1, col2 = st.columns(2)
+
+        if col1.button("Actualizar"):
+            supabase.table("productos").update({
                 "precio": nuevo_precio,
                 "cantidad": nueva_cantidad
-            }, fila["id"])
+            }).eq("id", fila["id"]).execute()
             st.rerun()
 
-        if st.button("Eliminar"):
-            eliminar("productos", fila["id"])
+        if col2.button("Eliminar"):
+            supabase.table("productos").delete().eq("id", fila["id"]).execute()
             st.rerun()
 
 # -------------------------------------------------
-# PLANTILLA PARA TODOS LOS DEMÁS MÓDULOS
+# FUNCIÓN PARA RESTO DE MÓDULOS (EXCEL)
 # -------------------------------------------------
-def modulo(nombre, campos):
+def modulo(nombre, df, columnas, archivo):
 
     st.header(nombre)
 
-    # SUBIR EXCEL
-    archivo = st.file_uploader(f"Subir {nombre}", type=["xlsx"])
-    if archivo:
-        df = pd.read_excel(archivo)
-        df.columns = df.columns.str.lower()
-        insertar_masivo(nombre.lower().replace(" ","_"), df)
-        st.success("Subido ☁️")
+    archivo_up = st.file_uploader("Subir Excel", type=["xlsx"])
+    if archivo_up:
+        nuevo = pd.read_excel(archivo_up)
+        df = pd.concat([df, nuevo])
+        guardar(df, archivo)
+        st.success("Subido")
 
-    # FORMULARIO
-    data = {}
-    for campo in campos:
-        data[campo] = st.text_input(campo)
+    datos = {}
+    for col in columnas:
+        datos[col] = st.text_input(col)
 
-    if st.button(f"Guardar {nombre}"):
-        insertar(nombre.lower().replace(" ","_"), data)
-        st.rerun()
+    if st.button("Guardar"):
+        nuevo = pd.DataFrame([datos])
+        df = pd.concat([df, nuevo])
+        guardar(df, archivo)
+        st.success("Guardado")
 
-    df = obtener(nombre.lower().replace(" ","_"))
     st.dataframe(df)
-    descargar(df, nombre)
+    descargar_excel(df, archivo)
 
 # -------------------------------------------------
-# MÓDULOS
+# RESTO MÓDULOS (SIN ROMPER)
 # -------------------------------------------------
 elif menu == "Ventas":
-    modulo("ventas", ["fecha","producto","cantidad","precio","total"])
+    modulo("Ventas", ventas, ["fecha","producto","cantidad","precio","total"], "ventas.xlsx")
 
 elif menu == "Compras":
-    modulo("compras", ["fecha","producto","cantidad","costo"])
+    modulo("Compras", compras, ["fecha","producto","cantidad","costo"], "compras.xlsx")
 
 elif menu == "Gastos":
-    modulo("gastos", ["fecha","descripcion","monto","tipo"])
+    modulo("Gastos", gastos, ["fecha","descripcion","monto","tipo"], "gastos.xlsx")
 
 elif menu == "Pérdidas":
-    modulo("perdidas", ["fecha","producto","cantidad","motivo"])
+    modulo("Pérdidas", perdidas, ["fecha","producto","cantidad","motivo"], "perdidas.xlsx")
 
 elif menu == "Gastos Dueño":
-    modulo("gastos_dueno", ["fecha","descripcion","monto"])
+    modulo("Gastos Dueño", gastos_dueno, ["fecha","descripcion","monto"], "gastos_dueno.xlsx")
 
 elif menu == "Empleados":
-    modulo("empleados", ["nombre","cargo","salario"])
+    modulo("Empleados", empleados, ["nombre","cargo","salario"], "empleados.xlsx")
 
 elif menu == "Cierre de Caja":
-    modulo("cierre_caja", ["fecha","efectivo","banco"])
+    modulo("Cierre de Caja", cierre, ["fecha","efectivo","banco"], "cierre_caja.xlsx")
