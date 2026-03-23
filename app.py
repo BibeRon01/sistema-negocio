@@ -146,7 +146,12 @@ elif menu == "Productos":
             productos["nombre"].astype(str).unique(),
             key="editar_producto"
         )
-        idx = productos[productos["nombre"] == producto_sel].index[0]
+        ila_filtrada = productos[productos["nombre"].astype(str) == str(producto_sel)]
+
+if fila_filtrada.empty:
+    st.warning("No se encontró el producto seleccionado.")
+else:
+    idx = fila_filtrada.index[0]
         datos = productos.loc[idx]
 
         col1, col2 = st.columns(2)
