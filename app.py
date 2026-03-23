@@ -143,22 +143,46 @@ elif menu == "Productos":
     if not productos.empty:
        producto_sel = st.selectbox(
     "Selecciona un producto",
-    productos["nombre"].dropna().astype(str).str.strip().unique(),
-    key="editar_producto"
-)
-fila_filtrada = productos[productos["nombre"].astype(str).str.strip() == str(producto_sel).strip()]
+    productos["nombre"].dropna().astype(str).str.s
+    st.subheader("Editar o eliminar producto")
+if not productos.empty:
+    producto_sel = st.selectbox(
+        "Selecciona un producto",
+        productos["nombre"].dropna().astype(str).str.strip().unique(),
+        key="editar_producto"
+    )
 
-if fila_filtrada.empty:
-    st.warning("No se encontró el producto seleccionado.")
-else:
-    idx = fila_filtrada.index[0]
-    datos = productos.loc[idx]
-col1, col2 = st.columns(2)
-with col1:
-            nuevo_costo = st.number_input("Nuevo costo", value=float(datos["costo"]), key="nuevo_costo_producto")
-            nuevo_precio = st.number_input("Nuevo precio", value=float(datos["precio"]), key="nuevo_precio_producto")
+    fila_filtrada = productos[
+        productos["nombre"].astype(str).str.strip() == str(producto_sel).strip()
+    ]
+
+    if fila_filtrada.empty:
+        st.warning("No se encontró el producto seleccionado.")
+    else:
+        idx = fila_filtrada.index[0]
+        datos = productos.loc[idx]
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            nuevo_costo = st.number_input(
+                "Nuevo costo",
+                value=float(datos["costo"]),
+                key="nuevo_costo_producto"
+            )
+            nuevo_precio = st.number_input(
+                "Nuevo precio",
+                value=float(datos["precio"]),
+                key="nuevo_precio_producto"
+            )
+
         with col2:
-            nueva_cantidad = st.number_input("Nueva cantidad", value=int(datos["cantidad"]), step=1, key="nueva_cantidad_producto")
+            nueva_cantidad = st.number_input(
+                "Nueva cantidad",
+                value=int(datos["cantidad"]),
+                step=1,
+                key="nueva_cantidad_producto"
+            )
 
         if st.button("Actualizar producto"):
             productos.loc[idx, "costo"] = float(nuevo_costo)
