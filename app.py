@@ -141,11 +141,6 @@ elif menu == "Productos":
 
     st.subheader("Editar o eliminar producto")
     if not productos.empty:
-       producto_sel = st.selectbox(
-    "Selecciona un producto",
-    productos["nombre"].dropna().astype(str).str.s
-    st.subheader("Editar o eliminar producto")
-if not productos.empty:
     producto_sel = st.selectbox(
         "Selecciona un producto",
         productos["nombre"].dropna().astype(str).str.strip().unique(),
