@@ -1,11 +1,15 @@
 import streamlit as st
 import pandas as pd
+from supabase import create_client
 
 from utils import cargar, guardar, subir_excel, filtrar_busqueda, descargar_excel
 from dashboard import mostrar_dashboard
 
 st.set_page_config(page_title="Sistema de Negocio", layout="wide")
 
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
 
 # -------------------------------------------------
 # FUNCIONES DE APOYO
@@ -30,7 +34,11 @@ def convertir_fecha_segura(df, columna="fecha"):
 # -------------------------------------------------
 # CARGA DE ARCHIVOS
 # -------------------------------------------------
-productos = cargar("productos.xlsx")
+try:
+    data = supabase.table("productos").select("*").order("id").execute()
+    productos = pd.DataFrame(data.data)
+except Exception:
+    productos = pd.DataFrame(columns=["id", "nombre", "costo", "precio", "cantidad"])
 ventas = cargar("ventas.xlsx")
 gastos = cargar("gastos.xlsx")
 compras = cargar("compras.xlsx")
@@ -43,7 +51,12 @@ cierre_caja = cargar("cierre_caja.xlsx")
 # -------------------------------------------------
 # ASEGURAR COLUMNAS
 # -------------------------------------------------
-productos = asegurar_columnas(productos, ["nombre", "costo", "precio", "cantidad"])
+if productos is None or productos.empty:
+    productos = pd.DataFrame(columns=["id", "nombre", "costo", "precio", "cantidad"])
+else:
+    for col in ["id", "nombre", "costo", "precio", "cantidad"]:
+        if col not in productos.columns:
+            productos[col] = ""
 ventas = asegurar_columnas(ventas, ["fecha", "total", "metodo"])
 gastos = asegurar_columnas(gastos, ["fecha", "tipo", "descripcion", "monto", "metodo"])
 compras = asegurar_columnas(compras, ["fecha", "numero", "proveedor", "monto", "metodo"])
@@ -116,11 +129,35 @@ elif menu == "Productos":
         type=["xlsx"],
         key="productos_excel"
     )
-    productos = subir_excel(productos, archivo_excel, columnas_productos, "productos.xlsx")
+    if archivo_excel is not None:
+    try:
+        df_excel = pd.read_excel(archivo_excel)
+        df_excel.columns = df_excel.columns.str.strip().str.lower()
 
-    # Limpiar nombres vacíos o nan escritos como texto
-    if not productos.empty:
-        productos["nombre"] = productos["nombre"].fillna("").astype(str).str.strip()
+        for col in ["nombre", "costo", "precio", "cantidad"]:
+            if col not in df_excel.columns:
+                st.error("El archivo debe tener: nombre, costo, precio, cantidad")
+                st.stop()
+
+        df_excel["nombre"] = df_excel["nombre"].fillna("").astype(str).str.strip()
+        df_excel = df_excel[df_excel["nombre"] != ""]
+        df_excel["costo"] = pd.to_numeric(df_excel["costo"], errors="coerce").fillna(0)
+        df_excel["precio"] = pd.to_numeric(df_excel["precio"], errors="coerce").fillna(0)
+        df_excel["cantidad"] = pd.to_numeric(df_excel["cantidad"], errors="coerce").fillna(0).astype(int)
+
+        for _, row in df_excel.iterrows():
+            supabase.table("productos").insert({
+                "nombre": row["nombre"],
+                "costo": float(row["costo"]),
+                "precio": float(row["precio"]),
+                "cantidad": int(row["cantidad"]),
+            }).execute()
+
+        st.success("Productos subidos correctamente a la nube.")
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"Error al subir Excel: {e}")
 
     st.subheader("Agregar producto manual")
     col1, col2 = st.columns(2)
@@ -135,15 +172,15 @@ elif menu == "Productos":
         if not nombre.strip():
             st.warning("Debes escribir el nombre del producto.")
         else:
-            nuevo = pd.DataFrame([{
-                "nombre": nombre.strip(),
-                "costo": float(costo),
-                "precio": float(precio),
-                "cantidad": int(cantidad),
-            }])
-            productos = pd.concat([productos, nuevo], ignore_index=True)
-            guardar(productos, "productos.xlsx")
-            st.success("Producto guardado correctamente.")
+            supabase.table("productos").insert({
+    "nombre": nombre.strip(),
+    "costo": float(costo),
+    "precio": float(precio),
+    "cantidad": int(cantidad),
+}).execute()
+
+st.success("Producto guardado correctamente en la nube.")
+st.rerun()
 
     st.subheader("Editar o eliminar producto")
 
@@ -198,16 +235,20 @@ elif menu == "Productos":
                 )
 
             if st.button("Actualizar producto"):
-                productos.loc[idx, "costo"] = float(nuevo_costo)
-                productos.loc[idx, "precio"] = float(nuevo_precio)
-                productos.loc[idx, "cantidad"] = int(nueva_cantidad)
-                guardar(productos, "productos.xlsx")
-                st.success("Producto actualizado correctamente.")
+                supabase.table("productos").update({
+    "costo": float(nuevo_costo),
+    "precio": float(nuevo_precio),
+    "cantidad": int(nueva_cantidad),
+}).eq("id", int(datos["id"])).execute()
+
+st.success("Producto actualizado correctamente en la nube.")
+st.rerun()
 
             if st.button("Eliminar producto"):
-                productos = productos.drop(index=idx).reset_index(drop=True)
-                guardar(productos, "productos.xlsx")
-                st.success("Producto eliminado correctamente.")
+                supabase.table("productos").delete().eq("id", int(datos["id"])).execute()
+
+st.success("Producto eliminado correctamente de la nube.")
+st.rerun()
 
     st.subheader("Listado de productos")
     productos_filtrados = filtrar_busqueda(productos)
