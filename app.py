@@ -143,7 +143,7 @@ elif menu == "Productos":
     if not productos.empty:
         producto_sel = st.selectbox(
             "Selecciona un producto",
-            productos["nombre"].astype(str).unique(),
+            productos["nombre"].dropna().astype(str).str.strip().unique(),
             key="editar_producto"
         )
         ila_filtrada = productos[productos["nombre"].astype(str) == str(producto_sel)]
