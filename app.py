@@ -1,15 +1,11 @@
 import streamlit as st
 import pandas as pd
-from supabase import create_client
 
 from utils import cargar, guardar, subir_excel, filtrar_busqueda, descargar_excel
 from dashboard import mostrar_dashboard
 
 st.set_page_config(page_title="Sistema de Negocio", layout="wide")
 
-url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_KEY"]
-supabase = create_client(url, key)
 
 # -------------------------------------------------
 # FUNCIONES DE APOYO
@@ -24,10 +20,12 @@ def asegurar_columnas(df, columnas):
 
     return df[columnas]
 
+
 def convertir_fecha_segura(df, columna="fecha"):
     if columna in df.columns and not df.empty:
         df[columna] = pd.to_datetime(df[columna], errors="coerce")
     return df
+
 
 # -------------------------------------------------
 # CARGA DE ARCHIVOS
@@ -40,6 +38,7 @@ perdidas = cargar("perdidas.xlsx")
 gastos_dueno = cargar("gastos_dueno.xlsx")
 empleados = cargar("empleados.xlsx")
 cierre_caja = cargar("cierre_caja.xlsx")
+
 
 # -------------------------------------------------
 # ASEGURAR COLUMNAS
@@ -74,6 +73,7 @@ perdidas = convertir_fecha_segura(perdidas)
 gastos_dueno = convertir_fecha_segura(gastos_dueno)
 cierre_caja = convertir_fecha_segura(cierre_caja)
 
+
 # -------------------------------------------------
 # MENÚ
 # -------------------------------------------------
@@ -94,11 +94,13 @@ menu = st.sidebar.selectbox(
     ],
 )
 
+
 # -------------------------------------------------
 # DASHBOARD
 # -------------------------------------------------
 if menu == "Dashboard":
     mostrar_dashboard(ventas, gastos, compras, perdidas, gastos_dueno, cierre_caja)
+
 
 # -------------------------------------------------
 # PRODUCTOS
@@ -115,6 +117,10 @@ elif menu == "Productos":
         key="productos_excel"
     )
     productos = subir_excel(productos, archivo_excel, columnas_productos, "productos.xlsx")
+
+    # Limpiar nombres vacíos o nan escritos como texto
+    if not productos.empty:
+        productos["nombre"] = productos["nombre"].fillna("").astype(str).str.strip()
 
     st.subheader("Agregar producto manual")
     col1, col2 = st.columns(2)
@@ -140,61 +146,74 @@ elif menu == "Productos":
             st.success("Producto guardado correctamente.")
 
     st.subheader("Editar o eliminar producto")
-    if not productos.empty:
-    producto_sel = st.selectbox(
-        "Selecciona un producto",
-        productos["nombre"].dropna().astype(str).str.strip().unique(),
-        key="editar_producto"
+
+    nombres_validos = (
+        productos["nombre"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
     )
+    nombres_validos = nombres_validos[(nombres_validos != "") & (nombres_validos.str.lower() != "nan")]
 
-    fila_filtrada = productos[
-        productos["nombre"].astype(str).str.strip() == str(producto_sel).strip()
-    ]
-
-    if fila_filtrada.empty:
-        st.warning("No se encontró el producto seleccionado.")
+    if nombres_validos.empty:
+        st.info("No hay productos válidos para editar.")
     else:
-        idx = fila_filtrada.index[0]
-        datos = productos.loc[idx]
+        producto_sel = st.selectbox(
+            "Selecciona un producto",
+            nombres_validos.unique(),
+            key="editar_producto"
+        )
 
-        col1, col2 = st.columns(2)
+        fila_filtrada = productos[
+            productos["nombre"].fillna("").astype(str).str.strip() == str(producto_sel).strip()
+        ]
 
-        with col1:
-            nuevo_costo = st.number_input(
-                "Nuevo costo",
-                value=float(datos["costo"]),
-                key="nuevo_costo_producto"
-            )
-            nuevo_precio = st.number_input(
-                "Nuevo precio",
-                value=float(datos["precio"]),
-                key="nuevo_precio_producto"
-            )
+        if fila_filtrada.empty:
+            st.warning("No se encontró el producto seleccionado.")
+        else:
+            idx = fila_filtrada.index[0]
+            datos = productos.loc[idx]
 
-        with col2:
-            nueva_cantidad = st.number_input(
-                "Nueva cantidad",
-                value=int(datos["cantidad"]),
-                step=1,
-                key="nueva_cantidad_producto"
-            )
+            col1, col2 = st.columns(2)
 
-        if st.button("Actualizar producto"):
-            productos.loc[idx, "costo"] = float(nuevo_costo)
-            productos.loc[idx, "precio"] = float(nuevo_precio)
-            productos.loc[idx, "cantidad"] = int(nueva_cantidad)
-            guardar(productos, "productos.xlsx")
-            st.success("Producto actualizado correctamente.")
+            with col1:
+                nuevo_costo = st.number_input(
+                    "Nuevo costo",
+                    value=float(datos["costo"]) if str(datos["costo"]) != "" else 0.0,
+                    key="nuevo_costo_producto"
+                )
+                nuevo_precio = st.number_input(
+                    "Nuevo precio",
+                    value=float(datos["precio"]) if str(datos["precio"]) != "" else 0.0,
+                    key="nuevo_precio_producto"
+                )
 
-        if st.button("Eliminar producto"):
-            productos = productos.drop(index=idx).reset_index(drop=True)
-            guardar(productos, "productos.xlsx")
-            st.success("Producto eliminado correctamente.")
+            with col2:
+                nueva_cantidad = st.number_input(
+                    "Nueva cantidad",
+                    value=int(float(datos["cantidad"])) if str(datos["cantidad"]) != "" else 0,
+                    min_value=0,
+                    step=1,
+                    key="nueva_cantidad_producto"
+                )
+
+            if st.button("Actualizar producto"):
+                productos.loc[idx, "costo"] = float(nuevo_costo)
+                productos.loc[idx, "precio"] = float(nuevo_precio)
+                productos.loc[idx, "cantidad"] = int(nueva_cantidad)
+                guardar(productos, "productos.xlsx")
+                st.success("Producto actualizado correctamente.")
+
+            if st.button("Eliminar producto"):
+                productos = productos.drop(index=idx).reset_index(drop=True)
+                guardar(productos, "productos.xlsx")
+                st.success("Producto eliminado correctamente.")
 
     st.subheader("Listado de productos")
     productos_filtrados = filtrar_busqueda(productos)
     st.dataframe(productos_filtrados, use_container_width=True)
     descargar_excel(productos_filtrados, "productos.xlsx")
+
 
 # -------------------------------------------------
 # VENTAS
@@ -276,6 +295,7 @@ elif menu == "Ventas":
     ventas_filtradas = filtrar_busqueda(ventas)
     st.dataframe(ventas_filtradas, use_container_width=True)
     descargar_excel(ventas_filtradas, "ventas.xlsx")
+
 
 # -------------------------------------------------
 # COMPRAS
@@ -365,6 +385,7 @@ elif menu == "Compras":
     compras_filtradas = filtrar_busqueda(compras)
     st.dataframe(compras_filtradas, use_container_width=True)
     descargar_excel(compras_filtradas, "compras.xlsx")
+
 
 # -------------------------------------------------
 # GASTOS
@@ -460,6 +481,7 @@ elif menu == "Gastos":
     st.dataframe(gastos_filtrados, use_container_width=True)
     descargar_excel(gastos_filtrados, "gastos.xlsx")
 
+
 # -------------------------------------------------
 # PÉRDIDAS
 # -------------------------------------------------
@@ -481,11 +503,14 @@ elif menu == "Pérdidas":
     col1, col2 = st.columns(2)
     with col1:
         fecha = st.date_input("Fecha de la pérdida")
-        if productos.empty:
+        productos_validos = productos["nombre"].fillna("").astype(str).str.strip()
+        productos_validos = productos_validos[(productos_validos != "") & (productos_validos.str.lower() != "nan")]
+
+        if productos_validos.empty:
             st.warning("Primero debes registrar productos.")
             producto = None
         else:
-            producto = st.selectbox("Producto", productos["nombre"].astype(str).unique())
+            producto = st.selectbox("Producto", productos_validos.unique())
     with col2:
         cantidad = st.number_input("Cantidad", min_value=0, step=1)
 
@@ -493,7 +518,9 @@ elif menu == "Pérdidas":
         if producto is None:
             st.warning("No hay productos disponibles.")
         else:
-            fila_producto = productos[productos["nombre"] == producto]
+            fila_producto = productos[
+                productos["nombre"].fillna("").astype(str).str.strip() == str(producto).strip()
+            ]
             if fila_producto.empty:
                 st.warning("El producto no existe.")
             else:
@@ -527,20 +554,28 @@ elif menu == "Pérdidas":
         idx = perdidas_edit[perdidas_edit["texto"] == perdida_sel].index[0]
         fila = perdidas.loc[idx]
 
+        productos_validos = productos["nombre"].fillna("").astype(str).str.strip()
+        productos_validos = productos_validos[(productos_validos != "") & (productos_validos.str.lower() != "nan")]
+
         col1, col2 = st.columns(2)
         with col1:
             fecha_edit = st.date_input("Nueva fecha", value=pd.to_datetime(fila["fecha"]), key="fecha_edit_perdida")
+            producto_actual = str(fila["producto"]).strip()
+            lista_productos = list(productos_validos.unique())
+            idx_producto = lista_productos.index(producto_actual) if producto_actual in lista_productos else 0
             producto_edit = st.selectbox(
                 "Nuevo producto",
-                productos["nombre"].astype(str).unique() if not productos.empty else [],
-                index=list(productos["nombre"].astype(str).unique()).index(str(fila["producto"])) if not productos.empty and str(fila["producto"]) in list(productos["nombre"].astype(str).unique()) else 0,
+                lista_productos if len(lista_productos) > 0 else [""],
+                index=idx_producto,
                 key="producto_edit_perdida"
             )
         with col2:
             cantidad_edit = st.number_input("Nueva cantidad", value=int(fila["cantidad"]), min_value=0, step=1, key="cantidad_edit_perdida")
 
         if st.button("Actualizar pérdida"):
-            fila_producto = productos[productos["nombre"] == producto_edit]
+            fila_producto = productos[
+                productos["nombre"].fillna("").astype(str).str.strip() == str(producto_edit).strip()
+            ]
             if fila_producto.empty:
                 st.warning("El producto no existe.")
             else:
@@ -563,6 +598,7 @@ elif menu == "Pérdidas":
     perdidas_filtradas = filtrar_busqueda(perdidas)
     st.dataframe(perdidas_filtradas, use_container_width=True)
     descargar_excel(perdidas_filtradas, "perdidas.xlsx")
+
 
 # -------------------------------------------------
 # GASTOS DUEÑO
@@ -647,6 +683,7 @@ elif menu == "Gastos Dueño":
     st.dataframe(dueno_filtrado, use_container_width=True)
     descargar_excel(dueno_filtrado, "gastos_dueno.xlsx")
 
+
 # -------------------------------------------------
 # EMPLEADOS
 # -------------------------------------------------
@@ -689,50 +726,62 @@ elif menu == "Empleados":
             st.success("Empleado guardado correctamente.")
 
     st.subheader("Editar o eliminar empleado")
-    if not empleados.empty:
+    nombres_empleados = empleados["nombre"].fillna("").astype(str).str.strip()
+    nombres_empleados = nombres_empleados[(nombres_empleados != "") & (nombres_empleados.str.lower() != "nan")]
+
+    if not nombres_empleados.empty:
         empleado_sel = st.selectbox(
             "Selecciona un empleado",
-            empleados["nombre"].astype(str).unique(),
+            nombres_empleados.unique(),
             key="editar_empleado"
         )
-        idx = empleados[empleados["nombre"] == empleado_sel].index[0]
-        datos = empleados.loc[idx]
 
-        col1, col2 = st.columns(2)
-        with col1:
-            cargo_n = st.text_input("Nuevo cargo", value=str(datos["cargo"]), key="cargo_edit_empleado")
-            sueldo_n = st.number_input("Nuevo sueldo", value=float(datos["sueldo"]), key="sueldo_edit_empleado")
-        with col2:
-            tipo_pago_n = st.selectbox(
-                "Nuevo tipo de pago",
-                ["Quincenal", "Mensual", "Variable"],
-                index=["Quincenal", "Mensual", "Variable"].index(str(datos["tipo_pago"])) if str(datos["tipo_pago"]) in ["Quincenal", "Mensual", "Variable"] else 0,
-                key="tipo_pago_edit_empleado"
-            )
-            metodo_pago_n = st.selectbox(
-                "Nuevo método de pago",
-                ["Efectivo", "Transferencia", "Cheque"],
-                index=["Efectivo", "Transferencia", "Cheque"].index(str(datos["metodo_pago"])) if str(datos["metodo_pago"]) in ["Efectivo", "Transferencia", "Cheque"] else 0,
-                key="metodo_pago_edit_empleado"
-            )
+        fila_empleado = empleados[
+            empleados["nombre"].fillna("").astype(str).str.strip() == str(empleado_sel).strip()
+        ]
 
-        if st.button("Actualizar empleado"):
-            empleados.loc[idx, "cargo"] = cargo_n.strip()
-            empleados.loc[idx, "sueldo"] = float(sueldo_n)
-            empleados.loc[idx, "tipo_pago"] = tipo_pago_n
-            empleados.loc[idx, "metodo_pago"] = metodo_pago_n
-            guardar(empleados, "empleados.xlsx")
-            st.success("Empleado actualizado correctamente.")
+        if not fila_empleado.empty:
+            idx = fila_empleado.index[0]
+            datos = empleados.loc[idx]
 
-        if st.button("Eliminar empleado"):
-            empleados = empleados.drop(index=idx).reset_index(drop=True)
-            guardar(empleados, "empleados.xlsx")
-            st.success("Empleado eliminado correctamente.")
+            col1, col2 = st.columns(2)
+            with col1:
+                cargo_n = st.text_input("Nuevo cargo", value=str(datos["cargo"]), key="cargo_edit_empleado")
+                sueldo_n = st.number_input("Nuevo sueldo", value=float(datos["sueldo"]), key="sueldo_edit_empleado")
+            with col2:
+                tipo_pago_n = st.selectbox(
+                    "Nuevo tipo de pago",
+                    ["Quincenal", "Mensual", "Variable"],
+                    index=["Quincenal", "Mensual", "Variable"].index(str(datos["tipo_pago"])) if str(datos["tipo_pago"]) in ["Quincenal", "Mensual", "Variable"] else 0,
+                    key="tipo_pago_edit_empleado"
+                )
+                metodo_pago_n = st.selectbox(
+                    "Nuevo método de pago",
+                    ["Efectivo", "Transferencia", "Cheque"],
+                    index=["Efectivo", "Transferencia", "Cheque"].index(str(datos["metodo_pago"])) if str(datos["metodo_pago"]) in ["Efectivo", "Transferencia", "Cheque"] else 0,
+                    key="metodo_pago_edit_empleado"
+                )
+
+            if st.button("Actualizar empleado"):
+                empleados.loc[idx, "cargo"] = cargo_n.strip()
+                empleados.loc[idx, "sueldo"] = float(sueldo_n)
+                empleados.loc[idx, "tipo_pago"] = tipo_pago_n
+                empleados.loc[idx, "metodo_pago"] = metodo_pago_n
+                guardar(empleados, "empleados.xlsx")
+                st.success("Empleado actualizado correctamente.")
+
+            if st.button("Eliminar empleado"):
+                empleados = empleados.drop(index=idx).reset_index(drop=True)
+                guardar(empleados, "empleados.xlsx")
+                st.success("Empleado eliminado correctamente.")
+    else:
+        st.info("No hay empleados válidos para editar.")
 
     st.subheader("Listado de empleados")
     empleados_filtrados = filtrar_busqueda(empleados)
     st.dataframe(empleados_filtrados, use_container_width=True)
     descargar_excel(empleados_filtrados, "empleados.xlsx")
+
 
 # -------------------------------------------------
 # CIERRE DE CAJA
@@ -869,156 +918,3 @@ elif menu == "Cierre de Caja":
     cierre_filtrado = filtrar_busqueda(cierre_caja)
     st.dataframe(cierre_filtrado, use_container_width=True)
     descargar_excel(cierre_filtrado, "cierre_caja.xlsx")
-    
-from supabase import create_client
-
-# 🔗 CONEXIÓN SUPABASE
-import pandas as pd
-import streamlit as st
-import os
-import io
-
-# -----------------------------
-# CARGAR ARCHIVO
-# -----------------------------
-def cargar(nombre_archivo):
-    if os.path.exists(nombre_archivo):
-        try:
-            return pd.read_excel(nombre_archivo)
-        except:
-            return pd.DataFrame()
-    return pd.DataFrame()
-
-# -----------------------------
-# GUARDAR ARCHIVO
-# -----------------------------
-def guardar(df, nombre_archivo):
-    try:
-        df.to_excel(nombre_archivo, index=False)
-    except Exception as e:
-        st.error(f"Error al guardar archivo: {e}")
-
-# -----------------------------
-# SUBIR EXCEL
-# -----------------------------
-def subir_excel(df_actual, archivo, columnas, nombre_archivo):
-    if archivo is not None:
-        try:
-            df_excel = pd.read_excel(archivo)
-
-            if not all(col in df_excel.columns for col in columnas):
-                st.error(f"El archivo debe tener estas columnas: {columnas}")
-                return df_actual
-
-            df_excel = df_excel[columnas].copy()
-
-            # convertir fecha
-            if "fecha" in df_excel.columns:
-                df_excel["fecha"] = pd.to_datetime(df_excel["fecha"], errors="coerce")
-
-            # convertir números
-            for col in ["monto", "total", "valor", "costo", "precio", "cantidad"]:
-                if col in df_excel.columns:
-                    df_excel[col] = pd.to_numeric(df_excel[col], errors="coerce").fillna(0)
-
-            df_nuevo = pd.concat([df_actual, df_excel], ignore_index=True)
-            guardar(df_nuevo, nombre_archivo)
-
-            st.success("Archivo cargado correctamente ✅")
-            return df_nuevo
-
-        except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
-            return df_actual
-
-    return df_actual
-
-# -----------------------------
-# BUSCADOR
-# -----------------------------
-def filtrar_busqueda(df):
-    if df.empty:
-        st.info("No hay datos para mostrar.")
-        return df
-
-    busqueda = st.text_input("🔍 Buscar en la tabla")
-
-    if busqueda:
-        df_filtrado = df[
-            df.astype(str)
-            .apply(lambda row: row.str.contains(busqueda, case=False).any(), axis=1)
-        ]
-        return df_filtrado
-
-    return df
-
-# -----------------------------
-# DESCARGAR EXCEL
-# -----------------------------
-def descargar_excel(df, nombre_archivo):
-    if df.empty:
-        st.warning("No hay datos para descargar.")
-        return
-
-    try:
-        output = io.BytesIO()
-
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            df.to_excel(writer, index=False)
-
-        st.download_button(
-            label="📥 Descargar Excel",
-            data=output.getvalue(),
-            file_name=nombre_archivo,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-    except Exception as e:
-        st.error(f"Error al generar el archivo: {e}")
-
-# -----------------------------
-# CONVERTIR FECHAS
-# -----------------------------
-def convertir_fecha(df, columna="fecha"):
-    if df.empty:
-        return df
-
-    if columna in df.columns:
-        df[columna] = pd.to_datetime(df[columna], errors="coerce")
-
-    return df
-
-# -----------------------------
-# SUMA SEGURA (CLAVE DEL SISTEMA)
-# -----------------------------
-
-def suma_segura(df, columna):
-    if df.empty or columna not in df.columns:
-        return 0.0
-    return float(pd.to_numeric(df[columna], errors="coerce").fillna(0).sum())
-    SUPABASE_URL = "PEGA_AQUI_LA_URL_DE_API"
-SUPABASE_KEY = "PEGA_AQUI_LA_CLAVE_PUBLICABLE"
-supabase = create_client(url, key)
-def backup_nube(tabla, df):
-    try:
-        if df is None or df.empty:
-            return
-
-        df_backup = df.copy()
-
-        # No mandar id a Supabase si viene vacío o si la tabla lo genera sola
-        if "id" in df_backup.columns:
-            df_backup = df_backup.drop(columns=["id"])
-
-        # Limpiar valores NaN
-        df_backup = df_backup.fillna("")
-
-        datos = df_backup.to_dict(orient="records")
-
-        # Borrar contenido anterior y volver a insertar
-        supabase.table(tabla).delete().neq("id", 0).execute()
-        supabase.table(tabla).insert(datos).execute()
-
-    except Exception as e:
-        st.warning(f"Error en backup nube: {e}")
-
