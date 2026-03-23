@@ -153,7 +153,8 @@ if fila_filtrada.empty:
 else:
     idx = fila_filtrada.index[0]
     datos = productos.loc[idx]
-        with col1:
+col1, col2 = st.columns(2)
+with col1:
             nuevo_costo = st.number_input("Nuevo costo", value=float(datos["costo"]), key="nuevo_costo_producto")
             nuevo_precio = st.number_input("Nuevo precio", value=float(datos["precio"]), key="nuevo_precio_producto")
         with col2:
