@@ -14,7 +14,7 @@ def asegurar_columnas(df, columnas):
         return pd.DataFrame(columns=columnas)
 
     for col in columnas:
-        if col not in df.columns
+        if col not in df.columns:
             df[col] = ""
 
     return df[columnas]
