@@ -141,20 +141,18 @@ elif menu == "Productos":
 
     st.subheader("Editar o eliminar producto")
     if not productos.empty:
-        producto_sel = st.selectbox(
-            "Selecciona un producto",
-            productos["nombre"].dropna().astype(str).str.strip().unique(),
-            key="editar_producto"
-        )
-        ila_filtrada = productos[productos["nombre"].astype(str) == str(producto_sel)]
+       producto_sel = st.selectbox(
+    "Selecciona un producto",
+    productos["nombre"].dropna().astype(str).str.strip().unique(),
+    key="editar_producto"
+)
+fila_filtrada = productos[productos["nombre"].astype(str).str.strip() == str(producto_sel).strip()]
 
 if fila_filtrada.empty:
     st.warning("No se encontró el producto seleccionado.")
 else:
     idx = fila_filtrada.index[0]
-        datos = productos.loc[idx]
-
-        col1, col2 = st.columns(2)
+    datos = productos.loc[idx]
         with col1:
             nuevo_costo = st.number_input("Nuevo costo", value=float(datos["costo"]), key="nuevo_costo_producto")
             nuevo_precio = st.number_input("Nuevo precio", value=float(datos["precio"]), key="nuevo_precio_producto")
