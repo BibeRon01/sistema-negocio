@@ -1,10 +1,15 @@
 import streamlit as st
 import pandas as pd
+from supabase import create_client
 
 from utils import cargar, guardar, subir_excel, filtrar_busqueda, descargar_excel
 from dashboard import mostrar_dashboard
 
 st.set_page_config(page_title="Sistema de Negocio", layout="wide")
+
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
 
 # -------------------------------------------------
 # FUNCIONES DE APOYO
@@ -841,6 +846,7 @@ elif menu == "Cierre de Caja":
     cierre_filtrado = filtrar_busqueda(cierre_caja)
     st.dataframe(cierre_filtrado, use_container_width=True)
     descargar_excel(cierre_filtrado, "cierre_caja.xlsx")
+    
 from supabase import create_client
 
 # 🔗 CONEXIÓN SUPABASE
