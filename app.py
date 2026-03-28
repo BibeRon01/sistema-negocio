@@ -14,20 +14,18 @@ def obtener_secreto(nombre: str, default: str = "") -> str:
     except Exception:
         return default
 
+
 SUPABASE_URL = obtener_secreto("SUPABASE_URL", "")
 SUPABASE_KEY = obtener_secreto("SUPABASE_KEY", "")
 APP_PASSWORD = obtener_secreto("APP_PASSWORD", "")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    st.error(
-        "Faltan las credenciales de Supabase en .streamlit/secrets.toml. "
-        "Debes agregar SUPABASE_URL y SUPABASE_KEY."
-    )
+    st.error("Faltan SUPABASE_URL y/o SUPABASE_KEY en .streamlit/secrets.toml")
     st.code(
         'SUPABASE_URL = "https://TU-PROYECTO.supabase.co"\n'
         'SUPABASE_KEY = "TU_CLAVE_PUBLICABLE"\n'
         'APP_PASSWORD = "1234"',
-        language="toml",
+        language="toml"
     )
     st.stop()
 
@@ -38,7 +36,7 @@ except Exception as e:
     st.stop()
 
 # =========================================================
-# SEGURIDAD SIMPLE
+# LOGIN SIMPLE
 # =========================================================
 def login_simple() -> bool:
     if not APP_PASSWORD:
@@ -64,16 +62,15 @@ if not login_simple():
     st.stop()
 
 # =========================================================
-# FUNCIONES GENERALES
+# FUNCIONES BASE
 # =========================================================
 def leer_tabla(nombre_tabla: str) -> pd.DataFrame:
     try:
         resp = supabase.table(nombre_tabla).select("*").order("id").execute()
         data = resp.data if resp.data else []
-        df = pd.DataFrame(data)
-        return df
+        return pd.DataFrame(data)
     except Exception as e:
-        st.error(f"Error al leer la tabla {nombre_tabla}: {e}")
+        st.error(f"Error al leer {nombre_tabla}: {e}")
         return pd.DataFrame()
 
 
@@ -82,7 +79,7 @@ def insertar_tabla(nombre_tabla: str, datos: dict) -> bool:
         supabase.table(nombre_tabla).insert(datos).execute()
         return True
     except Exception as e:
-        st.error(f"Error al insertar en {nombre_tabla}: {e}")
+        st.error(f"Error al guardar en {nombre_tabla}: {e}")
         return False
 
 
@@ -119,16 +116,21 @@ def suma_segura(df: pd.DataFrame, columna: str) -> float:
     return float(pd.to_numeric(df[columna], errors="coerce").fillna(0).sum())
 
 
-def filtrar_busqueda(df: pd.DataFrame, key_busqueda: str) -> pd.DataFrame:
-    if df.empty:
-        return df
+def filtrar_rango_fechas(df: pd.DataFrame, fecha_inicio, fecha_fin) -> pd.DataFrame:
+    if df.empty or "fecha" not in df.columns:
+        return df.copy()
+    df2 = df.copy()
+    df2["fecha"] = pd.to_datetime(df2["fecha"], errors="coerce")
+    inicio = pd.to_datetime(fecha_inicio)
+    fin = pd.to_datetime(fecha_fin)
+    return df2[(df2["fecha"] >= inicio) & (df2["fecha"] <= fin)]
 
-    busqueda = st.text_input("Buscar", key=key_busqueda)
-    if not busqueda:
-        return df
 
+def buscar_en_df(df: pd.DataFrame, texto: str) -> pd.DataFrame:
+    if df.empty or not texto:
+        return df
     mask = df.astype(str).apply(
-        lambda x: x.str.contains(busqueda, case=False, na=False)
+        lambda x: x.str.contains(texto, case=False, na=False)
     ).any(axis=1)
     return df[mask]
 
@@ -137,22 +139,101 @@ def descargar_csv(df: pd.DataFrame, nombre_archivo: str):
     if df.empty:
         st.info("No hay datos para descargar.")
         return
-
-    datos = df.to_csv(index=False).encode("utf-8-sig")
+    data = df.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
         "⬇️ Descargar CSV",
-        data=datos,
+        data=data,
         file_name=nombre_archivo,
-        mime="text/csv",
+        mime="text/csv"
     )
 
 
-def refrescar():
-    st.rerun()
+def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [
+        str(c).strip().lower().replace(" ", "_").replace("-", "_")
+        for c in df.columns
+    ]
+    return df
 
+
+def leer_archivo_subido(archivo) -> pd.DataFrame:
+    try:
+        nombre = archivo.name.lower()
+        if nombre.endswith(".csv"):
+            df = pd.read_csv(archivo)
+        else:
+            df = pd.read_excel(archivo)
+        return normalizar_columnas(df)
+    except Exception as e:
+        st.error(f"No se pudo leer el archivo: {e}")
+        return pd.DataFrame()
+
+
+def preparar_valor(v):
+    if pd.isna(v):
+        return None
+    if isinstance(v, pd.Timestamp):
+        return v.date().isoformat()
+    return v
+
+
+def subir_excel_a_tabla(nombre_tabla: str, columnas_permitidas: list[str], archivo, columnas_fecha=None):
+    if columnas_fecha is None:
+        columnas_fecha = []
+
+    df = leer_archivo_subido(archivo)
+    if df.empty:
+        return
+
+    faltantes = [c for c in columnas_permitidas if c not in df.columns]
+    if faltantes:
+        st.error(f"Al archivo le faltan estas columnas: {faltantes}")
+        st.write("Columnas detectadas:", list(df.columns))
+        return
+
+    df = df[columnas_permitidas].copy()
+
+    for col in columnas_fecha:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    total_ok = 0
+    total_bad = 0
+
+    for _, row in df.iterrows():
+        datos = {col: preparar_valor(row[col]) for col in columnas_permitidas}
+        ok = insertar_tabla(nombre_tabla, datos)
+        if ok:
+            total_ok += 1
+        else:
+            total_bad += 1
+
+    if total_ok:
+        st.success(f"Se cargaron {total_ok} registros en {nombre_tabla}.")
+    if total_bad:
+        st.warning(f"{total_bad} registros no se pudieron cargar.")
+
+
+def mostrar_tabla_filtrada(df: pd.DataFrame, titulo: str, key_base: str, nombre_descarga: str):
+    st.subheader(titulo)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        f1 = st.date_input("Desde", value=date.today().replace(day=1), key=f"{key_base}_desde")
+    with c2:
+        f2 = st.date_input("Hasta", value=date.today(), key=f"{key_base}_hasta")
+
+    texto = st.text_input("Buscar", key=f"{key_base}_buscar")
+
+    df_f = filtrar_rango_fechas(df, f1, f2)
+    df_f = buscar_en_df(df_f, texto)
+
+    st.dataframe(df_f, use_container_width=True)
+    descargar_csv(df_f, nombre_descarga)
 
 # =========================================================
-# CARGAR DATOS DESDE LA NUBE
+# CARGA DESDE NUBE
 # =========================================================
 productos = convertir_fechas(leer_tabla("productos"))
 ventas = convertir_fechas(leer_tabla("ventas"))
@@ -164,8 +245,11 @@ empleados = convertir_fechas(leer_tabla("empleados"))
 cierre_caja = convertir_fechas(leer_tabla("cierre_caja"))
 estado_resultados = convertir_fechas(leer_tabla("estado_resultados"))
 
+# Detectar si la tabla gastos tiene columna tipo
+TIENE_TIPO_GASTO = "tipo" in gastos.columns if not gastos.empty else False
+
 # =========================================================
-# MENÚ
+# SIDEBAR
 # =========================================================
 st.sidebar.title("💼 Sistema de Negocio")
 menu = st.sidebar.selectbox(
@@ -184,8 +268,8 @@ menu = st.sidebar.selectbox(
     ],
 )
 
-if st.sidebar.button("🔄 Recargar datos"):
-    refrescar()
+if st.sidebar.button("🔄 Recargar nube"):
+    st.rerun()
 
 # =========================================================
 # DASHBOARD
@@ -193,34 +277,73 @@ if st.sidebar.button("🔄 Recargar datos"):
 if menu == "Dashboard":
     st.title("📊 Dashboard")
 
-    total_ventas = suma_segura(ventas, "total")
-    total_compras = suma_segura(compras, "monto")
-    total_gastos = suma_segura(gastos, "monto")
-    total_perdidas = suma_segura(perdidas, "valor")
-    total_dueno = suma_segura(gastos_dueno, "monto")
-    utilidad_estimada = total_ventas - total_compras - total_gastos - total_perdidas - total_dueno
+    c1, c2 = st.columns(2)
+    with c1:
+        fecha_inicio = st.date_input("Desde", value=date.today().replace(day=1), key="dash_desde")
+    with c2:
+        fecha_fin = st.date_input("Hasta", value=date.today(), key="dash_hasta")
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Ventas", f"RD$ {total_ventas:,.2f}")
-    c2.metric("Compras", f"RD$ {total_compras:,.2f}")
-    c3.metric("Gastos", f"RD$ {total_gastos:,.2f}")
+    ventas_f = filtrar_rango_fechas(ventas, fecha_inicio, fecha_fin)
+    compras_f = filtrar_rango_fechas(compras, fecha_inicio, fecha_fin)
+    gastos_f = filtrar_rango_fechas(gastos, fecha_inicio, fecha_fin)
+    perdidas_f = filtrar_rango_fechas(perdidas, fecha_inicio, fecha_fin)
+    gastos_dueno_f = filtrar_rango_fechas(gastos_dueno, fecha_inicio, fecha_fin)
+    cierre_f = filtrar_rango_fechas(cierre_caja, fecha_inicio, fecha_fin)
 
-    c4, c5, c6 = st.columns(3)
-    c4.metric("Pérdidas", f"RD$ {total_perdidas:,.2f}")
-    c5.metric("Retiros dueño", f"RD$ {total_dueno:,.2f}")
-    c6.metric("Utilidad estimada", f"RD$ {utilidad_estimada:,.2f}")
+    ventas_totales = suma_segura(ventas_f, "total")
+    compras_totales = suma_segura(compras_f, "monto")
+    gastos_totales = suma_segura(gastos_f, "monto")
+    perdidas_totales = suma_segura(perdidas_f, "valor")
+    retiros_totales = suma_segura(gastos_dueno_f, "monto")
+
+    gastos_fijos = 0.0
+    gastos_variables = 0.0
+
+    if not gastos_f.empty and "tipo" in gastos_f.columns:
+        gf = gastos_f[gastos_f["tipo"].astype(str).str.lower().str.strip() == "fijo"]
+        gv = gastos_f[gastos_f["tipo"].astype(str).str.lower().str.strip() == "variable"]
+        gastos_fijos = suma_segura(gf, "monto")
+        gastos_variables = suma_segura(gv, "monto")
+    else:
+        gastos_variables = gastos_totales
+        st.info("La tabla gastos no tiene columna 'tipo'. Por ahora todos los gastos se toman como generales/variables.")
+
+    st.markdown("### Utilidad")
+    utilidad_bruta_manual = st.number_input(
+        "Utilidad bruta (la colocas tú manualmente)",
+        min_value=0.0,
+        step=1.0,
+        key="utilidad_bruta_manual"
+    )
+
+    utilidad_neta = float(utilidad_bruta_manual) - float(gastos_fijos) - float(gastos_variables) - float(perdidas_totales)
+    porcentaje_dueno = utilidad_neta * 0.65
+    porcentaje_gerente = utilidad_neta * 0.35
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Ventas totales", f"RD$ {ventas_totales:,.2f}")
+    m2.metric("Compras totales", f"RD$ {compras_totales:,.2f}")
+    m3.metric("Gastos totales", f"RD$ {gastos_totales:,.2f}")
+
+    m4, m5, m6 = st.columns(3)
+    m4.metric("Pérdidas totales", f"RD$ {perdidas_totales:,.2f}")
+    m5.metric("Retiros del dueño", f"RD$ {retiros_totales:,.2f}")
+    m6.metric("Utilidad bruta manual", f"RD$ {utilidad_bruta_manual:,.2f}")
+
+    m7, m8, m9 = st.columns(3)
+    m7.metric("Gastos fijos", f"RD$ {gastos_fijos:,.2f}")
+    m8.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
+    m9.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
+
+    m10, m11 = st.columns(2)
+    m10.metric("65% dueño", f"RD$ {porcentaje_dueno:,.2f}")
+    m11.metric("35% gerente", f"RD$ {porcentaje_gerente:,.2f}")
 
     st.subheader("Últimas ventas")
-    if ventas.empty:
-        st.info("No hay ventas registradas.")
-    else:
-        st.dataframe(ventas.tail(10), use_container_width=True)
+    st.dataframe(ventas_f.tail(10), use_container_width=True)
 
     st.subheader("Últimos cierres de caja")
-    if cierre_caja.empty:
-        st.info("No hay cierres de caja registrados.")
-    else:
-        st.dataframe(cierre_caja.tail(10), use_container_width=True)
+    st.dataframe(cierre_f.tail(10), use_container_width=True)
 
 # =========================================================
 # PRODUCTOS
@@ -228,10 +351,22 @@ if menu == "Dashboard":
 elif menu == "Productos":
     st.title("📦 Productos")
 
+    with st.expander("📥 Subir Excel / CSV de productos"):
+        st.write("Columnas esperadas: nombre, costo, precio, cantidad")
+        archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_productos")
+        if archivo is not None:
+            if st.button("Cargar archivo de productos"):
+                subir_excel_a_tabla(
+                    "productos",
+                    ["nombre", "costo", "precio", "cantidad"],
+                    archivo
+                )
+                st.rerun()
+
     with st.expander("➕ Agregar producto", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            nombre = st.text_input("Nombre del producto", key="prod_nombre")
+            nombre = st.text_input("Nombre", key="prod_nombre")
             costo = st.number_input("Costo", min_value=0.0, step=1.0, key="prod_costo")
         with c2:
             precio = st.number_input("Precio", min_value=0.0, step=1.0, key="prod_precio")
@@ -252,12 +387,12 @@ elif menu == "Productos":
                 )
                 if ok:
                     st.success("Producto guardado correctamente.")
-                    refrescar()
+                    st.rerun()
 
-    st.subheader("✏️ Editar o eliminar producto")
+    st.subheader("✏️ Editar o eliminar")
     if not productos.empty:
-        nombres = productos["nombre"].fillna("").astype(str)
-        producto_sel = st.selectbox("Selecciona un producto", nombres.unique(), key="prod_sel")
+        opciones = productos["nombre"].fillna("").astype(str).unique()
+        producto_sel = st.selectbox("Selecciona un producto", opciones, key="prod_sel")
 
         fila = productos[productos["nombre"].astype(str) == str(producto_sel)]
         if not fila.empty:
@@ -287,25 +422,34 @@ elif menu == "Productos":
                     )
                     if ok:
                         st.success("Producto actualizado.")
-                        refrescar()
-
+                        st.rerun()
             with b2:
                 if st.button("Eliminar producto"):
                     ok = eliminar_tabla("productos", fila_id)
                     if ok:
                         st.success("Producto eliminado.")
-                        refrescar()
+                        st.rerun()
 
-    st.subheader("📋 Listado de productos")
-    productos_f = filtrar_busqueda(productos, "busc_prod")
-    st.dataframe(productos_f, use_container_width=True)
-    descargar_csv(productos_f, "productos.csv")
+    mostrar_tabla_filtrada(productos, "📋 Listado", "productos_tabla", "productos.csv")
 
 # =========================================================
 # VENTAS
 # =========================================================
 elif menu == "Ventas":
     st.title("💰 Ventas")
+
+    with st.expander("📥 Subir Excel / CSV de ventas"):
+        st.write("Columnas esperadas: fecha, total, metodo")
+        archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_ventas")
+        if archivo is not None:
+            if st.button("Cargar archivo de ventas"):
+                subir_excel_a_tabla(
+                    "ventas",
+                    ["fecha", "total", "metodo"],
+                    archivo,
+                    columnas_fecha=["fecha"]
+                )
+                st.rerun()
 
     with st.expander("➕ Registrar venta", expanded=True):
         c1, c2, c3 = st.columns(3)
@@ -327,9 +471,8 @@ elif menu == "Ventas":
             )
             if ok:
                 st.success("Venta guardada correctamente.")
-                refrescar()
+                st.rerun()
 
-    st.subheader("✏️ Editar o eliminar venta")
     if not ventas.empty:
         aux = ventas.copy()
         aux["texto"] = (
@@ -347,9 +490,9 @@ elif menu == "Ventas":
         with c2:
             total_e = st.number_input("Total editado", value=float(fila["total"]), key="venta_total_e")
         with c3:
-            opciones_metodo = ["Efectivo", "Transferencia", "Tarjeta"]
-            idx_met = opciones_metodo.index(str(fila["metodo"])) if str(fila["metodo"]) in opciones_metodo else 0
-            metodo_e = st.selectbox("Método editado", opciones_metodo, index=idx_met, key="venta_metodo_e")
+            metodos = ["Efectivo", "Transferencia", "Tarjeta"]
+            idx = metodos.index(str(fila["metodo"])) if str(fila["metodo"]) in metodos else 0
+            metodo_e = st.selectbox("Método editado", metodos, index=idx, key="venta_metodo_e")
 
         b1, b2 = st.columns(2)
         with b1:
@@ -357,32 +500,38 @@ elif menu == "Ventas":
                 ok = actualizar_tabla(
                     "ventas",
                     fila_id,
-                    {
-                        "fecha": str(fecha_e),
-                        "total": float(total_e),
-                        "metodo": metodo_e,
-                    },
+                    {"fecha": str(fecha_e), "total": float(total_e), "metodo": metodo_e},
                 )
                 if ok:
                     st.success("Venta actualizada.")
-                    refrescar()
+                    st.rerun()
         with b2:
             if st.button("Eliminar venta"):
                 ok = eliminar_tabla("ventas", fila_id)
                 if ok:
                     st.success("Venta eliminada.")
-                    refrescar()
+                    st.rerun()
 
-    st.subheader("📋 Listado de ventas")
-    ventas_f = filtrar_busqueda(ventas, "busc_ventas")
-    st.dataframe(ventas_f, use_container_width=True)
-    descargar_csv(ventas_f, "ventas.csv")
+    mostrar_tabla_filtrada(ventas, "📋 Listado", "ventas_tabla", "ventas.csv")
 
 # =========================================================
 # COMPRAS
 # =========================================================
 elif menu == "Compras":
     st.title("🧾 Compras")
+
+    with st.expander("📥 Subir Excel / CSV de compras"):
+        st.write("Columnas esperadas: fecha, numero, proveedor, descripcion, monto, metodo")
+        archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_compras")
+        if archivo is not None:
+            if st.button("Cargar archivo de compras"):
+                subir_excel_a_tabla(
+                    "compras",
+                    ["fecha", "numero", "proveedor", "descripcion", "monto", "metodo"],
+                    archivo,
+                    columnas_fecha=["fecha"]
+                )
+                st.rerun()
 
     with st.expander("➕ Registrar compra", expanded=True):
         c1, c2 = st.columns(2)
@@ -391,7 +540,7 @@ elif menu == "Compras":
             numero = st.text_input("Número / referencia", key="compra_numero")
             proveedor = st.text_input("Proveedor", key="compra_proveedor")
         with c2:
-            descripcion = st.text_input("Descripción", key="compra_desc")
+            descripcion = st.text_input("Descripción", key="compra_descripcion")
             monto = st.number_input("Monto", min_value=0.0, step=1.0, key="compra_monto")
             metodo = st.selectbox("Método", ["Efectivo", "Transferencia", "Tarjeta"], key="compra_metodo")
 
@@ -409,9 +558,8 @@ elif menu == "Compras":
             )
             if ok:
                 st.success("Compra guardada correctamente.")
-                refrescar()
+                st.rerun()
 
-    st.subheader("✏️ Editar o eliminar compra")
     if not compras.empty:
         aux = compras.copy()
         aux["texto"] = (
@@ -429,11 +577,11 @@ elif menu == "Compras":
             numero_e = st.text_input("Número editado", value=str(fila["numero"]), key="compra_numero_e")
             proveedor_e = st.text_input("Proveedor editado", value=str(fila["proveedor"]), key="compra_proveedor_e")
         with c2:
-            descripcion_e = st.text_input("Descripción editada", value=str(fila["descripcion"]), key="compra_desc_e")
+            descripcion_e = st.text_input("Descripción editada", value=str(fila["descripcion"]), key="compra_descripcion_e")
             monto_e = st.number_input("Monto editado", value=float(fila["monto"]), key="compra_monto_e")
-            opciones_met = ["Efectivo", "Transferencia", "Tarjeta"]
-            idx_m = opciones_met.index(str(fila["metodo"])) if str(fila["metodo"]) in opciones_met else 0
-            metodo_e = st.selectbox("Método editado", opciones_met, index=idx_m, key="compra_metodo_e")
+            metodos = ["Efectivo", "Transferencia", "Tarjeta"]
+            idx = metodos.index(str(fila["metodo"])) if str(fila["metodo"]) in metodos else 0
+            metodo_e = st.selectbox("Método editado", metodos, index=idx, key="compra_metodo_e")
 
         b1, b2 = st.columns(2)
         with b1:
@@ -452,18 +600,15 @@ elif menu == "Compras":
                 )
                 if ok:
                     st.success("Compra actualizada.")
-                    refrescar()
+                    st.rerun()
         with b2:
             if st.button("Eliminar compra"):
                 ok = eliminar_tabla("compras", fila_id)
                 if ok:
                     st.success("Compra eliminada.")
-                    refrescar()
+                    st.rerun()
 
-    st.subheader("📋 Listado de compras")
-    compras_f = filtrar_busqueda(compras, "busc_compras")
-    st.dataframe(compras_f, use_container_width=True)
-    descargar_csv(compras_f, "compras.csv")
+    mostrar_tabla_filtrada(compras, "📋 Listado", "compras_tabla", "compras.csv")
 
 # =========================================================
 # GASTOS
@@ -471,28 +616,49 @@ elif menu == "Compras":
 elif menu == "Gastos":
     st.title("💸 Gastos")
 
+    with st.expander("📥 Subir Excel / CSV de gastos"):
+        columnas = ["fecha", "descripcion", "monto"]
+        if TIENE_TIPO_GASTO:
+            columnas.append("tipo")
+
+        st.write(f"Columnas esperadas: {', '.join(columnas)}")
+        archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_gastos")
+        if archivo is not None:
+            if st.button("Cargar archivo de gastos"):
+                subir_excel_a_tabla(
+                    "gastos",
+                    columnas,
+                    archivo,
+                    columnas_fecha=["fecha"]
+                )
+                st.rerun()
+
     with st.expander("➕ Registrar gasto", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
             fecha = st.date_input("Fecha", value=date.today(), key="gasto_fecha")
-            descripcion = st.text_input("Descripción", key="gasto_desc")
+            descripcion = st.text_input("Descripción", key="gasto_descripcion")
         with c2:
             monto = st.number_input("Monto", min_value=0.0, step=1.0, key="gasto_monto")
 
+        datos = {
+            "fecha": str(fecha),
+            "descripcion": descripcion.strip(),
+            "monto": float(monto),
+        }
+
+        if TIENE_TIPO_GASTO:
+            tipo = st.selectbox("Tipo de gasto", ["fijo", "variable"], key="gasto_tipo")
+            datos["tipo"] = tipo
+        else:
+            st.info("Si quieres separar gastos fijos y variables, agrega la columna 'tipo' a la tabla gastos.")
+
         if st.button("Guardar gasto"):
-            ok = insertar_tabla(
-                "gastos",
-                {
-                    "fecha": str(fecha),
-                    "descripcion": descripcion.strip(),
-                    "monto": float(monto),
-                },
-            )
+            ok = insertar_tabla("gastos", datos)
             if ok:
                 st.success("Gasto guardado correctamente.")
-                refrescar()
+                st.rerun()
 
-    st.subheader("✏️ Editar o eliminar gasto")
     if not gastos.empty:
         aux = gastos.copy()
         aux["texto"] = (
@@ -507,43 +673,56 @@ elif menu == "Gastos":
         c1, c2 = st.columns(2)
         with c1:
             fecha_e = st.date_input("Fecha editada", value=pd.to_datetime(fila["fecha"]).date(), key="gasto_fecha_e")
+            descripcion_e = st.text_input("Descripción editada", value=str(fila["descripcion"]), key="gasto_descripcion_e")
         with c2:
             monto_e = st.number_input("Monto editado", value=float(fila["monto"]), key="gasto_monto_e")
 
-        descripcion_e = st.text_input("Descripción editada", value=str(fila["descripcion"]), key="gasto_desc_e")
+        datos_e = {
+            "fecha": str(fecha_e),
+            "descripcion": descripcion_e.strip(),
+            "monto": float(monto_e),
+        }
+
+        if "tipo" in fila.index:
+            tipo_actual = str(fila["tipo"]) if pd.notna(fila["tipo"]) else "variable"
+            idx_tipo = 0 if tipo_actual == "fijo" else 1
+            tipo_e = st.selectbox("Tipo de gasto editado", ["fijo", "variable"], index=idx_tipo, key="gasto_tipo_e")
+            datos_e["tipo"] = tipo_e
 
         b1, b2 = st.columns(2)
         with b1:
             if st.button("Actualizar gasto"):
-                ok = actualizar_tabla(
-                    "gastos",
-                    fila_id,
-                    {
-                        "fecha": str(fecha_e),
-                        "descripcion": descripcion_e.strip(),
-                        "monto": float(monto_e),
-                    },
-                )
+                ok = actualizar_tabla("gastos", fila_id, datos_e)
                 if ok:
                     st.success("Gasto actualizado.")
-                    refrescar()
+                    st.rerun()
         with b2:
             if st.button("Eliminar gasto"):
                 ok = eliminar_tabla("gastos", fila_id)
                 if ok:
                     st.success("Gasto eliminado.")
-                    refrescar()
+                    st.rerun()
 
-    st.subheader("📋 Listado de gastos")
-    gastos_f = filtrar_busqueda(gastos, "busc_gastos")
-    st.dataframe(gastos_f, use_container_width=True)
-    descargar_csv(gastos_f, "gastos.csv")
+    mostrar_tabla_filtrada(gastos, "📋 Listado", "gastos_tabla", "gastos.csv")
 
 # =========================================================
 # PÉRDIDAS
 # =========================================================
 elif menu == "Pérdidas":
     st.title("📉 Pérdidas")
+
+    with st.expander("📥 Subir Excel / CSV de pérdidas"):
+        st.write("Columnas esperadas: fecha, producto, cantidad, valor")
+        archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_perdidas")
+        if archivo is not None:
+            if st.button("Cargar archivo de pérdidas"):
+                subir_excel_a_tabla(
+                    "perdidas",
+                    ["fecha", "producto", "cantidad", "valor"],
+                    archivo,
+                    columnas_fecha=["fecha"]
+                )
+                st.rerun()
 
     with st.expander("➕ Registrar pérdida", expanded=True):
         c1, c2 = st.columns(2)
@@ -567,9 +746,8 @@ elif menu == "Pérdidas":
             )
             if ok:
                 st.success("Pérdida guardada correctamente.")
-                refrescar()
+                st.rerun()
 
-    st.subheader("✏️ Editar o eliminar pérdida")
     if not perdidas.empty:
         aux = perdidas.copy()
         aux["texto"] = (
@@ -606,30 +784,40 @@ elif menu == "Pérdidas":
                 )
                 if ok:
                     st.success("Pérdida actualizada.")
-                    refrescar()
+                    st.rerun()
         with b2:
             if st.button("Eliminar pérdida"):
                 ok = eliminar_tabla("perdidas", fila_id)
                 if ok:
                     st.success("Pérdida eliminada.")
-                    refrescar()
+                    st.rerun()
 
-    st.subheader("📋 Listado de pérdidas")
-    perdidas_f = filtrar_busqueda(perdidas, "busc_perdidas")
-    st.dataframe(perdidas_f, use_container_width=True)
-    descargar_csv(perdidas_f, "perdidas.csv")
+    mostrar_tabla_filtrada(perdidas, "📋 Listado", "perdidas_tabla", "perdidas.csv")
 
 # =========================================================
 # GASTOS DUEÑO
 # =========================================================
 elif menu == "Gastos Dueño":
-    st.title("🏦 Gastos del dueño")
+    st.title("🏦 Gastos del dueño / retiros")
 
-    with st.expander("➕ Registrar retiro / gasto del dueño", expanded=True):
+    with st.expander("📥 Subir Excel / CSV de gastos del dueño"):
+        st.write("Columnas esperadas: fecha, descripcion, monto")
+        archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_dueno")
+        if archivo is not None:
+            if st.button("Cargar archivo de gastos del dueño"):
+                subir_excel_a_tabla(
+                    "gastos_dueno",
+                    ["fecha", "descripcion", "monto"],
+                    archivo,
+                    columnas_fecha=["fecha"]
+                )
+                st.rerun()
+
+    with st.expander("➕ Registrar retiro", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
             fecha = st.date_input("Fecha", value=date.today(), key="dueno_fecha")
-            descripcion = st.text_input("Descripción", key="dueno_desc")
+            descripcion = st.text_input("Descripción", key="dueno_descripcion")
         with c2:
             monto = st.number_input("Monto", min_value=0.0, step=1.0, key="dueno_monto")
 
@@ -644,9 +832,8 @@ elif menu == "Gastos Dueño":
             )
             if ok:
                 st.success("Gasto del dueño guardado correctamente.")
-                refrescar()
+                st.rerun()
 
-    st.subheader("✏️ Editar o eliminar gasto del dueño")
     if not gastos_dueno.empty:
         aux = gastos_dueno.copy()
         aux["texto"] = (
@@ -661,7 +848,7 @@ elif menu == "Gastos Dueño":
         c1, c2 = st.columns(2)
         with c1:
             fecha_e = st.date_input("Fecha editada", value=pd.to_datetime(fila["fecha"]).date(), key="dueno_fecha_e")
-            descripcion_e = st.text_input("Descripción editada", value=str(fila["descripcion"]), key="dueno_desc_e")
+            descripcion_e = st.text_input("Descripción editada", value=str(fila["descripcion"]), key="dueno_descripcion_e")
         with c2:
             monto_e = st.number_input("Monto editado", value=float(fila["monto"]), key="dueno_monto_e")
 
@@ -679,24 +866,33 @@ elif menu == "Gastos Dueño":
                 )
                 if ok:
                     st.success("Gasto del dueño actualizado.")
-                    refrescar()
+                    st.rerun()
         with b2:
             if st.button("Eliminar gasto del dueño"):
                 ok = eliminar_tabla("gastos_dueno", fila_id)
                 if ok:
                     st.success("Gasto del dueño eliminado.")
-                    refrescar()
+                    st.rerun()
 
-    st.subheader("📋 Listado")
-    gd_f = filtrar_busqueda(gastos_dueno, "busc_dueno")
-    st.dataframe(gd_f, use_container_width=True)
-    descargar_csv(gd_f, "gastos_dueno.csv")
+    mostrar_tabla_filtrada(gastos_dueno, "📋 Listado", "dueno_tabla", "gastos_dueno.csv")
 
 # =========================================================
 # EMPLEADOS
 # =========================================================
 elif menu == "Empleados":
     st.title("👥 Empleados")
+
+    with st.expander("📥 Subir Excel / CSV de empleados"):
+        st.write("Columnas esperadas: nombre, cargo, sueldo, tipo_pago, metodo_pago")
+        archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_empleados")
+        if archivo is not None:
+            if st.button("Cargar archivo de empleados"):
+                subir_excel_a_tabla(
+                    "empleados",
+                    ["nombre", "cargo", "sueldo", "tipo_pago", "metodo_pago"],
+                    archivo
+                )
+                st.rerun()
 
     with st.expander("➕ Agregar empleado", expanded=True):
         c1, c2 = st.columns(2)
@@ -705,8 +901,8 @@ elif menu == "Empleados":
             cargo = st.text_input("Cargo", key="emp_cargo")
             sueldo = st.number_input("Sueldo", min_value=0.0, step=1.0, key="emp_sueldo")
         with c2:
-            tipo_pago = st.selectbox("Tipo de pago", ["Quincenal", "Mensual", "Variable"], key="emp_tipo")
-            metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "Cheque"], key="emp_metodo")
+            tipo_pago = st.selectbox("Tipo de pago", ["Quincenal", "Mensual", "Variable"], key="emp_tipo_pago")
+            metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "Cheque"], key="emp_metodo_pago")
 
         if st.button("Guardar empleado"):
             ok = insertar_tabla(
@@ -721,9 +917,8 @@ elif menu == "Empleados":
             )
             if ok:
                 st.success("Empleado guardado correctamente.")
-                refrescar()
+                st.rerun()
 
-    st.subheader("✏️ Editar o eliminar empleado")
     if not empleados.empty:
         emp_sel = st.selectbox("Selecciona un empleado", empleados["nombre"].astype(str).tolist(), key="emp_sel")
         fila = empleados[empleados["nombre"].astype(str) == str(emp_sel)].iloc[0]
@@ -737,10 +932,10 @@ elif menu == "Empleados":
         with c2:
             tipos = ["Quincenal", "Mensual", "Variable"]
             metodos = ["Efectivo", "Transferencia", "Cheque"]
-            idx_tipo = tipos.index(str(fila["tipo_pago"])) if str(fila["tipo_pago"]) in tipos else 0
-            idx_metodo = metodos.index(str(fila["metodo_pago"])) if str(fila["metodo_pago"]) in metodos else 0
-            tipo_pago_e = st.selectbox("Tipo de pago editado", tipos, index=idx_tipo, key="emp_tipo_e")
-            metodo_pago_e = st.selectbox("Método de pago editado", metodos, index=idx_metodo, key="emp_metodo_e")
+            idx_t = tipos.index(str(fila["tipo_pago"])) if str(fila["tipo_pago"]) in tipos else 0
+            idx_m = metodos.index(str(fila["metodo_pago"])) if str(fila["metodo_pago"]) in metodos else 0
+            tipo_pago_e = st.selectbox("Tipo de pago editado", tipos, index=idx_t, key="emp_tipo_pago_e")
+            metodo_pago_e = st.selectbox("Método de pago editado", metodos, index=idx_m, key="emp_metodo_pago_e")
 
         b1, b2 = st.columns(2)
         with b1:
@@ -758,18 +953,15 @@ elif menu == "Empleados":
                 )
                 if ok:
                     st.success("Empleado actualizado.")
-                    refrescar()
+                    st.rerun()
         with b2:
             if st.button("Eliminar empleado"):
                 ok = eliminar_tabla("empleados", fila_id)
                 if ok:
                     st.success("Empleado eliminado.")
-                    refrescar()
+                    st.rerun()
 
-    st.subheader("📋 Listado de empleados")
-    empleados_f = filtrar_busqueda(empleados, "busc_empleados")
-    st.dataframe(empleados_f, use_container_width=True)
-    descargar_csv(empleados_f, "empleados.csv")
+    mostrar_tabla_filtrada(empleados, "📋 Listado", "empleados_tabla", "empleados.csv")
 
 # =========================================================
 # CIERRE DE CAJA
@@ -796,7 +988,7 @@ elif menu == "Cierre de Caja":
 
     st.metric("Monto sistema", f"RD$ {monto_sistema:,.2f}")
 
-    monto_real = st.number_input("Monto real contado", min_value=0.0, step=1.0, key="cc_real")
+    monto_real = st.number_input("Monto real contado", min_value=0.0, step=1.0, key="cc_monto_real")
     diferencia = float(monto_real) - float(monto_sistema)
 
     st.metric("Diferencia", f"RD$ {diferencia:,.2f}")
@@ -813,12 +1005,9 @@ elif menu == "Cierre de Caja":
         )
         if ok:
             st.success("Cierre de caja guardado correctamente.")
-            refrescar()
+            st.rerun()
 
-    st.subheader("📋 Historial de cierres")
-    cierre_f = filtrar_busqueda(cierre_caja, "busc_cierre")
-    st.dataframe(cierre_f, use_container_width=True)
-    descargar_csv(cierre_f, "cierre_caja.csv")
+    mostrar_tabla_filtrada(cierre_caja, "📋 Historial", "cierre_tabla", "cierre_caja.csv")
 
 # =========================================================
 # ESTADO DE RESULTADOS
@@ -828,55 +1017,69 @@ elif menu == "Estado de Resultados":
 
     c1, c2 = st.columns(2)
     with c1:
-        fecha_desde = st.date_input("Desde", value=date.today().replace(day=1), key="er_desde")
+        fecha_inicio = st.date_input("Desde", value=date.today().replace(day=1), key="er_desde")
     with c2:
-        fecha_hasta = st.date_input("Hasta", value=date.today(), key="er_hasta")
+        fecha_fin = st.date_input("Hasta", value=date.today(), key="er_hasta")
 
-    desde = pd.to_datetime(fecha_desde)
-    hasta = pd.to_datetime(fecha_hasta)
+    ventas_f = filtrar_rango_fechas(ventas, fecha_inicio, fecha_fin)
+    compras_f = filtrar_rango_fechas(compras, fecha_inicio, fecha_fin)
+    gastos_f = filtrar_rango_fechas(gastos, fecha_inicio, fecha_fin)
+    perdidas_f = filtrar_rango_fechas(perdidas, fecha_inicio, fecha_fin)
 
-    def filtrar_rango(df: pd.DataFrame) -> pd.DataFrame:
-        if df.empty or "fecha" not in df.columns:
-            return pd.DataFrame()
-        return df[(df["fecha"] >= desde) & (df["fecha"] <= hasta)]
+    ventas_totales = suma_segura(ventas_f, "total")
+    compras_totales = suma_segura(compras_f, "monto")
+    gastos_totales = suma_segura(gastos_f, "monto")
+    perdidas_totales = suma_segura(perdidas_f, "valor")
 
-    ventas_r = filtrar_rango(ventas)
-    compras_r = filtrar_rango(compras)
-    gastos_r = filtrar_rango(gastos)
-    perdidas_r = filtrar_rango(perdidas)
+    gastos_fijos = 0.0
+    gastos_variables = 0.0
+    if not gastos_f.empty and "tipo" in gastos_f.columns:
+        gf = gastos_f[gastos_f["tipo"].astype(str).str.lower().str.strip() == "fijo"]
+        gv = gastos_f[gastos_f["tipo"].astype(str).str.lower().str.strip() == "variable"]
+        gastos_fijos = suma_segura(gf, "monto")
+        gastos_variables = suma_segura(gv, "monto")
+    else:
+        gastos_variables = gastos_totales
 
-    total_ventas = suma_segura(ventas_r, "total")
-    total_compras = suma_segura(compras_r, "monto")
-    total_gastos = suma_segura(gastos_r, "monto")
-    total_perdidas = suma_segura(perdidas_r, "valor")
-    utilidad = total_ventas - total_compras - total_gastos - total_perdidas
+    utilidad_bruta_manual = st.number_input(
+        "Utilidad bruta (la colocas tú)",
+        min_value=0.0,
+        step=1.0,
+        key="er_util_bruta"
+    )
+    utilidad_neta = float(utilidad_bruta_manual) - float(gastos_fijos) - float(gastos_variables) - float(perdidas_totales)
+    dueno_65 = utilidad_neta * 0.65
+    gerente_35 = utilidad_neta * 0.35
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Ventas", f"RD$ {total_ventas:,.2f}")
-    c2.metric("Compras", f"RD$ {total_compras:,.2f}")
-    c3.metric("Gastos", f"RD$ {total_gastos:,.2f}")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Ventas", f"RD$ {ventas_totales:,.2f}")
+    m2.metric("Compras", f"RD$ {compras_totales:,.2f}")
+    m3.metric("Gastos", f"RD$ {gastos_totales:,.2f}")
 
-    c4, c5 = st.columns(2)
-    c4.metric("Pérdidas", f"RD$ {total_perdidas:,.2f}")
-    c5.metric("Utilidad", f"RD$ {utilidad:,.2f}")
+    m4, m5, m6 = st.columns(3)
+    m4.metric("Pérdidas", f"RD$ {perdidas_totales:,.2f}")
+    m5.metric("Gastos fijos", f"RD$ {gastos_fijos:,.2f}")
+    m6.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
+
+    m7, m8, m9 = st.columns(3)
+    m7.metric("Utilidad bruta", f"RD$ {utilidad_bruta_manual:,.2f}")
+    m8.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
+    m9.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
+
+    st.metric("35% gerente", f"RD$ {gerente_35:,.2f}")
 
     if st.button("Guardar estado de resultados"):
-        ok = insertar_tabla(
-            "estado_resultados",
-            {
-                "fecha": str(fecha_hasta),
-                "ventas": float(total_ventas),
-                "compras": float(total_compras),
-                "gastos": float(total_gastos),
-                "perdidas": float(total_perdidas),
-                "utilidad": float(utilidad),
-            },
-        )
+        datos = {
+            "fecha": str(fecha_fin),
+            "ventas": float(ventas_totales),
+            "compras": float(compras_totales),
+            "gastos": float(gastos_totales),
+            "perdidas": float(perdidas_totales),
+            "utilidad": float(utilidad_neta),
+        }
+        ok = insertar_tabla("estado_resultados", datos)
         if ok:
             st.success("Estado de resultados guardado correctamente.")
-            refrescar()
+            st.rerun()
 
-    st.subheader("📋 Historial")
-    er_f = filtrar_busqueda(estado_resultados, "busc_er")
-    st.dataframe(er_f, use_container_width=True)
-    descargar_csv(er_f, "estado_resultados.csv")
+    mostrar_tabla_filtrada(estado_resultados, "📋 Historial", "estado_resultados_tabla", "estado_resultados.csv")
