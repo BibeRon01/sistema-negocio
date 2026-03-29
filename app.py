@@ -1,6 +1,7 @@
+import calendar
+from datetime import date, datetime
 import streamlit as st
 import pandas as pd
-from datetime import date
 from supabase import create_client, Client
 
 st.set_page_config(page_title="Sistema de Negocio", layout="wide")
@@ -25,7 +26,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
         'SUPABASE_URL = "https://TU-PROYECTO.supabase.co"\n'
         'SUPABASE_KEY = "TU_CLAVE_PUBLICABLE"\n'
         'APP_PASSWORD = "1234"',
-        language="toml"
+        language="toml",
     )
     st.stop()
 
@@ -144,7 +145,7 @@ def descargar_csv(df: pd.DataFrame, nombre_archivo: str):
         "⬇️ Descargar CSV",
         data=data,
         file_name=nombre_archivo,
-        mime="text/csv"
+        mime="text/csv",
     )
 
 
@@ -155,6 +156,43 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
         for c in df.columns
     ]
     return df
+
+
+def limpiar_numero(valor):
+    if pd.isna(valor):
+        return None
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    txt = str(valor).strip().replace("$", "").replace(",", "")
+    if txt == "":
+        return None
+    try:
+        return float(txt)
+    except Exception:
+        return None
+
+
+def limpiar_fecha(valor):
+    if pd.isna(valor) or valor == "":
+        return None
+    if isinstance(valor, pd.Timestamp):
+        return valor.date().isoformat()
+    if isinstance(valor, datetime):
+        return valor.date().isoformat()
+    if isinstance(valor, date):
+        return valor.isoformat()
+
+    txt = str(valor).strip()
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(txt, fmt).date().isoformat()
+        except Exception:
+            pass
+
+    try:
+        return pd.to_datetime(txt, errors="coerce").date().isoformat()
+    except Exception:
+        return None
 
 
 def leer_archivo_subido(archivo) -> pd.DataFrame:
@@ -170,15 +208,40 @@ def leer_archivo_subido(archivo) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def preparar_valor(v):
-    if pd.isna(v):
-        return None
-    if isinstance(v, pd.Timestamp):
-        return v.date().isoformat()
-    return v
+def preparar_registro(df_row: pd.Series, columnas_texto=None, columnas_numericas=None, columnas_fecha=None):
+    if columnas_texto is None:
+        columnas_texto = []
+    if columnas_numericas is None:
+        columnas_numericas = []
+    if columnas_fecha is None:
+        columnas_fecha = []
+
+    datos = {}
+    for col in df_row.index:
+        val = df_row[col]
+        if col in columnas_fecha:
+            datos[col] = limpiar_fecha(val)
+        elif col in columnas_numericas:
+            datos[col] = limpiar_numero(val)
+        elif col in columnas_texto:
+            datos[col] = None if pd.isna(val) else str(val).strip()
+        else:
+            datos[col] = None if pd.isna(val) else val
+    return datos
 
 
-def subir_excel_a_tabla(nombre_tabla: str, columnas_permitidas: list[str], archivo, columnas_fecha=None):
+def subir_excel_a_tabla(
+    nombre_tabla: str,
+    columnas_permitidas: list[str],
+    archivo,
+    columnas_texto=None,
+    columnas_numericas=None,
+    columnas_fecha=None,
+):
+    if columnas_texto is None:
+        columnas_texto = []
+    if columnas_numericas is None:
+        columnas_numericas = []
     if columnas_fecha is None:
         columnas_fecha = []
 
@@ -193,16 +256,16 @@ def subir_excel_a_tabla(nombre_tabla: str, columnas_permitidas: list[str], archi
         return
 
     df = df[columnas_permitidas].copy()
-
-    for col in columnas_fecha:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
-
     total_ok = 0
     total_bad = 0
 
     for _, row in df.iterrows():
-        datos = {col: preparar_valor(row[col]) for col in columnas_permitidas}
+        datos = preparar_registro(
+            row,
+            columnas_texto=columnas_texto,
+            columnas_numericas=columnas_numericas,
+            columnas_fecha=columnas_fecha,
+        )
         ok = insertar_tabla(nombre_tabla, datos)
         if ok:
             total_ok += 1
@@ -233,6 +296,103 @@ def mostrar_tabla_filtrada(df: pd.DataFrame, titulo: str, key_base: str, nombre_
     descargar_csv(df_f, nombre_descarga)
 
 # =========================================================
+# NÓMINA / GASTO FIJO DE EMPLEADOS
+# =========================================================
+def ultimo_dia_mes(anio: int, mes: int) -> int:
+    return calendar.monthrange(anio, mes)[1]
+
+
+def normalizar_frecuencia(valor: str) -> str:
+    v = str(valor).strip().lower()
+    if v in ["quincenal", "2 veces", "dos veces", "dos_veces"]:
+        return "quincenal"
+    if v in ["mensual", "1 vez", "una vez", "una_vez"]:
+        return "mensual"
+    return v
+
+
+def fechas_pago_empleado_en_rango(row: pd.Series, fecha_inicio: date, fecha_fin: date) -> list[date]:
+    fechas = []
+
+    sueldo = limpiar_numero(row.get("sueldo"))
+    if sueldo is None or sueldo <= 0:
+        return fechas
+
+    frecuencia = normalizar_frecuencia(
+        row.get("frecuencia_pago", row.get("tipo_pago", "mensual"))
+    )
+
+    dia1 = limpiar_numero(row.get("dia_pago_1"))
+    dia2 = limpiar_numero(row.get("dia_pago_2"))
+
+    if frecuencia == "mensual":
+        if dia1 is None:
+            dia1 = 30
+    elif frecuencia == "quincenal":
+        if dia1 is None:
+            dia1 = 15
+        if dia2 is None:
+            dia2 = 30
+
+    actual = date(fecha_inicio.year, fecha_inicio.month, 1)
+
+    while actual <= fecha_fin:
+        anio = actual.year
+        mes = actual.month
+        ultimo = ultimo_dia_mes(anio, mes)
+
+        if frecuencia == "mensual":
+            d1 = min(int(dia1), ultimo)
+            f = date(anio, mes, d1)
+            if fecha_inicio <= f <= fecha_fin:
+                fechas.append(f)
+
+        elif frecuencia == "quincenal":
+            d1 = min(int(dia1), ultimo)
+            d2 = min(int(dia2), ultimo)
+            f1 = date(anio, mes, d1)
+            f2 = date(anio, mes, d2)
+            if fecha_inicio <= f1 <= fecha_fin:
+                fechas.append(f1)
+            if fecha_inicio <= f2 <= fecha_fin and f2 != f1:
+                fechas.append(f2)
+
+        if mes == 12:
+            actual = date(anio + 1, 1, 1)
+        else:
+            actual = date(anio, mes + 1, 1)
+
+    return fechas
+
+
+def calcular_pago_empleados_fijo(empleados_df: pd.DataFrame, fecha_inicio: date, fecha_fin: date) -> float:
+    if empleados_df.empty:
+        return 0.0
+
+    total = 0.0
+    for _, row in empleados_df.iterrows():
+        sueldo = limpiar_numero(row.get("sueldo"))
+        if sueldo is None or sueldo <= 0:
+            continue
+
+        frecuencia = normalizar_frecuencia(
+            row.get("frecuencia_pago", row.get("tipo_pago", "mensual"))
+        )
+
+        fechas = fechas_pago_empleado_en_rango(row, fecha_inicio, fecha_fin)
+        if not fechas:
+            continue
+
+        if frecuencia == "quincenal":
+            monto_por_pago = float(sueldo) / 2.0
+        else:
+            monto_por_pago = float(sueldo)
+
+        total += len(fechas) * monto_por_pago
+
+    return float(total)
+
+# =========================================================
 # CARGA DESDE NUBE
 # =========================================================
 productos = convertir_fechas(leer_tabla("productos"))
@@ -245,7 +405,6 @@ empleados = convertir_fechas(leer_tabla("empleados"))
 cierre_caja = convertir_fechas(leer_tabla("cierre_caja"))
 estado_resultados = convertir_fechas(leer_tabla("estado_resultados"))
 
-# Detectar si la tabla gastos tiene columna tipo
 TIENE_TIPO_GASTO = "tipo" in gastos.columns if not gastos.empty else False
 
 # =========================================================
@@ -296,17 +455,20 @@ if menu == "Dashboard":
     perdidas_totales = suma_segura(perdidas_f, "valor")
     retiros_totales = suma_segura(gastos_dueno_f, "monto")
 
-    gastos_fijos = 0.0
+    gastos_fijos_otros = 0.0
     gastos_variables = 0.0
 
     if not gastos_f.empty and "tipo" in gastos_f.columns:
         gf = gastos_f[gastos_f["tipo"].astype(str).str.lower().str.strip() == "fijo"]
         gv = gastos_f[gastos_f["tipo"].astype(str).str.lower().str.strip() == "variable"]
-        gastos_fijos = suma_segura(gf, "monto")
+        gastos_fijos_otros = suma_segura(gf, "monto")
         gastos_variables = suma_segura(gv, "monto")
     else:
         gastos_variables = gastos_totales
-        st.info("La tabla gastos no tiene columna 'tipo'. Por ahora todos los gastos se toman como generales/variables.")
+        st.info("La tabla gastos no tiene columna 'tipo'. Por ahora todos los gastos normales se toman como variables.")
+
+    pago_empleados_fijo = calcular_pago_empleados_fijo(empleados, fecha_inicio, fecha_fin)
+    gastos_fijos_totales = gastos_fijos_otros + pago_empleados_fijo
 
     st.markdown("### Utilidad")
     utilidad_bruta_manual = st.number_input(
@@ -316,7 +478,7 @@ if menu == "Dashboard":
         key="utilidad_bruta_manual"
     )
 
-    utilidad_neta = float(utilidad_bruta_manual) - float(gastos_fijos) - float(gastos_variables) - float(perdidas_totales)
+    utilidad_neta = float(utilidad_bruta_manual) - float(gastos_fijos_totales) - float(gastos_variables) - float(perdidas_totales)
     porcentaje_dueno = utilidad_neta * 0.65
     porcentaje_gerente = utilidad_neta * 0.35
 
@@ -331,13 +493,16 @@ if menu == "Dashboard":
     m6.metric("Utilidad bruta manual", f"RD$ {utilidad_bruta_manual:,.2f}")
 
     m7, m8, m9 = st.columns(3)
-    m7.metric("Gastos fijos", f"RD$ {gastos_fijos:,.2f}")
-    m8.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
-    m9.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
+    m7.metric("Gastos fijos (otros)", f"RD$ {gastos_fijos_otros:,.2f}")
+    m8.metric("Pago a empleados (fijo)", f"RD$ {pago_empleados_fijo:,.2f}")
+    m9.metric("Gastos fijos totales", f"RD$ {gastos_fijos_totales:,.2f}")
 
-    m10, m11 = st.columns(2)
-    m10.metric("65% dueño", f"RD$ {porcentaje_dueno:,.2f}")
-    m11.metric("35% gerente", f"RD$ {porcentaje_gerente:,.2f}")
+    m10, m11, m12 = st.columns(3)
+    m10.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
+    m11.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
+    m12.metric("65% dueño", f"RD$ {porcentaje_dueno:,.2f}")
+
+    st.metric("35% gerente", f"RD$ {porcentaje_gerente:,.2f}")
 
     st.subheader("Últimas ventas")
     st.dataframe(ventas_f.tail(10), use_container_width=True)
@@ -354,14 +519,15 @@ elif menu == "Productos":
     with st.expander("📥 Subir Excel / CSV de productos"):
         st.write("Columnas esperadas: nombre, costo, precio, cantidad")
         archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_productos")
-        if archivo is not None:
-            if st.button("Cargar archivo de productos"):
-                subir_excel_a_tabla(
-                    "productos",
-                    ["nombre", "costo", "precio", "cantidad"],
-                    archivo
-                )
-                st.rerun()
+        if archivo is not None and st.button("Cargar archivo de productos"):
+            subir_excel_a_tabla(
+                "productos",
+                ["nombre", "costo", "precio", "cantidad"],
+                archivo,
+                columnas_texto=["nombre"],
+                columnas_numericas=["costo", "precio", "cantidad"],
+            )
+            st.rerun()
 
     with st.expander("➕ Agregar producto", expanded=True):
         c1, c2 = st.columns(2)
@@ -441,15 +607,16 @@ elif menu == "Ventas":
     with st.expander("📥 Subir Excel / CSV de ventas"):
         st.write("Columnas esperadas: fecha, total, metodo")
         archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_ventas")
-        if archivo is not None:
-            if st.button("Cargar archivo de ventas"):
-                subir_excel_a_tabla(
-                    "ventas",
-                    ["fecha", "total", "metodo"],
-                    archivo,
-                    columnas_fecha=["fecha"]
-                )
-                st.rerun()
+        if archivo is not None and st.button("Cargar archivo de ventas"):
+            subir_excel_a_tabla(
+                "ventas",
+                ["fecha", "total", "metodo"],
+                archivo,
+                columnas_texto=["metodo"],
+                columnas_numericas=["total"],
+                columnas_fecha=["fecha"],
+            )
+            st.rerun()
 
     with st.expander("➕ Registrar venta", expanded=True):
         c1, c2, c3 = st.columns(3)
@@ -523,15 +690,16 @@ elif menu == "Compras":
     with st.expander("📥 Subir Excel / CSV de compras"):
         st.write("Columnas esperadas: fecha, numero, proveedor, descripcion, monto, metodo")
         archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_compras")
-        if archivo is not None:
-            if st.button("Cargar archivo de compras"):
-                subir_excel_a_tabla(
-                    "compras",
-                    ["fecha", "numero", "proveedor", "descripcion", "monto", "metodo"],
-                    archivo,
-                    columnas_fecha=["fecha"]
-                )
-                st.rerun()
+        if archivo is not None and st.button("Cargar archivo de compras"):
+            subir_excel_a_tabla(
+                "compras",
+                ["fecha", "numero", "proveedor", "descripcion", "monto", "metodo"],
+                archivo,
+                columnas_texto=["numero", "proveedor", "descripcion", "metodo"],
+                columnas_numericas=["monto"],
+                columnas_fecha=["fecha"],
+            )
+            st.rerun()
 
     with st.expander("➕ Registrar compra", expanded=True):
         c1, c2 = st.columns(2)
@@ -618,20 +786,23 @@ elif menu == "Gastos":
 
     with st.expander("📥 Subir Excel / CSV de gastos"):
         columnas = ["fecha", "descripcion", "monto"]
+        columnas_texto = ["descripcion"]
         if TIENE_TIPO_GASTO:
             columnas.append("tipo")
+            columnas_texto.append("tipo")
 
         st.write(f"Columnas esperadas: {', '.join(columnas)}")
         archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_gastos")
-        if archivo is not None:
-            if st.button("Cargar archivo de gastos"):
-                subir_excel_a_tabla(
-                    "gastos",
-                    columnas,
-                    archivo,
-                    columnas_fecha=["fecha"]
-                )
-                st.rerun()
+        if archivo is not None and st.button("Cargar archivo de gastos"):
+            subir_excel_a_tabla(
+                "gastos",
+                columnas,
+                archivo,
+                columnas_texto=columnas_texto,
+                columnas_numericas=["monto"],
+                columnas_fecha=["fecha"],
+            )
+            st.rerun()
 
     with st.expander("➕ Registrar gasto", expanded=True):
         c1, c2 = st.columns(2)
@@ -651,7 +822,7 @@ elif menu == "Gastos":
             tipo = st.selectbox("Tipo de gasto", ["fijo", "variable"], key="gasto_tipo")
             datos["tipo"] = tipo
         else:
-            st.info("Si quieres separar gastos fijos y variables, agrega la columna 'tipo' a la tabla gastos.")
+            st.info("Agrega la columna 'tipo' en gastos para separar fijo y variable.")
 
         if st.button("Guardar gasto"):
             ok = insertar_tabla("gastos", datos)
@@ -714,15 +885,16 @@ elif menu == "Pérdidas":
     with st.expander("📥 Subir Excel / CSV de pérdidas"):
         st.write("Columnas esperadas: fecha, producto, cantidad, valor")
         archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_perdidas")
-        if archivo is not None:
-            if st.button("Cargar archivo de pérdidas"):
-                subir_excel_a_tabla(
-                    "perdidas",
-                    ["fecha", "producto", "cantidad", "valor"],
-                    archivo,
-                    columnas_fecha=["fecha"]
-                )
-                st.rerun()
+        if archivo is not None and st.button("Cargar archivo de pérdidas"):
+            subir_excel_a_tabla(
+                "perdidas",
+                ["fecha", "producto", "cantidad", "valor"],
+                archivo,
+                columnas_texto=["producto"],
+                columnas_numericas=["cantidad", "valor"],
+                columnas_fecha=["fecha"],
+            )
+            st.rerun()
 
     with st.expander("➕ Registrar pérdida", expanded=True):
         c1, c2 = st.columns(2)
@@ -803,15 +975,16 @@ elif menu == "Gastos Dueño":
     with st.expander("📥 Subir Excel / CSV de gastos del dueño"):
         st.write("Columnas esperadas: fecha, descripcion, monto")
         archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_dueno")
-        if archivo is not None:
-            if st.button("Cargar archivo de gastos del dueño"):
-                subir_excel_a_tabla(
-                    "gastos_dueno",
-                    ["fecha", "descripcion", "monto"],
-                    archivo,
-                    columnas_fecha=["fecha"]
-                )
-                st.rerun()
+        if archivo is not None and st.button("Cargar archivo de gastos del dueño"):
+            subir_excel_a_tabla(
+                "gastos_dueno",
+                ["fecha", "descripcion", "monto"],
+                archivo,
+                columnas_texto=["descripcion"],
+                columnas_numericas=["monto"],
+                columnas_fecha=["fecha"],
+            )
+            st.rerun()
 
     with st.expander("➕ Registrar retiro", expanded=True):
         c1, c2 = st.columns(2)
@@ -883,25 +1056,28 @@ elif menu == "Empleados":
     st.title("👥 Empleados")
 
     with st.expander("📥 Subir Excel / CSV de empleados"):
-        st.write("Columnas esperadas: nombre, cargo, sueldo, tipo_pago, metodo_pago")
+        st.write("Columnas esperadas: nombre, cargo, sueldo, frecuencia_pago, dia_pago_1, dia_pago_2, metodo_pago")
         archivo = st.file_uploader("Sube el archivo", type=["xlsx", "xls", "csv"], key="up_empleados")
-        if archivo is not None:
-            if st.button("Cargar archivo de empleados"):
-                subir_excel_a_tabla(
-                    "empleados",
-                    ["nombre", "cargo", "sueldo", "tipo_pago", "metodo_pago"],
-                    archivo
-                )
-                st.rerun()
+        if archivo is not None and st.button("Cargar archivo de empleados"):
+            subir_excel_a_tabla(
+                "empleados",
+                ["nombre", "cargo", "sueldo", "frecuencia_pago", "dia_pago_1", "dia_pago_2", "metodo_pago"],
+                archivo,
+                columnas_texto=["nombre", "cargo", "frecuencia_pago", "metodo_pago"],
+                columnas_numericas=["sueldo", "dia_pago_1", "dia_pago_2"],
+            )
+            st.rerun()
 
     with st.expander("➕ Agregar empleado", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
             nombre = st.text_input("Nombre", key="emp_nombre")
             cargo = st.text_input("Cargo", key="emp_cargo")
-            sueldo = st.number_input("Sueldo", min_value=0.0, step=1.0, key="emp_sueldo")
+            sueldo = st.number_input("Sueldo mensual", min_value=0.0, step=1.0, key="emp_sueldo")
+            frecuencia_pago = st.selectbox("Frecuencia de pago", ["mensual", "quincenal"], key="emp_freq")
         with c2:
-            tipo_pago = st.selectbox("Tipo de pago", ["Quincenal", "Mensual", "Variable"], key="emp_tipo_pago")
+            dia_pago_1 = st.number_input("Día de pago 1", min_value=1, max_value=31, step=1, key="emp_dia1")
+            dia_pago_2 = st.number_input("Día de pago 2 (si es quincenal)", min_value=0, max_value=31, step=1, key="emp_dia2")
             metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "Cheque"], key="emp_metodo_pago")
 
         if st.button("Guardar empleado"):
@@ -911,7 +1087,9 @@ elif menu == "Empleados":
                     "nombre": nombre.strip(),
                     "cargo": cargo.strip(),
                     "sueldo": float(sueldo),
-                    "tipo_pago": tipo_pago,
+                    "frecuencia_pago": frecuencia_pago,
+                    "dia_pago_1": int(dia_pago_1),
+                    "dia_pago_2": int(dia_pago_2) if frecuencia_pago == "quincenal" and int(dia_pago_2) > 0 else None,
                     "metodo_pago": metodo_pago,
                 },
             )
@@ -919,22 +1097,25 @@ elif menu == "Empleados":
                 st.success("Empleado guardado correctamente.")
                 st.rerun()
 
-    if not empleados.empty:
+    if not empleados.empty and "nombre" in empleados.columns:
         emp_sel = st.selectbox("Selecciona un empleado", empleados["nombre"].astype(str).tolist(), key="emp_sel")
         fila = empleados[empleados["nombre"].astype(str) == str(emp_sel)].iloc[0]
         fila_id = int(fila["id"])
 
         c1, c2 = st.columns(2)
         with c1:
-            nombre_e = st.text_input("Nombre editado", value=str(fila["nombre"]), key="emp_nombre_e")
-            cargo_e = st.text_input("Cargo editado", value=str(fila["cargo"]), key="emp_cargo_e")
-            sueldo_e = st.number_input("Sueldo editado", value=float(fila["sueldo"]), key="emp_sueldo_e")
+            nombre_e = st.text_input("Nombre editado", value=str(fila.get("nombre", "")), key="emp_nombre_e")
+            cargo_e = st.text_input("Cargo editado", value=str(fila.get("cargo", "")), key="emp_cargo_e")
+            sueldo_e = st.number_input("Sueldo mensual editado", value=float(limpiar_numero(fila.get("sueldo")) or 0), key="emp_sueldo_e")
+            freq_actual = str(fila.get("frecuencia_pago", "mensual"))
+            idx_f = 0 if freq_actual == "mensual" else 1
+            frecuencia_pago_e = st.selectbox("Frecuencia editada", ["mensual", "quincenal"], index=idx_f, key="emp_freq_e")
         with c2:
-            tipos = ["Quincenal", "Mensual", "Variable"]
+            dia_pago_1_e = st.number_input("Día de pago 1 editado", min_value=1, max_value=31, value=int(limpiar_numero(fila.get("dia_pago_1")) or 30), key="emp_dia1_e")
+            dia_pago_2_e = st.number_input("Día de pago 2 editado", min_value=0, max_value=31, value=int(limpiar_numero(fila.get("dia_pago_2")) or 0), key="emp_dia2_e")
             metodos = ["Efectivo", "Transferencia", "Cheque"]
-            idx_t = tipos.index(str(fila["tipo_pago"])) if str(fila["tipo_pago"]) in tipos else 0
-            idx_m = metodos.index(str(fila["metodo_pago"])) if str(fila["metodo_pago"]) in metodos else 0
-            tipo_pago_e = st.selectbox("Tipo de pago editado", tipos, index=idx_t, key="emp_tipo_pago_e")
+            metodo_actual = str(fila.get("metodo_pago", "Efectivo"))
+            idx_m = metodos.index(metodo_actual) if metodo_actual in metodos else 0
             metodo_pago_e = st.selectbox("Método de pago editado", metodos, index=idx_m, key="emp_metodo_pago_e")
 
         b1, b2 = st.columns(2)
@@ -947,7 +1128,9 @@ elif menu == "Empleados":
                         "nombre": nombre_e.strip(),
                         "cargo": cargo_e.strip(),
                         "sueldo": float(sueldo_e),
-                        "tipo_pago": tipo_pago_e,
+                        "frecuencia_pago": frecuencia_pago_e,
+                        "dia_pago_1": int(dia_pago_1_e),
+                        "dia_pago_2": int(dia_pago_2_e) if frecuencia_pago_e == "quincenal" and int(dia_pago_2_e) > 0 else None,
                         "metodo_pago": metodo_pago_e,
                     },
                 )
@@ -978,15 +1161,19 @@ elif menu == "Cierre de Caja":
     perdidas_dia = perdidas[perdidas["fecha"].dt.date == fecha_dt.date()] if not perdidas.empty else pd.DataFrame()
     dueno_dia = gastos_dueno[gastos_dueno["fecha"].dt.date == fecha_dt.date()] if not gastos_dueno.empty else pd.DataFrame()
 
+    pago_empleados_dia = calcular_pago_empleados_fijo(empleados, fecha_cierre, fecha_cierre)
+
     monto_sistema = (
         suma_segura(ventas_dia, "total")
         - suma_segura(compras_dia, "monto")
         - suma_segura(gastos_dia, "monto")
         - suma_segura(perdidas_dia, "valor")
         - suma_segura(dueno_dia, "monto")
+        - float(pago_empleados_dia)
     )
 
     st.metric("Monto sistema", f"RD$ {monto_sistema:,.2f}")
+    st.metric("Pago a empleados del día (fijo)", f"RD$ {pago_empleados_dia:,.2f}")
 
     monto_real = st.number_input("Monto real contado", min_value=0.0, step=1.0, key="cc_monto_real")
     diferencia = float(monto_real) - float(monto_sistema)
@@ -1031,15 +1218,18 @@ elif menu == "Estado de Resultados":
     gastos_totales = suma_segura(gastos_f, "monto")
     perdidas_totales = suma_segura(perdidas_f, "valor")
 
-    gastos_fijos = 0.0
+    gastos_fijos_otros = 0.0
     gastos_variables = 0.0
     if not gastos_f.empty and "tipo" in gastos_f.columns:
         gf = gastos_f[gastos_f["tipo"].astype(str).str.lower().str.strip() == "fijo"]
         gv = gastos_f[gastos_f["tipo"].astype(str).str.lower().str.strip() == "variable"]
-        gastos_fijos = suma_segura(gf, "monto")
+        gastos_fijos_otros = suma_segura(gf, "monto")
         gastos_variables = suma_segura(gv, "monto")
     else:
         gastos_variables = gastos_totales
+
+    pago_empleados_fijo = calcular_pago_empleados_fijo(empleados, fecha_inicio, fecha_fin)
+    gastos_fijos_totales = gastos_fijos_otros + pago_empleados_fijo
 
     utilidad_bruta_manual = st.number_input(
         "Utilidad bruta (la colocas tú)",
@@ -1047,7 +1237,8 @@ elif menu == "Estado de Resultados":
         step=1.0,
         key="er_util_bruta"
     )
-    utilidad_neta = float(utilidad_bruta_manual) - float(gastos_fijos) - float(gastos_variables) - float(perdidas_totales)
+
+    utilidad_neta = float(utilidad_bruta_manual) - float(gastos_fijos_totales) - float(gastos_variables) - float(perdidas_totales)
     dueno_65 = utilidad_neta * 0.65
     gerente_35 = utilidad_neta * 0.35
 
@@ -1058,15 +1249,18 @@ elif menu == "Estado de Resultados":
 
     m4, m5, m6 = st.columns(3)
     m4.metric("Pérdidas", f"RD$ {perdidas_totales:,.2f}")
-    m5.metric("Gastos fijos", f"RD$ {gastos_fijos:,.2f}")
-    m6.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
+    m5.metric("Gastos fijos (otros)", f"RD$ {gastos_fijos_otros:,.2f}")
+    m6.metric("Pago a empleados (fijo)", f"RD$ {pago_empleados_fijo:,.2f}")
 
     m7, m8, m9 = st.columns(3)
-    m7.metric("Utilidad bruta", f"RD$ {utilidad_bruta_manual:,.2f}")
-    m8.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
-    m9.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
+    m7.metric("Gastos fijos totales", f"RD$ {gastos_fijos_totales:,.2f}")
+    m8.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
+    m9.metric("Utilidad bruta", f"RD$ {utilidad_bruta_manual:,.2f}")
 
-    st.metric("35% gerente", f"RD$ {gerente_35:,.2f}")
+    m10, m11, m12 = st.columns(3)
+    m10.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
+    m11.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
+    m12.metric("35% gerente", f"RD$ {gerente_35:,.2f}")
 
     if st.button("Guardar estado de resultados"):
         datos = {
