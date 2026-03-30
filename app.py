@@ -729,6 +729,123 @@ def serie_periodica(df: pd.DataFrame, columna: str, frecuencia: str = "M") -> pd
     return out
 
 
+
+
+def valor_bool_ui(valor) -> bool:
+    if isinstance(valor, bool):
+        return valor
+    txt = normalizar_texto(valor)
+    return txt in ["true", "1", "si", "sí", "yes", "activo"]
+
+
+def columnas_sistema_no_editables() -> set[str]:
+    return {"id", "created_at", "updated_at"}
+
+
+def construir_payload_desde_fila(df: pd.DataFrame, fila: pd.Series, key_base: str) -> dict:
+    payload: dict[str, Any] = {}
+    excluir = columnas_sistema_no_editables()
+
+    for col in df.columns:
+        if col in excluir:
+            continue
+
+        valor = fila.get(col, None)
+        etiqueta = col.replace("_", " ").title()
+
+        if col == "anulado":
+            payload[col] = st.checkbox(etiqueta, value=valor_bool_ui(valor), key=f"{key_base}_{col}")
+            continue
+
+        if "fecha" in col:
+            fecha_default = date.today()
+            try:
+                fecha_parsed = pd.to_datetime(valor, errors="coerce")
+                if not pd.isna(fecha_parsed):
+                    fecha_default = fecha_parsed.date()
+            except Exception:
+                pass
+            payload[col] = str(st.date_input(etiqueta, value=fecha_default, key=f"{key_base}_{col}"))
+            continue
+
+        if pd.api.types.is_bool_dtype(df[col]) or isinstance(valor, bool):
+            payload[col] = st.checkbox(etiqueta, value=valor_bool_ui(valor), key=f"{key_base}_{col}")
+            continue
+
+        if pd.api.types.is_numeric_dtype(df[col]) or isinstance(valor, (int, float)):
+            num = limpiar_numero(valor) or 0.0
+            payload[col] = float(st.number_input(etiqueta, value=float(num), step=1.0, key=f"{key_base}_{col}"))
+            continue
+
+        txt = "" if pd.isna(valor) else str(valor)
+        if len(txt) > 80:
+            payload[col] = st.text_area(etiqueta, value=txt, key=f"{key_base}_{col}")
+        else:
+            payload[col] = st.text_input(etiqueta, value=txt, key=f"{key_base}_{col}")
+
+    return payload
+
+
+def crud_pro_tabla(tabla: str, permitir_anular: bool = True, permitir_eliminar: bool = True):
+    st.title(f"🛠️ CRUD PRO · {tabla}")
+    df = leer_tabla(tabla)
+
+    if df.empty:
+        st.info("No hay registros en esta tabla.")
+        return
+
+    txt = st.text_input("Buscar", key=f"crud_buscar_{tabla}")
+    if txt:
+        df = buscar_df(df, txt)
+
+    st.subheader("📋 Registros")
+    st.dataframe(df, use_container_width=True)
+
+    if "id" not in df.columns:
+        st.warning("Esta tabla no tiene columna id. No se puede editar ni eliminar desde aquí.")
+        return
+
+    opciones = df["id"].tolist()
+    fila_id = st.selectbox("Selecciona el ID a trabajar", opciones, key=f"crud_id_{tabla}")
+    fila = df[df["id"] == fila_id].iloc[0]
+
+    st.subheader("✏️ Editar registro")
+    with st.form(f"form_editar_{tabla}"):
+        payload = construir_payload_desde_fila(df, fila, f"edit_{tabla}_{fila_id}")
+        guardar = st.form_submit_button("💾 Guardar cambios")
+        if guardar:
+            if actualizar(tabla, fila_id, payload):
+                st.success("Registro actualizado correctamente.")
+                st.rerun()
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.subheader("🗑️ Eliminar")
+        confirmar_eliminar = st.checkbox(
+            "Confirmo que quiero eliminar físicamente este registro",
+            key=f"confirmar_eliminar_{tabla}_{fila_id}",
+        )
+        if st.button("Eliminar definitivo", key=f"btn_eliminar_{tabla}_{fila_id}", disabled=not permitir_eliminar):
+            if not permitir_eliminar:
+                st.warning("En esta tabla se recomienda anular en vez de eliminar.")
+            elif not confirmar_eliminar:
+                st.warning("Debes confirmar antes de eliminar.")
+            elif eliminar(tabla, fila_id):
+                st.success("Registro eliminado correctamente.")
+                st.rerun()
+
+    with c2:
+        st.subheader("🚫 Anular")
+        motivo = st.text_area("Motivo de anulación", key=f"motivo_anular_{tabla}_{fila_id}")
+        if st.button("Anular registro", key=f"btn_anular_{tabla}_{fila_id}", disabled=not permitir_anular):
+            if not permitir_anular:
+                st.warning("Esta tabla normalmente se maneja con eliminar, no con anular.")
+            elif anular(tabla, fila_id, motivo):
+                st.success("Registro anulado correctamente.")
+                st.rerun()
+
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -752,6 +869,7 @@ menu = st.sidebar.selectbox(
         "Cierre de Caja",
         "Estado de Resultados",
         "Reportes",
+        "CRUD PRO",
         "Auditoría",
     ],
 )
@@ -1919,6 +2037,42 @@ elif menu == "Reportes":
     if not perdidas_s.empty:
         st.write("Pérdidas")
         st.line_chart(perdidas_s.set_index("periodo"))
+
+
+# =========================================================
+# CRUD PRO
+# =========================================================
+elif menu == "CRUD PRO":
+    tabla = st.selectbox(
+        "Tabla",
+        [
+            "productos",
+            "empleados",
+            "catalogo_gastos",
+            "adelantos_empleados",
+            "ventas",
+            "compras",
+            "gastos",
+            "perdidas",
+            "gastos_dueno",
+            "cierre_caja",
+            "inventario_actual",
+            "conteo_inventario",
+            "ajustes_inventario",
+            "estado_resultados",
+        ],
+        key="crud_tabla_general",
+    )
+
+    tablas_transaccionales = {"ventas", "compras", "gastos", "perdidas", "gastos_dueno", "cierre_caja", "estado_resultados"}
+    permitir_anular = tabla in tablas_transaccionales
+    permitir_eliminar = not permitir_anular
+
+    st.info(
+        "Productos, empleados, catálogo y adelantos: usa eliminar. "
+        "Ventas, compras, gastos, pérdidas, cierre y similares: usa anular."
+    )
+    crud_pro_tabla(tabla, permitir_anular=permitir_anular, permitir_eliminar=permitir_eliminar)
 
 # =========================================================
 # AUDITORÍA
