@@ -266,8 +266,94 @@ def descargar_archivos(df: pd.DataFrame, base_name: str):
         )
 
 
+
 # =========================================================
-# SUPABASE CRUD
+# CRUD PRO COMPLETO (CREAR - EDITAR - ELIMINAR - ANULAR)
+# =========================================================
+
+def insertar(tabla, datos, usuario="admin"):
+    try:
+        supabase.table(tabla).insert(datos).execute()
+
+        supabase.table("auditoria").insert({
+            "accion": "crear",
+            "tabla": tabla,
+            "usuario": usuario,
+            "detalle": str(datos)
+        }).execute()
+
+        return True
+
+    except Exception as e:
+        st.error(f"Error al insertar en {tabla}: {e}")
+        return False
+
+
+def actualizar(tabla, fila_id, datos, usuario="admin"):
+    try:
+        supabase.table(tabla).update(datos).eq("id", fila_id).execute()
+
+        supabase.table("auditoria").insert({
+            "accion": "editar",
+            "tabla": tabla,
+            "usuario": usuario,
+            "detalle": f"id={fila_id} | {datos}"
+        }).execute()
+
+        return True
+
+    except Exception as e:
+        st.error(f"Error al actualizar en {tabla}: {e}")
+        return False
+
+
+def eliminar(tabla, fila_id, usuario="admin"):
+    try:
+        supabase.table(tabla).delete().eq("id", fila_id).execute()
+
+        supabase.table("auditoria").insert({
+            "accion": "eliminar",
+            "tabla": tabla,
+            "usuario": usuario,
+            "detalle": f"id eliminado: {fila_id}"
+        }).execute()
+
+        return True
+
+    except Exception as e:
+        st.error(f"Error al eliminar en {tabla}: {e}")
+        return False
+
+
+def anular(tabla, fila_id, motivo="", usuario="admin"):
+    try:
+        supabase.table(tabla).update({
+            "anulado": True,
+            "motivo_anulacion": motivo
+        }).eq("id", fila_id).execute()
+
+        supabase.table("auditoria").insert({
+            "accion": "anular",
+            "tabla": tabla,
+            "usuario": usuario,
+            "detalle": f"id={fila_id} | motivo={motivo}"
+        }).execute()
+
+        return True
+
+    except Exception as e:
+        st.error(f"Error al anular en {tabla}: {e}")
+        return False
+
+
+def leer_tabla(tabla):
+    try:
+        resp = supabase.table(tabla).select("*").execute()
+        return pd.DataFrame(resp.data or [])
+    except Exception as e:
+        st.error(f"Error al leer {tabla}: {e}")
+        return pd.DataFrame()
+
 # =========================================================
 def registrar_auditoria(accion: str, tabla: str, detalle: str = ""):
     try:
