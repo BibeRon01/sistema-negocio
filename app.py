@@ -270,146 +270,78 @@ def descargar_archivos(df: pd.DataFrame, base_name: str):
 # =========================================================
 # CRUD PRO COMPLETO (CREAR - EDITAR - ELIMINAR - ANULAR)
 # =========================================================
-
-def insertar(tabla, datos, usuario="admin"):
-    try:
-        supabase.table(tabla).insert(datos).execute()
-
-        supabase.table("auditoria").insert({
-            "accion": "crear",
-            "tabla": tabla,
-            "usuario": usuario,
-            "detalle": str(datos)
-        }).execute()
-
-        return True
-
-    except Exception as e:
-        st.error(f"Error al insertar en {tabla}: {e}")
-        return False
-
-
-def actualizar(tabla, fila_id, datos, usuario="admin"):
-    try:
-        supabase.table(tabla).update(datos).eq("id", fila_id).execute()
-
-        supabase.table("auditoria").insert({
-            "accion": "editar",
-            "tabla": tabla,
-            "usuario": usuario,
-            "detalle": f"id={fila_id} | {datos}"
-        }).execute()
-
-        return True
-
-    except Exception as e:
-        st.error(f"Error al actualizar en {tabla}: {e}")
-        return False
-
-
-def eliminar(tabla, fila_id, usuario="admin"):
-    try:
-        supabase.table(tabla).delete().eq("id", fila_id).execute()
-
-        supabase.table("auditoria").insert({
-            "accion": "eliminar",
-            "tabla": tabla,
-            "usuario": usuario,
-            "detalle": f"id eliminado: {fila_id}"
-        }).execute()
-
-        return True
-
-    except Exception as e:
-        st.error(f"Error al eliminar en {tabla}: {e}")
-        return False
-
-
-def anular(tabla, fila_id, motivo="", usuario="admin"):
-    try:
-        supabase.table(tabla).update({
-            "anulado": True,
-            "motivo_anulacion": motivo
-        }).eq("id", fila_id).execute()
-
-        supabase.table("auditoria").insert({
-            "accion": "anular",
-            "tabla": tabla,
-            "usuario": usuario,
-            "detalle": f"id={fila_id} | motivo={motivo}"
-        }).execute()
-
-        return True
-
-    except Exception as e:
-        st.error(f"Error al anular en {tabla}: {e}")
-        return False
-
-
-def leer_tabla(tabla):
-    try:
-        resp = supabase.table(tabla).select("*").execute()
-        return pd.DataFrame(resp.data or [])
-    except Exception as e:
-        st.error(f"Error al leer {tabla}: {e}")
-        return pd.DataFrame()
-
-# =========================================================
-def registrar_auditoria(accion: str, tabla: str, detalle: str = ""):
+def registrar_auditoria(accion: str, tabla: str, detalle: str = "", usuario: str = "admin"):
     try:
         supabase.table("auditoria").insert(
             {
                 "accion": accion,
                 "tabla": tabla,
-                "usuario": "sistema",
+                "usuario": usuario,
                 "fecha": datetime.now().isoformat(),
-                "detalle": detalle,
+                "detalle": detalle[:1000],
             }
         ).execute()
     except Exception:
         pass
 
 
-
-def leer_tabla(nombre_tabla: str, order_by: str = "id") -> pd.DataFrame:
+def leer_tabla(tabla: str, order_by: str = "id") -> pd.DataFrame:
     try:
-        resp = supabase.table(nombre_tabla).select("*").order(order_by).execute()
-        data = resp.data if resp.data else []
-        return pd.DataFrame(data)
-    except Exception:
+        query = supabase.table(tabla).select("*")
+        if order_by:
+            try:
+                query = query.order(order_by)
+            except Exception:
+                pass
+        resp = query.execute()
+        return pd.DataFrame(resp.data or [])
+    except Exception as e:
+        st.error(f"Error al leer {tabla}: {e}")
         return pd.DataFrame()
 
 
-
-def insertar(nombre_tabla: str, datos: dict) -> bool:
+def insertar(tabla: str, datos: dict, usuario: str = "admin") -> bool:
     try:
-        supabase.table(nombre_tabla).insert(datos).execute()
-        registrar_auditoria("insertar", nombre_tabla, str(datos)[:500])
+        supabase.table(tabla).insert(datos).execute()
+        registrar_auditoria("crear", tabla, str(datos), usuario)
         return True
-    except Exception as exc:
-        st.error(f"Error al insertar en {nombre_tabla}: {exc}")
+    except Exception as e:
+        st.error(f"Error al insertar en {tabla}: {e}")
         return False
 
 
-
-def actualizar(nombre_tabla: str, fila_id: Any, datos: dict) -> bool:
+def actualizar(tabla: str, fila_id: Any, datos: dict, usuario: str = "admin") -> bool:
     try:
-        supabase.table(nombre_tabla).update(datos).eq("id", fila_id).execute()
-        registrar_auditoria("actualizar", nombre_tabla, f"id={fila_id} | {str(datos)[:500]}")
+        supabase.table(tabla).update(datos).eq("id", fila_id).execute()
+        registrar_auditoria("editar", tabla, f"id={fila_id} | {datos}", usuario)
         return True
-    except Exception as exc:
-        st.error(f"Error al actualizar en {nombre_tabla}: {exc}")
+    except Exception as e:
+        st.error(f"Error al actualizar en {tabla}: {e}")
         return False
 
 
-
-def eliminar(nombre_tabla: str, fila_id: Any) -> bool:
+def eliminar(tabla: str, fila_id: Any, usuario: str = "admin") -> bool:
     try:
-        supabase.table(nombre_tabla).delete().eq("id", fila_id).execute()
-        registrar_auditoria("eliminar", nombre_tabla, f"id={fila_id}")
+        supabase.table(tabla).delete().eq("id", fila_id).execute()
+        registrar_auditoria("eliminar", tabla, f"id eliminado: {fila_id}", usuario)
         return True
-    except Exception as exc:
-        st.error(f"Error al eliminar en {nombre_tabla}: {exc}")
+    except Exception as e:
+        st.error(f"Error al eliminar en {tabla}: {e}")
+        return False
+
+
+def anular(tabla: str, fila_id: Any, motivo: str = "", usuario: str = "admin") -> bool:
+    try:
+        supabase.table(tabla).update(
+            {
+                "anulado": True,
+                "motivo_anulacion": motivo,
+            }
+        ).eq("id", fila_id).execute()
+        registrar_auditoria("anular", tabla, f"id={fila_id} | motivo={motivo}", usuario)
+        return True
+    except Exception as e:
+        st.error(f"Error al anular en {tabla}: {e}")
         return False
 
 
@@ -731,119 +663,201 @@ def serie_periodica(df: pd.DataFrame, columna: str, frecuencia: str = "M") -> pd
 
 
 
-def valor_bool_ui(valor) -> bool:
-    if isinstance(valor, bool):
+# =========================================================
+# HELPERS CRUD UI PRO
+# =========================================================
+TABLAS_ANULABLES = {"ventas", "compras", "gastos", "perdidas", "cierre_caja"}
+TABLAS_SISTEMA = [
+    "productos",
+    "ventas",
+    "compras",
+    "gastos",
+    "catalogo_gastos",
+    "empleados",
+    "adelantos_empleados",
+    "perdidas",
+    "inventario_actual",
+    "conteo_inventario",
+    "ajustes_inventario",
+    "gastos_dueno",
+    "cierre_caja",
+    "estado_resultados",
+    "auditoria",
+]
+
+
+def refrescar_datos():
+    global DATA
+    DATA = cargar_datos()
+
+
+def tabla_es_anulable(tabla: str) -> bool:
+    return tabla in TABLAS_ANULABLES
+
+
+def valor_para_widget(valor: Any):
+    if isinstance(valor, pd.Timestamp):
+        return valor.date()
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
         return valor
-    txt = normalizar_texto(valor)
-    return txt in ["true", "1", "si", "sí", "yes", "activo"]
+    if pd.isna(valor):
+        return ""
+    return valor
 
 
-def columnas_sistema_no_editables() -> set[str]:
-    return {"id", "created_at", "updated_at"}
-
-
-def construir_payload_desde_fila(df: pd.DataFrame, fila: pd.Series, key_base: str) -> dict:
-    payload: dict[str, Any] = {}
-    excluir = columnas_sistema_no_editables()
-
-    for col in df.columns:
-        if col in excluir:
+def construir_payload_desde_fila(fila: pd.Series, key_base: str) -> dict:
+    payload = {}
+    for columna in fila.index:
+        if columna == "id":
             continue
+        valor = fila[columna]
+        valor_widget = valor_para_widget(valor)
+        label = columna.replace("_", " ").title()
 
-        valor = fila.get(col, None)
-        etiqueta = col.replace("_", " ").title()
-
-        if col == "anulado":
-            payload[col] = st.checkbox(etiqueta, value=valor_bool_ui(valor), key=f"{key_base}_{col}")
-            continue
-
-        if "fecha" in col:
-            fecha_default = date.today()
-            try:
-                fecha_parsed = pd.to_datetime(valor, errors="coerce")
-                if not pd.isna(fecha_parsed):
-                    fecha_default = fecha_parsed.date()
-            except Exception:
-                pass
-            payload[col] = str(st.date_input(etiqueta, value=fecha_default, key=f"{key_base}_{col}"))
-            continue
-
-        if pd.api.types.is_bool_dtype(df[col]) or isinstance(valor, bool):
-            payload[col] = st.checkbox(etiqueta, value=valor_bool_ui(valor), key=f"{key_base}_{col}")
-            continue
-
-        if pd.api.types.is_numeric_dtype(df[col]) or isinstance(valor, (int, float)):
-            num = limpiar_numero(valor) or 0.0
-            payload[col] = float(st.number_input(etiqueta, value=float(num), step=1.0, key=f"{key_base}_{col}"))
-            continue
-
-        txt = "" if pd.isna(valor) else str(valor)
-        if len(txt) > 80:
-            payload[col] = st.text_area(etiqueta, value=txt, key=f"{key_base}_{col}")
+        if isinstance(valor, (bool,)) or str(columna).lower() in {"activo", "anulado"}:
+            payload[columna] = st.checkbox(label, value=bool(valor), key=f"{key_base}_{columna}")
+        elif isinstance(valor, (int, float)) and not isinstance(valor, bool):
+            payload[columna] = st.number_input(label, value=float(valor or 0), step=1.0, key=f"{key_base}_{columna}")
         else:
-            payload[col] = st.text_input(etiqueta, value=txt, key=f"{key_base}_{col}")
-
+            fecha_parseada = parsear_fecha(valor)
+            if fecha_parseada and str(columna).lower() == "fecha":
+                try:
+                    payload[columna] = str(st.date_input(label, value=pd.to_datetime(fecha_parseada).date(), key=f"{key_base}_{columna}"))
+                except Exception:
+                    payload[columna] = limpiar_texto(
+                        st.text_input(label, value=limpiar_texto(valor_widget), key=f"{key_base}_{columna}")
+                    )
+            elif isinstance(valor, str) and len(valor) > 80:
+                payload[columna] = st.text_area(label, value=limpiar_texto(valor_widget), key=f"{key_base}_{columna}")
+            else:
+                payload[columna] = limpiar_texto(
+                    st.text_input(label, value=limpiar_texto(valor_widget), key=f"{key_base}_{columna}")
+                )
     return payload
 
 
-def crud_pro_tabla(tabla: str, permitir_anular: bool = True, permitir_eliminar: bool = True):
-    st.title(f"🛠️ CRUD PRO · {tabla}")
-    df = leer_tabla(tabla)
-
+def mostrar_tabla_pro(tabla: str, key_base: str, ocultar_anulados: bool = False):
+    df = DATA.get(tabla, pd.DataFrame()).copy()
     if df.empty:
-        st.info("No hay registros en esta tabla.")
-        return
+        st.info("No hay registros.")
+        return df
 
-    txt = st.text_input("Buscar", key=f"crud_buscar_{tabla}")
+    if ocultar_anulados and "anulado" in df.columns:
+        df = df[df["anulado"] != True]
+
+    txt = st.text_input("Buscar en la tabla", key=f"buscar_{key_base}")
     if txt:
         df = buscar_df(df, txt)
 
-    st.subheader("📋 Registros")
     st.dataframe(df, use_container_width=True)
+    return df
 
-    if "id" not in df.columns:
-        st.warning("Esta tabla no tiene columna id. No se puede editar ni eliminar desde aquí.")
+
+def render_crud_panel(tabla: str, key_base: str | None = None):
+    key_base = key_base or tabla
+    df = DATA.get(tabla, pd.DataFrame()).copy()
+
+    if df.empty:
+        st.info("No hay datos en esta tabla.")
         return
 
-    opciones = df["id"].tolist()
-    fila_id = st.selectbox("Selecciona el ID a trabajar", opciones, key=f"crud_id_{tabla}")
-    fila = df[df["id"] == fila_id].iloc[0]
+    if "id" not in df.columns:
+        st.warning("Esta tabla no tiene columna id, por lo que no se puede editar desde la app.")
+        return
 
-    st.subheader("✏️ Editar registro")
-    with st.form(f"form_editar_{tabla}"):
-        payload = construir_payload_desde_fila(df, fila, f"edit_{tabla}_{fila_id}")
-        guardar = st.form_submit_button("💾 Guardar cambios")
-        if guardar:
-            if actualizar(tabla, fila_id, payload):
-                st.success("Registro actualizado correctamente.")
-                st.rerun()
+    ids = df["id"].dropna().tolist()
+    if not ids:
+        st.info("No hay registros con id.")
+        return
 
-    c1, c2 = st.columns(2)
-
+    st.markdown(f"### ⚙️ CRUD PRO · {tabla}")
+    c0, c1 = st.columns([1, 1])
+    with c0:
+        ocultar_anulados = st.checkbox("Ocultar anulados en la vista", value=False, key=f"ocultar_{key_base}")
     with c1:
-        st.subheader("🗑️ Eliminar")
-        confirmar_eliminar = st.checkbox(
-            "Confirmo que quiero eliminar físicamente este registro",
-            key=f"confirmar_eliminar_{tabla}_{fila_id}",
-        )
-        if st.button("Eliminar definitivo", key=f"btn_eliminar_{tabla}_{fila_id}", disabled=not permitir_eliminar):
-            if not permitir_eliminar:
-                st.warning("En esta tabla se recomienda anular en vez de eliminar.")
-            elif not confirmar_eliminar:
-                st.warning("Debes confirmar antes de eliminar.")
-            elif eliminar(tabla, fila_id):
-                st.success("Registro eliminado correctamente.")
+        st.caption("Edita, elimina o anula sin salir del módulo.")
+
+    vista_df = df.copy()
+    if ocultar_anulados and "anulado" in vista_df.columns:
+        vista_df = vista_df[vista_df["anulado"] != True]
+    st.dataframe(vista_df, use_container_width=True)
+
+    tabs = st.tabs(["✏️ Editar", "🗑️ Eliminar", "🟡 Anular", "➕ Crear manual"])
+
+    with tabs[0]:
+        id_editar = st.selectbox("Selecciona el ID a editar", ids, key=f"{key_base}_id_editar")
+        fila = df[df["id"] == id_editar].iloc[0]
+        with st.form(f"form_editar_{key_base}"):
+            payload = construir_payload_desde_fila(fila, f"edit_{key_base}_{id_editar}")
+            submitted = st.form_submit_button("Guardar cambios")
+        if submitted:
+            if actualizar(tabla, id_editar, payload):
+                st.success("Registro actualizado correctamente.")
+                refrescar_datos()
                 st.rerun()
 
-    with c2:
-        st.subheader("🚫 Anular")
-        motivo = st.text_area("Motivo de anulación", key=f"motivo_anular_{tabla}_{fila_id}")
-        if st.button("Anular registro", key=f"btn_anular_{tabla}_{fila_id}", disabled=not permitir_anular):
-            if not permitir_anular:
-                st.warning("Esta tabla normalmente se maneja con eliminar, no con anular.")
-            elif anular(tabla, fila_id, motivo):
-                st.success("Registro anulado correctamente.")
+    with tabs[1]:
+        id_eliminar = st.selectbox("Selecciona el ID a eliminar", ids, key=f"{key_base}_id_eliminar")
+        confirmar = st.checkbox("Confirmo que deseo eliminar este registro de verdad", key=f"{key_base}_confirmar_eliminar")
+        if st.button("Eliminar registro", key=f"{key_base}_btn_eliminar"):
+            if not confirmar:
+                st.error("Debes confirmar antes de eliminar.")
+            else:
+                if eliminar(tabla, id_eliminar):
+                    st.success("Registro eliminado.")
+                    refrescar_datos()
+                    st.rerun()
+
+    with tabs[2]:
+        if tabla_es_anulable(tabla):
+            id_anular = st.selectbox("Selecciona el ID a anular", ids, key=f"{key_base}_id_anular")
+            motivo = st.text_area("Motivo de anulación", key=f"{key_base}_motivo_anular")
+            if st.button("Anular registro", key=f"{key_base}_btn_anular"):
+                if anular(tabla, id_anular, motivo):
+                    st.warning("Registro anulado.")
+                    refrescar_datos()
+                    st.rerun()
+        else:
+            st.info("En esta tabla se recomienda editar o eliminar. La anulación está reservada para tablas transaccionales.")
+
+    with tabs[3]:
+        columnas_creables = [c for c in df.columns if c != "id"]
+        with st.form(f"form_crear_{key_base}"):
+            nuevo = {}
+            for columna in columnas_creables:
+                serie = df[columna].dropna()
+                ejemplo = serie.iloc[0] if not serie.empty else ""
+                label = columna.replace("_", " ").title()
+
+                if isinstance(ejemplo, (bool,)) or columna.lower() in {"activo", "anulado"}:
+                    nuevo[columna] = st.checkbox(label, value=False, key=f"crear_{key_base}_{columna}")
+                elif isinstance(ejemplo, (int, float)) and not isinstance(ejemplo, bool):
+                    nuevo[columna] = st.number_input(label, value=0.0, step=1.0, key=f"crear_{key_base}_{columna}")
+                elif columna.lower() == "fecha":
+                    nuevo[columna] = str(st.date_input(label, value=date.today(), key=f"crear_{key_base}_{columna}"))
+                else:
+                    nuevo[columna] = limpiar_texto(st.text_input(label, key=f"crear_{key_base}_{columna}"))
+            crear_ok = st.form_submit_button("Crear nuevo registro")
+        if crear_ok:
+            nuevo = {k: v for k, v in nuevo.items() if not (isinstance(v, str) and v == "")}
+            if insertar(tabla, nuevo):
+                st.success("Registro creado.")
+                refrescar_datos()
                 st.rerun()
+
+
+def render_crud_menu_global():
+    st.title("🧰 CRUD PRO EMPRESA")
+    st.caption("Edita, elimina, anula o crea registros desde un solo lugar.")
+
+    tabla = st.selectbox("Selecciona la tabla", TABLAS_SISTEMA, key="crud_pro_tabla")
+    if tabla not in DATA:
+        st.info("Tabla no disponible.")
+        return
+
+    render_crud_panel(tabla, key_base=f"global_{tabla}")
 
 
 # =========================================================
@@ -1078,6 +1092,8 @@ elif menu == "Productos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "productos")
+        with st.expander("⚙️ CRUD PRO Productos", expanded=False):
+            render_crud_panel("productos", key_base="productos_mod")
     else:
         st.info("No hay productos registrados.")
 
@@ -1423,6 +1439,8 @@ elif menu == "Ventas":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ventas")
+        with st.expander("⚙️ CRUD PRO Ventas", expanded=False):
+            render_crud_panel("ventas", key_base="ventas_mod")
     else:
         st.info("No hay ventas registradas.")
 
@@ -1496,6 +1514,8 @@ elif menu == "Compras":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "compras")
+        with st.expander("⚙️ CRUD PRO Compras", expanded=False):
+            render_crud_panel("compras", key_base="compras_mod")
     else:
         st.info("No hay compras registradas.")
 
@@ -1540,6 +1560,8 @@ elif menu == "Catálogo de Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "catalogo_gastos")
+        with st.expander("⚙️ CRUD PRO Catálogo", expanded=False):
+            render_crud_panel("catalogo_gastos", key_base="catalogo_mod")
     else:
         st.info("No hay catálogo de gastos.")
 
@@ -1633,6 +1655,8 @@ elif menu == "Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos")
+        with st.expander("⚙️ CRUD PRO Gastos", expanded=False):
+            render_crud_panel("gastos", key_base="gastos_mod")
     else:
         st.info("No hay gastos registrados.")
 
@@ -1707,6 +1731,8 @@ elif menu == "Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "empleados")
+        with st.expander("⚙️ CRUD PRO Empleados", expanded=False):
+            render_crud_panel("empleados", key_base="empleados_mod")
     else:
         st.info("No hay empleados registrados.")
 
@@ -1744,6 +1770,8 @@ elif menu == "Adelantos Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "adelantos_empleados")
+        with st.expander("⚙️ CRUD PRO Adelantos", expanded=False):
+            render_crud_panel("adelantos_empleados", key_base="adelantos_mod")
     else:
         st.info("No hay adelantos registrados.")
 
@@ -1780,6 +1808,8 @@ elif menu == "Pérdidas":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "perdidas")
+        with st.expander("⚙️ CRUD PRO Pérdidas", expanded=False):
+            render_crud_panel("perdidas", key_base="perdidas_mod")
     else:
         st.info("No hay pérdidas registradas.")
 
@@ -1815,6 +1845,8 @@ elif menu == "Gastos Dueño":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos_dueno")
+        with st.expander("⚙️ CRUD PRO Gastos Dueño", expanded=False):
+            render_crud_panel("gastos_dueno", key_base="dueno_mod")
     else:
         st.info("No hay gastos del dueño registrados.")
 
@@ -1872,6 +1904,8 @@ elif menu == "Cierre de Caja":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "cierre_caja")
+        with st.expander("⚙️ CRUD PRO Cierre de Caja", expanded=False):
+            render_crud_panel("cierre_caja", key_base="caja_mod")
     else:
         st.info("No hay cierres de caja registrados.")
 
@@ -2043,36 +2077,8 @@ elif menu == "Reportes":
 # CRUD PRO
 # =========================================================
 elif menu == "CRUD PRO":
-    tabla = st.selectbox(
-        "Tabla",
-        [
-            "productos",
-            "empleados",
-            "catalogo_gastos",
-            "adelantos_empleados",
-            "ventas",
-            "compras",
-            "gastos",
-            "perdidas",
-            "gastos_dueno",
-            "cierre_caja",
-            "inventario_actual",
-            "conteo_inventario",
-            "ajustes_inventario",
-            "estado_resultados",
-        ],
-        key="crud_tabla_general",
-    )
+    render_crud_menu_global()
 
-    tablas_transaccionales = {"ventas", "compras", "gastos", "perdidas", "gastos_dueno", "cierre_caja", "estado_resultados"}
-    permitir_anular = tabla in tablas_transaccionales
-    permitir_eliminar = not permitir_anular
-
-    st.info(
-        "Productos, empleados, catálogo y adelantos: usa eliminar. "
-        "Ventas, compras, gastos, pérdidas, cierre y similares: usa anular."
-    )
-    crud_pro_tabla(tabla, permitir_anular=permitir_anular, permitir_eliminar=permitir_eliminar)
 
 # =========================================================
 # AUDITORÍA
