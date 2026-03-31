@@ -39,6 +39,34 @@ except Exception as exc:
     st.stop()
 
 
+
+
+# =========================================================
+# UTILIDADES BÁSICAS TEMPRANAS (PARA LOGIN)
+# =========================================================
+def limpiar_texto(valor: Any) -> str:
+    try:
+        if pd.isna(valor):
+            return ""
+    except Exception:
+        pass
+    return str(valor).strip()
+
+
+def quitar_acentos(texto: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)
+    )
+
+
+def normalizar_texto(valor: Any) -> str:
+    txt = limpiar_texto(valor).lower()
+    txt = quitar_acentos(txt)
+    txt = txt.replace("-", " ").replace("_", " ")
+    txt = " ".join(txt.split())
+    return txt
+
+
 # =========================================================
 # LOGIN POR USUARIO / CONTRASEÑA
 # =========================================================
@@ -138,29 +166,6 @@ if not login_simple():
 # =========================================================
 def ahora_str() -> str:
     return date.today().isoformat()
-
-
-
-def limpiar_texto(valor: Any) -> str:
-    if pd.isna(valor):
-        return ""
-    return str(valor).strip()
-
-
-
-def quitar_acentos(texto: str) -> str:
-    return "".join(
-        c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)
-    )
-
-
-
-def normalizar_texto(valor: Any) -> str:
-    txt = limpiar_texto(valor).lower()
-    txt = quitar_acentos(txt)
-    txt = txt.replace("-", " ").replace("_", " ")
-    txt = " ".join(txt.split())
-    return txt
 
 
 
@@ -2662,4 +2667,3 @@ elif menu == "Configuración":
                     st.rerun()
             if cfg.get("logo_url"):
                 st.image(cfg.get("logo_url"), width=220)
-
