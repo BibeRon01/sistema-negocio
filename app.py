@@ -182,11 +182,26 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def limpiar_numero(valor: Any) -> float | None:
-    if pd.isna(valor) or valor == "":
+    if valor is None:
         return None
-    if isinstance(valor, (int, float)):
+    if isinstance(valor, pd.Series):
+        if valor.empty:
+            return None
+        valor = valor.iloc[0]
+    if isinstance(valor, (list, tuple)):
+        if not valor:
+            return None
+        valor = valor[0]
+    if isinstance(valor, (int, float)) and not pd.isna(valor):
         return float(valor)
+    try:
+        if pd.isna(valor):
+            return None
+    except Exception:
+        pass
     txt = str(valor).strip()
+    if txt == "":
+        return None
     txt = txt.replace("RD$", "").replace("rd$", "").replace("$", "")
     txt = txt.replace(",", "")
     txt = txt.replace(" ", "")
@@ -697,9 +712,41 @@ def actualizar_stock_producto(nombre: str, nueva_cantidad: float, fecha_mov=None
     if fila is None:
         return False
     payload = {"cantidad": float(nueva_cantidad)}
+    if "stock" in fila.index:
+        payload["stock"] = float(nueva_cantidad)
     if fecha_mov is not None:
         payload["fecha"] = str(fecha_mov)
-    return actualizar("productos", fila["id"], payload)
+    ok = actualizar("productos", fila["id"], payload)
+    if ok:
+        try:
+            upsert_inventario_actual(
+                nombre,
+                float(limpiar_numero(fila.get("costo")) or 0),
+                float(limpiar_numero(fila.get("precio")) or 0),
+                float(nueva_cantidad),
+                fecha_mov or date.today(),
+                "Actualizado desde ajuste manual",
+            )
+        except Exception:
+            pass
+    return ok
+
+
+def obtener_stock_desde_fuente(producto_row: pd.Series) -> float:
+    if producto_row is None:
+        return 0.0
+    return float(limpiar_numero(producto_row.get("cantidad")) or limpiar_numero(producto_row.get("stock")) or 0.0)
+
+
+def aplicar_conteo_a_producto(producto: str, existencia_fisica: float, fecha_mov, observacion: str = "") -> bool:
+    fila_prod = get_producto_por_nombre(producto)
+    if fila_prod is None:
+        return False
+    costo = float(limpiar_numero(fila_prod.get("costo")) or 0)
+    precio = float(limpiar_numero(fila_prod.get("precio")) or 0)
+    ok1 = actualizar_stock_producto(producto, existencia_fisica, fecha_mov)
+    ok2 = upsert_inventario_actual(producto, costo, precio, existencia_fisica, fecha_mov, observacion or "Conteo aplicado manualmente")
+    return bool(ok1 and ok2)
 
 
 
@@ -957,79 +1004,6 @@ def serie_periodica(df: pd.DataFrame, columna: str, frecuencia: str = "M") -> pd
     return out
 
 
-
-
-def usuario_id_actual():
-    user = usuario_sesion()
-    return user.get("id")
-
-
-def obtener_caja_abierta():
-    usuario_id = usuario_id_actual()
-    if not usuario_id:
-        return None
-    try:
-        resp = (
-            supabase.table("caja")
-            .select("*")
-            .eq("usuario_id", str(usuario_id))
-            .eq("estado", "abierta")
-            .order("fecha_apertura", desc=True)
-            .limit(1)
-            .execute()
-        )
-        filas = resp.data or []
-        return filas[0] if filas else None
-    except Exception:
-        return None
-
-
-def abrir_caja(monto_inicial: float, observacion: str = "") -> tuple[bool, str]:
-    if obtener_caja_abierta() is not None:
-        return False, "Ya tienes una caja abierta."
-    usuario_id = usuario_id_actual()
-    if not usuario_id:
-        return False, "No se encontró el usuario actual."
-    try:
-        supabase.table("caja").insert({
-            "usuario_id": str(usuario_id),
-            "fecha_apertura": datetime.now().isoformat(),
-            "monto_inicial": float(monto_inicial),
-            "estado": "abierta",
-            "dia_operativo": ahora_str(),
-            "observacion": observacion,
-            "anulado": False,
-        }).execute()
-        registrar_auditoria("abrir_caja", "caja", f"monto_inicial={monto_inicial}")
-        return True, "Caja abierta correctamente."
-    except Exception as exc:
-        return False, f"No se pudo abrir caja: {exc}"
-
-
-def cerrar_caja(caja_row: dict, monto_cierre: float, observacion: str = "") -> tuple[bool, str]:
-    try:
-        monto_inicial = float(limpiar_numero(caja_row.get("monto_inicial")) or 0)
-        diferencia = float(monto_cierre) - monto_inicial
-        supabase.table("caja").update({
-            "fecha_cierre": datetime.now().isoformat(),
-            "monto_cierre": float(monto_cierre),
-            "diferencia": float(diferencia),
-            "observacion": observacion or caja_row.get("observacion") or "",
-            "estado": "cerrada",
-        }).eq("id", caja_row["id"]).execute()
-        insertar("cierre_caja", {
-            "fecha": datetime.now().isoformat(),
-            "apertura": monto_inicial,
-            "efectivo_sistema": monto_inicial,
-            "efectivo_fisico": float(monto_cierre),
-            "diferencia": float(diferencia),
-            "detalle": observacion,
-        })
-        registrar_auditoria("cerrar_caja", "caja", f"id={caja_row['id']} monto_cierre={monto_cierre}")
-        return True, "Caja cerrada correctamente."
-    except Exception as exc:
-        return False, f"No se pudo cerrar caja: {exc}"
-
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1074,14 +1048,18 @@ menu_base = [
 ]
 
 if es_admin() or tiene_permiso("puede_configurar"):
-    menu_opciones = ["Dashboard", "Caja"] + [m for m in menu_base if m not in ["Dashboard", "Cierre de Caja"]]
+    menu_opciones = menu_base
 else:
-    menu_opciones = []
+    menu_opciones = ["Dashboard"]
     if tiene_permiso("puede_vender"):
-        menu_opciones += ["Caja", "POS", "Ventas"]
+        menu_opciones += ["POS", "Ventas", "Cierre de Caja"]
+    if tiene_permiso("puede_registrar_compras"):
+        menu_opciones += ["Compras", "Proveedores", "Productos", "Inventario Actual"]
+    if tiene_permiso("puede_registrar_gastos"):
+        menu_opciones += ["Gastos", "Catálogo de Gastos", "Gastos Dueño"]
     if tiene_permiso("puede_ver_reportes"):
-        menu_opciones += ["Clientes", "Créditos"]
-    menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
+        menu_opciones += ["Reportes", "Estado de Resultados", "Auditoría", "Clientes", "Créditos"]
+    menu_opciones = list(dict.fromkeys(menu_opciones))
 
 menu = st.sidebar.selectbox("Menú", menu_opciones)
 
@@ -1398,138 +1376,183 @@ elif menu == "Inventario Actual":
 # =========================================================
 elif menu == "Conteo Inventario":
     st.title("🧮 Conteo de Inventario")
+    st.caption("Aquí cuentas físicamente lo que hay en el negocio. El sistema toma la existencia desde productos y luego tú decides si aplicar ajuste o enviar faltante a pérdidas.")
 
-    with st.expander("📥 Subir conteo físico por Excel / CSV", expanded=True):
-        st.write("Columnas esperadas: producto o nombre, existencia_fisica o cantidad.")
-        archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_conteo")
-        fecha_conteo = st.date_input("Fecha del conteo", value=date.today(), key="fecha_conteo")
-
-        if archivo is not None and st.button("Procesar conteo"):
-            df = leer_archivo_subido(archivo)
-            df = df.rename(columns={"nombre": "producto", "cantidad": "existencia_fisica"})
-            faltan = [c for c in ["producto", "existencia_fisica"] if c not in df.columns]
-            if faltan:
-                st.error(f"Faltan columnas: {faltan}")
-            else:
-                procesados = 0
-                for _, row in df.iterrows():
-                    producto = limpiar_texto(row["producto"])
-                    if not producto:
-                        continue
-                    fila_prod = get_producto_por_nombre(producto)
-                    existencia_sistema = float(limpiar_numero(fila_prod.get("cantidad")) or 0) if fila_prod is not None else 0.0
-                    existencia_fisica = float(limpiar_numero(row["existencia_fisica"]) or 0)
-                    diferencia = existencia_fisica - existencia_sistema
-
-                    if diferencia == 0:
-                        estado = "cuadrado"
-                    elif diferencia < 0:
-                        estado = "faltante"
-                    else:
-                        estado = "sobrante"
-
-                    insertar(
-                        "conteo_inventario",
-                        {
-                            "fecha": str(fecha_conteo),
-                            "producto": producto,
-                            "existencia_sistema": existencia_sistema,
-                            "existencia_fisica": existencia_fisica,
-                            "diferencia": diferencia,
-                            "estado": estado,
-                            "observacion": "",
-                        },
-                    )
-                    procesados += 1
-                st.success(f"Se procesaron {procesados} filas de conteo.")
-                st.rerun()
-
-    conteo = DATA["conteo_inventario"].copy()
-    if not conteo.empty:
-        st.subheader("📋 Conteos guardados")
-        d1, d2 = rango_fechas_ui("conteo_inv")
-        conteo_f = filtrar_por_fechas(conteo, d1, d2)
-        estado_filtro = st.selectbox("Filtrar por estado", ["Todos", "cuadrado", "faltante", "sobrante"], key="filtro_estado_conteo")
-        if estado_filtro != "Todos" and "estado" in conteo_f.columns:
-            conteo_f = conteo_f[conteo_f["estado"].astype(str).str.lower() == estado_filtro]
-
-        st.dataframe(conteo_f, use_container_width=True)
-        descargar_archivos(conteo_f, "conteo_inventario")
-
-        st.subheader("⚙️ Procesar faltantes y sobrantes")
-        pendientes = conteo_f[conteo_f["estado"].astype(str).str.lower().isin(["faltante", "sobrante"])] if not conteo_f.empty else pd.DataFrame()
-        if not pendientes.empty:
-            opciones = pendientes.apply(
-                lambda r: f"{r['producto']} | sistema: {r['existencia_sistema']} | físico: {r['existencia_fisica']} | estado: {r['estado']}",
-                axis=1,
-            ).tolist()
-            sel = st.selectbox("Selecciona una fila", opciones, key="conteo_sel")
-            fila = pendientes.iloc[opciones.index(sel)]
-
-            producto = fila["producto"]
-            existencia_sistema = float(fila["existencia_sistema"])
-            existencia_fisica = float(fila["existencia_fisica"])
-            diferencia = float(fila["diferencia"])
-            fecha_mov = pd.to_datetime(fila["fecha"]).date()
-
-            fila_prod = get_producto_por_nombre(producto)
-            costo = float(limpiar_numero(fila_prod.get("costo")) or 0) if fila_prod is not None else 0.0
-            precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
-
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if diferencia < 0 and st.button("Enviar este faltante a pérdidas"):
-                    cant_perdida = abs(diferencia)
-                    ok1 = registrar_perdida(
-                        fecha_mov,
-                        producto,
-                        cant_perdida,
-                        costo,
-                        "mercancia",
-                        f"Generado desde conteo. Sistema: {existencia_sistema}, físico: {existencia_fisica}",
-                    )
-                    ok2 = actualizar_stock_producto(producto, existencia_fisica, fecha_mov)
-                    ok3 = upsert_inventario_actual(producto, costo, precio, existencia_fisica, fecha_mov, "Ajustado por conteo a pérdida")
-                    if ok1 and ok2 and ok3:
-                        st.success("Faltante enviado a pérdidas y stock ajustado.")
-                        st.rerun()
-
-            with col2:
-                if diferencia > 0 and st.button("Aplicar ajuste positivo"):
-                    ok2 = actualizar_stock_producto(producto, existencia_fisica, fecha_mov)
-                    ok3 = upsert_inventario_actual(producto, costo, precio, existencia_fisica, fecha_mov, "Ajuste positivo por conteo")
-                    if ok2 and ok3:
-                        st.success("Ajuste positivo aplicado.")
-                        st.rerun()
-
-            with col3:
-                if st.button("Marcar pendiente / dejar como está"):
-                    st.info("No se hizo cambio en inventario. Queda el registro para revisión.")
-
-            faltantes_df = pendientes[pendientes["estado"].astype(str).str.lower() == "faltante"]
-            if not faltantes_df.empty and st.button("Enviar TODOS los faltantes del filtro a pérdidas"):
-                count = 0
-                for _, r in faltantes_df.iterrows():
-                    prod = r["producto"]
-                    fis = float(r["existencia_fisica"])
-                    sist = float(r["existencia_sistema"])
-                    dif = abs(float(r["diferencia"]))
-                    ff = pd.to_datetime(r["fecha"]).date()
-                    p = get_producto_por_nombre(prod)
-                    c = float(limpiar_numero(p.get("costo")) or 0) if p is not None else 0.0
-                    pr = float(limpiar_numero(p.get("precio")) or 0) if p is not None else 0.0
-                    registrar_perdida(ff, prod, dif, c, "mercancia", f"Generado masivamente desde conteo. Sistema: {sist}, físico: {fis}")
-                    actualizar_stock_producto(prod, fis, ff)
-                    upsert_inventario_actual(prod, c, pr, fis, ff, "Ajustado por envío masivo a pérdidas")
-                    count += 1
-                st.success(f"Se enviaron {count} faltantes a pérdidas.")
-                st.rerun()
-        else:
-            st.info("No hay faltantes ni sobrantes en el filtro seleccionado.")
+    productos_base = DATA["productos"].copy()
+    if productos_base.empty:
+        st.info("No hay productos para contar.")
     else:
-        st.info("No hay conteos registrados.")
+        if "activo" in productos_base.columns:
+            productos_base = productos_base[productos_base["activo"] == True]
+        productos_base = productos_base.copy()
+        productos_base["existencia_sistema"] = productos_base.apply(obtener_stock_desde_fuente, axis=1)
 
+        with st.expander("➕ Conteo manual por producto", expanded=True):
+            opciones = []
+            mapa_prod = {}
+            for _, row in productos_base.iterrows():
+                etiqueta = f"{obtener_nombre_producto(row)} | Stock sistema: {obtener_stock_desde_fuente(row):,.2f}"
+                opciones.append(etiqueta)
+                mapa_prod[etiqueta] = row
 
+            producto_sel = st.selectbox("Producto a contar", opciones, key="conteo_manual_producto") if opciones else None
+            fecha_conteo = st.date_input("Fecha del conteo", value=date.today(), key="fecha_conteo_manual")
+            existencia_fisica = st.number_input("Existencia física contada", min_value=0.0, step=1.0, key="conteo_existencia_fisica")
+            observacion = st.text_area("Observación", key="conteo_obs_manual")
+
+            if st.button("Guardar conteo manual", key="btn_guardar_conteo_manual") and producto_sel:
+                prod = mapa_prod[producto_sel]
+                producto = obtener_nombre_producto(prod)
+                existencia_sistema = obtener_stock_desde_fuente(prod)
+                diferencia = float(existencia_fisica) - float(existencia_sistema)
+
+                if diferencia == 0:
+                    estado = "cuadrado"
+                elif diferencia < 0:
+                    estado = "faltante"
+                else:
+                    estado = "sobrante"
+
+                ok = insertar(
+                    "conteo_inventario",
+                    {
+                        "fecha": str(fecha_conteo),
+                        "producto": producto,
+                        "existencia_sistema": float(existencia_sistema),
+                        "existencia_fisica": float(existencia_fisica),
+                        "diferencia": float(diferencia),
+                        "estado": estado,
+                        "observacion": observacion,
+                    },
+                )
+                if ok:
+                    st.success("Conteo guardado.")
+                    st.rerun()
+
+        with st.expander("📥 Subir conteo físico por Excel / CSV", expanded=False):
+            st.write("Columnas esperadas: producto o nombre, existencia_fisica o cantidad.")
+            archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_conteo")
+            fecha_conteo = st.date_input("Fecha del conteo archivo", value=date.today(), key="fecha_conteo_archivo")
+
+            if archivo is not None and st.button("Procesar conteo archivo", key="btn_procesar_conteo_archivo"):
+                df = leer_archivo_subido(archivo)
+                df = df.rename(columns={"nombre": "producto", "cantidad": "existencia_fisica"})
+                faltan = [c for c in ["producto", "existencia_fisica"] if c not in df.columns]
+                if faltan:
+                    st.error(f"Faltan columnas: {faltan}")
+                else:
+                    procesados = 0
+                    for _, row in df.iterrows():
+                        producto = limpiar_texto(row.get("producto"))
+                        if not producto:
+                            continue
+                        fila_prod = get_producto_por_nombre(producto)
+                        existencia_sistema = obtener_stock_desde_fuente(fila_prod) if fila_prod is not None else 0.0
+                        existencia_fisica_val = float(limpiar_numero(row.get("existencia_fisica")) or 0)
+                        diferencia = existencia_fisica_val - existencia_sistema
+
+                        if diferencia == 0:
+                            estado = "cuadrado"
+                        elif diferencia < 0:
+                            estado = "faltante"
+                        else:
+                            estado = "sobrante"
+
+                        insertar(
+                            "conteo_inventario",
+                            {
+                                "fecha": str(fecha_conteo),
+                                "producto": producto,
+                                "existencia_sistema": float(existencia_sistema),
+                                "existencia_fisica": float(existencia_fisica_val),
+                                "diferencia": float(diferencia),
+                                "estado": estado,
+                                "observacion": "",
+                            },
+                        )
+                        procesados += 1
+                    st.success(f"Se procesaron {procesados} filas de conteo.")
+                    st.rerun()
+
+        conteo = DATA["conteo_inventario"].copy()
+        if not conteo.empty:
+            st.subheader("📋 Conteos guardados")
+            d1, d2 = rango_fechas_ui("conteo_inv")
+            conteo_f = filtrar_por_fechas(conteo, d1, d2)
+            estado_filtro = st.selectbox("Filtrar por estado", ["Todos", "cuadrado", "faltante", "sobrante"], key="filtro_estado_conteo")
+            if estado_filtro != "Todos" and "estado" in conteo_f.columns:
+                conteo_f = conteo_f[conteo_f["estado"].astype(str).str.lower() == estado_filtro]
+
+            st.dataframe(conteo_f, use_container_width=True)
+            descargar_archivos(conteo_f, "conteo_inventario")
+
+            st.subheader("⚙️ Aplicar ajuste o enviar a pérdidas")
+            pendientes = conteo_f[conteo_f["estado"].astype(str).str.lower().isin(["faltante", "sobrante"])] if not conteo_f.empty else pd.DataFrame()
+            if not pendientes.empty:
+                opciones = pendientes.apply(
+                    lambda r: f"{r['producto']} | sistema: {r['existencia_sistema']} | físico: {r['existencia_fisica']} | estado: {r['estado']}",
+                    axis=1,
+                ).tolist()
+                sel = st.selectbox("Selecciona una fila", opciones, key="conteo_sel")
+                fila = pendientes.iloc[opciones.index(sel)]
+
+                producto = limpiar_texto(fila["producto"])
+                existencia_sistema = float(limpiar_numero(fila.get("existencia_sistema")) or 0)
+                existencia_fisica_sel = float(limpiar_numero(fila.get("existencia_fisica")) or 0)
+                diferencia = float(limpiar_numero(fila.get("diferencia")) or 0)
+                fecha_mov = pd.to_datetime(fila["fecha"]).date()
+
+                fila_prod = get_producto_por_nombre(producto)
+                costo = float(limpiar_numero(fila_prod.get("costo")) or 0) if fila_prod is not None else 0.0
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if diferencia < 0 and st.button("Enviar este faltante a pérdidas", key="btn_faltante_perdida_uno"):
+                        cant_perdida = abs(diferencia)
+                        ok1 = registrar_perdida(
+                            fecha_mov,
+                            producto,
+                            cant_perdida,
+                            costo,
+                            "mercancia",
+                            f"Generado desde conteo. Sistema: {existencia_sistema}, físico: {existencia_fisica_sel}",
+                        )
+                        ok2 = aplicar_conteo_a_producto(producto, existencia_fisica_sel, fecha_mov, "Ajustado por conteo a pérdida")
+                        if ok1 and ok2:
+                            st.success("Faltante enviado a pérdidas y stock ajustado.")
+                            st.rerun()
+
+                with col2:
+                    if st.button("Aplicar ajuste al stock", key="btn_aplicar_ajuste_conteo"):
+                        ok = aplicar_conteo_a_producto(producto, existencia_fisica_sel, fecha_mov, "Ajuste aplicado desde conteo")
+                        if ok:
+                            st.success("Ajuste aplicado al inventario.")
+                            st.rerun()
+
+                with col3:
+                    if st.button("Marcar pendiente / dejar como está", key="btn_dejar_pendiente_conteo"):
+                        st.info("No se hizo cambio en inventario. Queda el registro para revisión.")
+
+                faltantes_df = pendientes[pendientes["estado"].astype(str).str.lower() == "faltante"]
+                if not faltantes_df.empty and st.button("Enviar TODOS los faltantes del filtro a pérdidas", key="btn_faltantes_perdidas_todos"):
+                    count = 0
+                    for _, r in faltantes_df.iterrows():
+                        prod = limpiar_texto(r["producto"])
+                        fis = float(limpiar_numero(r.get("existencia_fisica")) or 0)
+                        sist = float(limpiar_numero(r.get("existencia_sistema")) or 0)
+                        dif = abs(float(limpiar_numero(r.get("diferencia")) or 0))
+                        ff = pd.to_datetime(r["fecha"]).date()
+                        p = get_producto_por_nombre(prod)
+                        c = float(limpiar_numero(p.get("costo")) or 0) if p is not None else 0.0
+                        registrar_perdida(ff, prod, dif, c, "mercancia", f"Generado masivamente desde conteo. Sistema: {sist}, físico: {fis}")
+                        aplicar_conteo_a_producto(prod, fis, ff, "Ajustado por envío masivo a pérdidas")
+                        count += 1
+                    st.success(f"Se enviaron {count} faltantes a pérdidas.")
+                    st.rerun()
+            else:
+                st.info("No hay faltantes ni sobrantes en el filtro seleccionado.")
+        else:
+            st.info("No hay conteos registrados.")
 # =========================================================
 # AJUSTES INVENTARIO
 # =========================================================
@@ -2063,6 +2086,7 @@ elif menu == "Adelantos Empleados":
 # =========================================================
 elif menu == "Pérdidas":
     st.title("📉 Pérdidas")
+    st.caption("Puedes registrar pérdidas manualmente aunque no vengan de conteo.")
 
     productos_lista = DATA["productos"]["nombre"].astype(str).tolist() if not DATA["productos"].empty and "nombre" in DATA["productos"].columns else []
 
@@ -2132,63 +2156,48 @@ elif menu == "Gastos Dueño":
 # =========================================================
 # CIERRE DE CAJA
 # =========================================================
-elif menu == "Caja":
-    st.title("💵 Caja")
-    caja_activa = obtener_caja_abierta()
+elif menu == "Cierre de Caja":
+    st.title("🧾 Cierre de Caja")
 
-    if caja_activa is None:
-        st.subheader("Abrir caja")
-        c1, c2 = st.columns(2)
-        with c1:
-            monto_inicial = st.number_input("Fondo inicial", min_value=0.0, step=1.0, key="caja_monto_inicial")
-        with c2:
-            observacion_apertura = st.text_input("Observación", key="caja_obs_apertura")
-        if st.button("Abrir caja", key="btn_abrir_caja"):
-            ok, msg = abrir_caja(monto_inicial, observacion_apertura)
-            if ok:
-                st.success(msg)
+    with st.expander("➕ Registrar cierre de caja", expanded=True):
+        fecha = st.date_input("Fecha de cierre", value=date.today(), key="caja_fecha")
+        apertura = st.number_input("Fondo / apertura", min_value=0.0, step=1.0, key="caja_apertura")
+
+        ventas_hoy = filtrar_por_fechas(DATA["ventas"], fecha, fecha)
+        compras_hoy = filtrar_por_fechas(DATA["compras"], fecha, fecha)
+        gastos_hoy = filtrar_por_fechas(DATA["gastos"], fecha, fecha)
+        adelantos_hoy = filtrar_por_fechas(DATA["adelantos_empleados"], fecha, fecha)
+        dueno_hoy = filtrar_por_fechas(DATA["gastos_dueno"], fecha, fecha)
+
+        ventas_efectivo = suma_col(ventas_hoy[ventas_hoy["metodo"].astype(str).str.lower() == "efectivo"], "total") if not ventas_hoy.empty and "metodo" in ventas_hoy.columns else 0.0
+        compras_efectivo = suma_col(compras_hoy[compras_hoy["metodo"].astype(str).str.lower() == "efectivo"], "monto") if not compras_hoy.empty and "metodo" in compras_hoy.columns else 0.0
+        gastos_efectivo = suma_col(gastos_hoy[gastos_hoy["metodo_pago"].astype(str).str.lower() == "efectivo"], "monto") if not gastos_hoy.empty and "metodo_pago" in gastos_hoy.columns else 0.0
+        adelantos_total = suma_col(adelantos_hoy, "monto")
+        dueno_total = suma_col(dueno_hoy, "monto")
+
+        efectivo_sistema = apertura + ventas_efectivo - compras_efectivo - gastos_efectivo - adelantos_total - dueno_total
+        st.info(f"Efectivo esperado en sistema: RD$ {efectivo_sistema:,.2f}")
+
+        efectivo_fisico = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_fisico")
+        detalle = st.text_area("Detalle / observación", key="caja_detalle")
+        diferencia = float(efectivo_fisico) - float(efectivo_sistema)
+        st.write(f"Diferencia: RD$ {diferencia:,.2f}")
+
+        if st.button("Guardar cierre de caja"):
+            if insertar(
+                "cierre_caja",
+                {
+                    "fecha": str(fecha),
+                    "apertura": float(apertura),
+                    "efectivo_sistema": float(efectivo_sistema),
+                    "efectivo_fisico": float(efectivo_fisico),
+                    "diferencia": float(diferencia),
+                    "detalle": detalle,
+                },
+            ):
+                st.success("Cierre de caja guardado.")
                 st.rerun()
-            else:
-                st.error(msg)
-    else:
-        st.success("Tienes una caja abierta.")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Apertura", f"RD$ {float(limpiar_numero(caja_activa.get('monto_inicial')) or 0):,.2f}")
-        c2.metric("Fecha apertura", limpiar_texto(caja_activa.get("fecha_apertura")))
-        c3.metric("Estado", limpiar_texto(caja_activa.get("estado")))
 
-        pagos_df = DATA.get("ventas_pagos", pd.DataFrame()).copy()
-        if not pagos_df.empty:
-            pagos_hoy = filtrar_por_fechas(pagos_df, date.today(), date.today())
-            if "usuario" in pagos_hoy.columns:
-                pagos_hoy = pagos_hoy[pagos_hoy["usuario"].astype(str) == nombre_usuario_actual()]
-        else:
-            pagos_hoy = pd.DataFrame()
-
-        efectivo_hoy = suma_col(pagos_hoy[pagos_hoy["metodo"].astype(str).str.lower() == "efectivo"], "monto") if not pagos_hoy.empty and "metodo" in pagos_hoy.columns else 0.0
-        transferencia_hoy = suma_col(pagos_hoy[pagos_hoy["metodo"].astype(str).str.lower() == "transferencia"], "monto") if not pagos_hoy.empty and "metodo" in pagos_hoy.columns else 0.0
-        tarjeta_hoy = suma_col(pagos_hoy[pagos_hoy["metodo"].astype(str).str.lower() == "tarjeta"], "monto") if not pagos_hoy.empty and "metodo" in pagos_hoy.columns else 0.0
-        credito_hoy = suma_col(pagos_hoy[pagos_hoy["metodo"].astype(str).str.lower() == "credito"], "monto") if not pagos_hoy.empty and "metodo" in pagos_hoy.columns else 0.0
-        total_ventas_hoy = efectivo_hoy + transferencia_hoy + tarjeta_hoy + credito_hoy
-
-        r1, r2, r3, r4 = st.columns(4)
-        r1.metric("Efectivo vendido", f"RD$ {efectivo_hoy:,.2f}")
-        r2.metric("Transferencia", f"RD$ {transferencia_hoy:,.2f}")
-        r3.metric("Tarjeta", f"RD$ {tarjeta_hoy:,.2f}")
-        r4.metric("Crédito", f"RD$ {credito_hoy:,.2f}")
-        st.info(f"Total vendido del usuario hoy: RD$ {total_ventas_hoy:,.2f}")
-
-        monto_cierre = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_monto_cierre")
-        observacion_cierre = st.text_area("Observación de cierre", key="caja_obs_cierre")
-        if st.button("Cerrar caja", key="btn_cerrar_caja"):
-            ok, msg = cerrar_caja(caja_activa, monto_cierre, observacion_cierre)
-            if ok:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-
-    st.subheader("Historial de cierres")
     df = DATA["cierre_caja"].copy()
     if not df.empty:
         d1, d2 = rango_fechas_ui("caja")
@@ -2203,7 +2212,6 @@ elif menu == "Caja":
 
 # =========================================================
 # ESTADO DE RESULTADOS
-
 # =========================================================
 elif menu == "Estado de Resultados":
     st.title("📊 Estado de Resultados")
@@ -2385,10 +2393,6 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
-    caja_activa = obtener_caja_abierta()
-    if caja_activa is None:
-        st.warning("Debes abrir la caja antes de vender.")
-        st.stop()
     cfg = obtener_configuracion()
     productos_df = DATA["productos"].copy()
     if not productos_df.empty and "activo" in productos_df.columns:
@@ -2517,7 +2521,6 @@ elif menu == "POS":
                             "cliente_id": cliente_id,
                             "cliente_nombre": cliente_nombre,
                             "usuario": nombre_usuario_actual(),
-                            "usuario_id": str(usuario_id_actual()) if usuario_id_actual() else None,
                             "dia_operativo": ahora_str(),
                             "ncf": ncf,
                             "tipo_venta": "POS",
@@ -2546,7 +2549,10 @@ elif menu == "POS":
                                 "anulado": False,
                             }).execute()
                             if producto_tiene_inventario(prod):
+                                nueva_cant = max(obtener_existencia_producto(prod) - float(item["cantidad"]), 0.0)
+                                actualizar_existencia_producto(prod, nueva_cant)
                                 aplicar_consumo_fifo(movimientos_fifo)
+                                registrar_movimiento_inventario(prod["id"], obtener_nombre_producto(prod), "salida_venta", "ventas", venta_id, -float(item["cantidad"]), costo_unit, "Salida por venta POS")
                         pagos = {"efectivo": pago_efectivo, "transferencia": pago_transferencia, "tarjeta": pago_tarjeta, "credito": pago_credito}
                         for metodo, monto in pagos.items():
                             if monto > 0:
@@ -2555,8 +2561,22 @@ elif menu == "POS":
                                     "metodo": metodo,
                                     "monto": float(monto),
                                     "usuario": nombre_usuario_actual(),
-                                    "fecha": datetime.now().isoformat(),
                                 }).execute()
+                                if metodo != "credito":
+                                    try:
+                                        supabase.table("movimientos_caja").insert({
+                                            "fecha": datetime.now().isoformat(),
+                                            "dia_operativo": ahora_str(),
+                                            "tipo_movimiento": "entrada",
+                                            "origen": "venta",
+                                            "referencia_id": str(venta_id),
+                                            "metodo_pago": metodo,
+                                            "monto": float(monto) if metodo != "tarjeta" else float(monto + recargo),
+                                            "descripcion": f"Venta POS {venta_id}",
+                                            "usuario": nombre_usuario_actual(),
+                                        }).execute()
+                                    except Exception:
+                                        pass
                         if pago_credito > 0:
                             supabase.table("cuentas_por_cobrar").insert({
                                 "cliente_id": cliente_id,
@@ -2567,7 +2587,6 @@ elif menu == "POS":
                                 "saldo_pendiente": float(pago_credito),
                                 "estado": "pendiente",
                                 "usuario": nombre_usuario_actual(),
-                                "fecha": datetime.now().isoformat(),
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
                         st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
