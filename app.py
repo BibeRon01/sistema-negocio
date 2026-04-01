@@ -2157,10 +2157,26 @@ elif menu == "Caja":
         c2.metric("Fecha apertura", limpiar_texto(caja_activa.get("fecha_apertura")))
         c3.metric("Estado", limpiar_texto(caja_activa.get("estado")))
 
-        ventas_hoy = filtrar_por_fechas(DATA["ventas"], date.today(), date.today())
-        ventas_usuario = ventas_hoy[ventas_hoy["usuario"].astype(str) == nombre_usuario_actual()] if not ventas_hoy.empty and "usuario" in ventas_hoy.columns else ventas_hoy
-        total_ventas_hoy = suma_col(ventas_usuario, "total")
-        st.info(f"Ventas del usuario hoy: RD$ {total_ventas_hoy:,.2f}")
+        pagos_df = DATA.get("ventas_pagos", pd.DataFrame()).copy()
+        if not pagos_df.empty:
+            pagos_hoy = filtrar_por_fechas(pagos_df, date.today(), date.today())
+            if "usuario" in pagos_hoy.columns:
+                pagos_hoy = pagos_hoy[pagos_hoy["usuario"].astype(str) == nombre_usuario_actual()]
+        else:
+            pagos_hoy = pd.DataFrame()
+
+        efectivo_hoy = suma_col(pagos_hoy[pagos_hoy["metodo"].astype(str).str.lower() == "efectivo"], "monto") if not pagos_hoy.empty and "metodo" in pagos_hoy.columns else 0.0
+        transferencia_hoy = suma_col(pagos_hoy[pagos_hoy["metodo"].astype(str).str.lower() == "transferencia"], "monto") if not pagos_hoy.empty and "metodo" in pagos_hoy.columns else 0.0
+        tarjeta_hoy = suma_col(pagos_hoy[pagos_hoy["metodo"].astype(str).str.lower() == "tarjeta"], "monto") if not pagos_hoy.empty and "metodo" in pagos_hoy.columns else 0.0
+        credito_hoy = suma_col(pagos_hoy[pagos_hoy["metodo"].astype(str).str.lower() == "credito"], "monto") if not pagos_hoy.empty and "metodo" in pagos_hoy.columns else 0.0
+        total_ventas_hoy = efectivo_hoy + transferencia_hoy + tarjeta_hoy + credito_hoy
+
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Efectivo vendido", f"RD$ {efectivo_hoy:,.2f}")
+        r2.metric("Transferencia", f"RD$ {transferencia_hoy:,.2f}")
+        r3.metric("Tarjeta", f"RD$ {tarjeta_hoy:,.2f}")
+        r4.metric("Crédito", f"RD$ {credito_hoy:,.2f}")
+        st.info(f"Total vendido del usuario hoy: RD$ {total_ventas_hoy:,.2f}")
 
         monto_cierre = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_monto_cierre")
         observacion_cierre = st.text_area("Observación de cierre", key="caja_obs_cierre")
@@ -2501,6 +2517,7 @@ elif menu == "POS":
                             "cliente_id": cliente_id,
                             "cliente_nombre": cliente_nombre,
                             "usuario": nombre_usuario_actual(),
+                            "usuario_id": str(usuario_id_actual()) if usuario_id_actual() else None,
                             "dia_operativo": ahora_str(),
                             "ncf": ncf,
                             "tipo_venta": "POS",
@@ -2529,10 +2546,7 @@ elif menu == "POS":
                                 "anulado": False,
                             }).execute()
                             if producto_tiene_inventario(prod):
-                                nueva_cant = max(obtener_existencia_producto(prod) - float(item["cantidad"]), 0.0)
-                                actualizar_existencia_producto(prod, nueva_cant)
                                 aplicar_consumo_fifo(movimientos_fifo)
-                                registrar_movimiento_inventario(prod["id"], obtener_nombre_producto(prod), "salida_venta", "ventas", venta_id, -float(item["cantidad"]), costo_unit, "Salida por venta POS")
                         pagos = {"efectivo": pago_efectivo, "transferencia": pago_transferencia, "tarjeta": pago_tarjeta, "credito": pago_credito}
                         for metodo, monto in pagos.items():
                             if monto > 0:
@@ -2541,22 +2555,8 @@ elif menu == "POS":
                                     "metodo": metodo,
                                     "monto": float(monto),
                                     "usuario": nombre_usuario_actual(),
+                                    "fecha": datetime.now().isoformat(),
                                 }).execute()
-                                if metodo != "credito":
-                                    try:
-                                        supabase.table("movimientos_caja").insert({
-                                            "fecha": datetime.now().isoformat(),
-                                            "dia_operativo": ahora_str(),
-                                            "tipo_movimiento": "entrada",
-                                            "origen": "venta",
-                                            "referencia_id": str(venta_id),
-                                            "metodo_pago": metodo,
-                                            "monto": float(monto) if metodo != "tarjeta" else float(monto + recargo),
-                                            "descripcion": f"Venta POS {venta_id}",
-                                            "usuario": nombre_usuario_actual(),
-                                        }).execute()
-                                    except Exception:
-                                        pass
                         if pago_credito > 0:
                             supabase.table("cuentas_por_cobrar").insert({
                                 "cliente_id": cliente_id,
@@ -2567,6 +2567,7 @@ elif menu == "POS":
                                 "saldo_pendiente": float(pago_credito),
                                 "estado": "pendiente",
                                 "usuario": nombre_usuario_actual(),
+                                "fecha": datetime.now().isoformat(),
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
                         st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
