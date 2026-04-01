@@ -2377,45 +2377,39 @@ elif menu == "POS":
         st.subheader("🧾 Carrito")
         if carrito:
             df_carrito = pd.DataFrame(carrito)
-            df_editor = st.data_editor(
+            df_carrito = st.data_editor(
                 df_carrito,
                 use_container_width=True,
                 disabled=["producto_id", "codigo", "producto"],
-                key="editor_carrito"
+                hide_index=True,
+                key="editor_carrito",
             )
-            try:
-                nuevos_items = []
-                for _, row in df_editor.iterrows():
-                    cantidad_edit = float(limpiar_numero(row.get("cantidad")) or 0)
-                    precio_edit = float(limpiar_numero(row.get("precio_unitario")) or 0)
-                    if cantidad_edit <= 0:
-                        continue
-                    nuevos_items.append({
-                        "producto_id": str(row.get("producto_id")),
-                        "codigo": limpiar_texto(row.get("codigo")),
-                        "producto": limpiar_texto(row.get("producto")),
-                        "cantidad": cantidad_edit,
-                        "precio_unitario": precio_edit,
-                        "total_linea": cantidad_edit * precio_edit,
-                    })
-                carrito[:] = nuevos_items
-            except Exception:
-                pass
+            carrito_actualizado = []
+            for _, row in df_carrito.iterrows():
+                item = row.to_dict()
+                item["cantidad"] = float(limpiar_numero(item.get("cantidad")) or 0)
+                item["precio_unitario"] = float(limpiar_numero(item.get("precio_unitario")) or 0)
+                item["total_linea"] = item["cantidad"] * item["precio_unitario"]
+                carrito_actualizado.append(item)
+            st.session_state["pos_carrito"] = carrito_actualizado
+            carrito = st.session_state["pos_carrito"]
+            subtotal = float(sum(float(i.get("total_linea", 0)) for i in carrito))
 
-            cbtn1, cbtn2 = st.columns(2)
-            with cbtn1:
-                if st.button("🗑️ Vaciar carrito", key="btn_pos_vaciar"):
-                    st.session_state["pos_carrito"] = []
+            col_rm1, col_rm2 = st.columns([3, 1])
+            with col_rm1:
+                item_quitar = st.selectbox(
+                    "Quitar producto del carrito",
+                    [""] + [f"{i['producto']} | Cant. {i['cantidad']}" for i in carrito],
+                    key="pos_item_quitar",
+                )
+            with col_rm2:
+                st.write("")
+                st.write("")
+                if st.button("Quitar", key="btn_pos_quitar") and item_quitar:
+                    nombre_q = item_quitar.split(" | ")[0]
+                    st.session_state["pos_carrito"] = [i for i in carrito if i["producto"] != nombre_q]
                     st.rerun()
-            with cbtn2:
-                eliminar_idx = st.number_input("Eliminar línea #", min_value=0, step=1, key="pos_del_idx")
-                if st.button("Eliminar línea", key="btn_pos_del_linea"):
-                    idx = int(eliminar_idx)
-                    if 0 <= idx < len(carrito):
-                        carrito.pop(idx)
-                        st.rerun()
 
-            subtotal = float(sum(float(x.get("total_linea", 0)) for x in carrito))
             descuento_global = st.number_input("Descuento global", min_value=0.0, step=1.0, key="pos_desc_global")
             cliente_df = DATA.get("clientes", pd.DataFrame()).copy()
             cliente_nombre = "Venta general"
@@ -2446,11 +2440,11 @@ elif menu == "POS":
             csum1.metric("Subtotal", f"RD$ {subtotal:,.2f}")
             csum2.metric("Recargo tarjeta", f"RD$ {recargo:,.2f}")
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
-            csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
+            csum4.metric("Cambio" if cambio > 0 else "Faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"RD$ {faltante:,.2f}")
             if cambio > 0:
-                st.success(f"Cambio a devolver: RD$ {cambio:,.2f}")
+                st.success(f"Cambio a entregar: RD$ {cambio:,.2f}")
             elif faltante > 0:
-                st.error(f"Faltan RD$ {faltante:,.2f} para completar la venta")
+                st.error(f"Faltan RD$ {faltante:,.2f} para completar el pago.")
             ncf = st.text_input("NCF (opcional)", key="pos_ncf")
             if st.button("💳 Cobrar", key="btn_pos_cobrar"):
                 if faltante > 0.001:
@@ -2459,15 +2453,13 @@ elif menu == "POS":
                     st.error("Para vender a crédito debes asignar un cliente.")
                 else:
                     try:
-                        metodo_final = "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito")
                         venta_resp = supabase.table("ventas").insert({
                             "fecha": datetime.now().isoformat(),
                             "subtotal": float(subtotal),
                             "descuento": float(descuento_global),
                             "recargo": float(recargo),
                             "total": float(total_final),
-                            "metodo": metodo_final,
-                            "metodo_pago": metodo_final,
+                            "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
                             "cliente_id": cliente_id,
                             "cliente_nombre": cliente_nombre,
                             "usuario": nombre_usuario_actual(),
@@ -2479,22 +2471,27 @@ elif menu == "POS":
                             "editable": False,
                         }).execute()
                         venta = (venta_resp.data or [{}])[0]
-                        venta_id = venta.get("id")
+                        venta_id = venta.get("id") or venta.get("identificación") or venta.get("identificacion")
+                        if not venta_id:
+                            raise Exception("No se pudo obtener el ID de la venta creada")
                         for item in carrito:
                             prod = productos_df[productos_df["id"].astype(str) == str(item["producto_id"])].iloc[0]
                             costo_unit, movimientos_fifo = obtener_costo_fifo(prod, float(item["cantidad"]))
+                            total_linea = float(item["cantidad"]) * float(item["precio_unitario"])
                             supabase.table("detalle_venta").insert({
                                 "venta_id": str(venta_id),
                                 "producto_id": str(prod["id"]),
-                                "codigo": item["codigo"],
+                                "codigo": item.get("codigo"),
                                 "producto": item["producto"],
                                 "cantidad": float(item["cantidad"]),
-                                "precio": float(item["precio_unitario"]),
                                 "precio_unitario": float(item["precio_unitario"]),
-                                "costo": float(costo_unit),
+                                "precio": float(item["precio_unitario"]),
                                 "costo_unitario": float(costo_unit),
+                                "costo": float(costo_unit),
                                 "descuento": 0,
                                 "recargo": 0,
+                                "total_linea": total_linea,
+                                "ganancia_linea": total_linea - (float(item["cantidad"]) * float(costo_unit)),
                                 "modo_utilidad": "automatica",
                                 "ganancia_manual": 0,
                                 "usuario": nombre_usuario_actual(),
@@ -2507,29 +2504,12 @@ elif menu == "POS":
                                 supabase.table("ventas_pagos").insert({
                                     "venta_id": str(venta_id),
                                     "metodo": metodo,
-                                    "monto": float(monto if metodo != "tarjeta" else monto + recargo),
+                                    "monto": float(monto),
                                     "usuario": nombre_usuario_actual(),
                                     "fecha": datetime.now().isoformat(),
                                 }).execute()
-                        if pago_credito > 0:
-                            existentes = leer_tabla("cuentas_por_cobrar")
-                            existe_cxc = False
-                            if not existentes.empty and "venta_id" in existentes.columns:
-                                existe_cxc = str(venta_id) in existentes["venta_id"].astype(str).tolist()
-                            if not existe_cxc:
-                                supabase.table("cuentas_por_cobrar").insert({
-                                    "cliente_id": cliente_id,
-                                    "cliente_nombre": cliente_nombre,
-                                    "venta_id": str(venta_id),
-                                    "monto_original": float(pago_credito),
-                                    "monto_abonado": 0,
-                                    "saldo_pendiente": float(pago_credito),
-                                    "estado": "pendiente",
-                                    "usuario": nombre_usuario_actual(),
-                                }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
                         st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
-                        st.balloons()
                         st.session_state["pos_carrito"] = []
                         st.rerun()
                     except Exception as exc:
