@@ -1657,9 +1657,10 @@ elif menu == "Ventas":
                 st.success(f"Se cargaron {count} ventas.")
                 st.rerun()
 
+    df = DATA["ventas"].copy()
     if not df.empty:
         st.subheader("Resumen de utilidad")
-        st.metric("Utilidad bruta ventas filtradas", f"RD$ {suma_col(df, 'ganancia_bruta'):,.2f}")
+        st.metric("Utilidad bruta ventas registradas", f"RD$ {suma_col(df, 'ganancia_bruta'):,.2f}")
     with st.expander("➕ Agregar venta manual", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
