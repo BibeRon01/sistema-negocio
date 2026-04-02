@@ -95,14 +95,16 @@ def tiene_permiso(flag: str) -> bool:
     return bool(user.get(flag, False))
 
 
-def puede_editar_todo() -> bool:
-    user = usuario_sesion()
-    if not user:
+def es_gerente_autorizado() -> bool:
+    rol = normalizar_texto(usuario_sesion().get("rol", ""))
+    if rol != "gerente":
         return False
-    if es_admin():
-        return True
-    rol = normalizar_texto(user.get("rol", ""))
-    return rol == "gerente" and bool(user.get("puede_editar_todo", False))
+    user = usuario_sesion()
+    return bool(user.get("puede_editar_todo", False) or user.get("puede_configurar", False))
+
+
+def puede_editar_registros() -> bool:
+    return es_admin() or es_gerente_autorizado()
 
 
 
@@ -155,7 +157,6 @@ def login_simple() -> bool:
                 "puede_registrar_compras": True,
                 "puede_registrar_gastos": True,
                 "puede_configurar": True,
-                "puede_editar_todo": True,
                 "activo": True,
             }
             st.rerun()
@@ -570,73 +571,6 @@ def descargar_archivos(df: pd.DataFrame, base_name: str):
         )
 
 
-def _valor_inicial_form(v):
-    try:
-        if pd.isna(v):
-            return ""
-    except Exception:
-        pass
-    return v
-
-def mostrar_crud_inline(nombre_tabla: str, df: pd.DataFrame, modo: str = "auto", titulo: str = ""):
-    if not puede_editar_todo():
-        return
-    if df is None or df.empty or "id" not in df.columns:
-        return
-
-    st.markdown("---")
-    st.subheader(titulo or f"Editar / eliminar en {nombre_tabla}")
-    opciones = []
-    for _, row in df.iterrows():
-        etiqueta = f"{row['id']}"
-        for campo in ["nombre","producto","cliente_nombre","proveedor","numero","usuario","fecha"]:
-            if campo in row.index and limpiar_texto(row.get(campo)):
-                etiqueta += f" | {limpiar_texto(row.get(campo))}"
-                break
-        opciones.append((etiqueta, row["id"]))
-    elegido = st.selectbox(f"Registro en {nombre_tabla}", opciones, format_func=lambda x: x[0], key=f"crud_sel_{nombre_tabla}")
-    fila = df[df["id"] == elegido[1]].iloc[0]
-
-    with st.form(f"crud_form_{nombre_tabla}"):
-        nuevos = {}
-        for col in df.columns:
-            if col == "id":
-                continue
-            val = _valor_inicial_form(fila.get(col))
-            col_n = normalizar_texto(col)
-            if col_n in ["fecha","fecha_apertura","fecha_cierre","desde","hasta"]:
-                txt = st.text_input(col, value=str(val)[:19] if val not in ["", None] else "", key=f"{nombre_tabla}_{col}")
-                nuevos[col] = txt if txt != "" else None
-            elif isinstance(val, bool):
-                nuevos[col] = st.checkbox(col, value=bool(val), key=f"{nombre_tabla}_{col}")
-            else:
-                num = limpiar_numero(val)
-                if num is not None and col_n not in ["telefono","rnc","cedula rnc","cedula_rnc"]:
-                    nuevos[col] = st.number_input(col, value=float(num), step=1.0, key=f"{nombre_tabla}_{col}")
-                else:
-                    nuevos[col] = st.text_input(col, value="" if val is None else str(val), key=f"{nombre_tabla}_{col}")
-        c1, c2, c3 = st.columns(3)
-        guardar = c1.form_submit_button("💾 Guardar cambios")
-        eliminar_btn = c2.form_submit_button("🗑️ Eliminar")
-        anular_btn = c3.form_submit_button("🚫 Anular")
-
-    if guardar:
-        if actualizar(nombre_tabla, fila["id"], nuevos):
-            st.success(f"{nombre_tabla} actualizado.")
-            st.rerun()
-    if eliminar_btn:
-        if eliminar(nombre_tabla, fila["id"]):
-            st.success(f"{nombre_tabla} eliminado.")
-            st.rerun()
-    if anular_btn:
-        if "anulado" in df.columns:
-            if anular(nombre_tabla, fila["id"], "Anulado desde módulo"):
-                st.success(f"{nombre_tabla} anulado.")
-                st.rerun()
-        else:
-            st.warning("Este módulo no maneja anulación.")
-
-
 # =========================================================
 # SUPABASE CRUD
 # =========================================================
@@ -707,6 +641,87 @@ def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
     except Exception as exc:
         st.error(f"Error al anular en {nombre_tabla}: {exc}")
         return False
+
+
+def utilidad_bruta_fila(row: pd.Series | dict) -> float:
+    datos = row if isinstance(row, dict) else row.to_dict()
+    modo = normalizar_texto(datos.get("modo_ganancia", "automatica"))
+    manual = limpiar_numero(datos.get("ganancia_bruta_manual")) or 0.0
+    auto = limpiar_numero(datos.get("ganancia_bruta")) or 0.0
+    return manual if modo == "manual" and manual > 0 else auto
+
+
+def utilidad_bruta_total_df(df: pd.DataFrame) -> float:
+    if df.empty:
+        return 0.0
+    return float(sum(utilidad_bruta_fila(row) for _, row in df.iterrows()))
+
+
+def _widget_valor_admin(col: str, valor: Any, key: str):
+    try:
+        if pd.isna(valor):
+            valor = None
+    except Exception:
+        pass
+    txt_col = normalizar_texto(col)
+    if isinstance(valor, bool):
+        return st.checkbox(col, value=bool(valor), key=key)
+    if txt_col in ["anulado", "activo", "usa_inventario", "editable"]:
+        return st.checkbox(col, value=bool(valor), key=key)
+    if isinstance(valor, (int, float)):
+        return st.number_input(col, value=float(valor), step=1.0, key=key)
+    num_guess = limpiar_numero(valor)
+    if num_guess is not None and txt_col not in ["codigo", "telefono", "cedula rnc", "cedula_rnc", "rnc", "ncf"]:
+        return st.number_input(col, value=float(num_guess), step=1.0, key=key)
+    return st.text_input(col, value="" if valor is None else str(valor), key=key)
+
+
+def mostrar_panel_admin_modulo(nombre_modulo: str, nombre_tabla: str, df: pd.DataFrame, permitir_eliminar: bool = True, permitir_anular: bool = False):
+    if not puede_editar_registros():
+        return
+    st.divider()
+    st.subheader(f"🛠️ Administración de {nombre_modulo}")
+    if df.empty or "id" not in df.columns:
+        st.info("No hay registros para editar en este módulo.")
+        return
+    base_df = df.copy()
+    base_df["__label__"] = base_df.apply(lambda r: f"{r['id']} | " + " | ".join([str(r[c]) for c in base_df.columns if c != 'id'][:3]), axis=1)
+    opciones = base_df["__label__"].tolist()
+    seleccion = st.selectbox(f"Selecciona registro de {nombre_modulo}", opciones, key=f"admin_sel_{nombre_tabla}_{nombre_modulo}")
+    fila = base_df[base_df["__label__"] == seleccion].iloc[0].drop(labels=["__label__"])
+    nuevos = {}
+    cols = [c for c in fila.index if c != "id"]
+    ncols = 2
+    columnas = st.columns(ncols)
+    for idx, col in enumerate(cols):
+        with columnas[idx % ncols]:
+            nuevos[col] = _widget_valor_admin(col, fila[col], key=f"admin_edit_{nombre_tabla}_{fila['id']}_{col}")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button(f"💾 Guardar cambios en {nombre_modulo}", key=f"admin_save_{nombre_tabla}_{fila['id']}"):
+            if actualizar(nombre_tabla, fila["id"], nuevos):
+                st.success("Registro actualizado.")
+                st.rerun()
+    with c2:
+        if permitir_eliminar and st.button(f"🗑️ Eliminar de {nombre_modulo}", key=f"admin_del_{nombre_tabla}_{fila['id']}"):
+            if nombre_tabla == "ventas":
+                try:
+                    supabase.rpc("eliminar_venta_completa", {"p_venta_id": str(fila["id"]) }).execute()
+                    registrar_auditoria("eliminar_completo", nombre_tabla, f"id={fila['id']}")
+                    st.success("Venta eliminada completa.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Error al eliminar venta completa: {exc}")
+            elif eliminar(nombre_tabla, fila["id"]):
+                st.success("Registro eliminado.")
+                st.rerun()
+    with c3:
+        if permitir_anular:
+            motivo = st.text_input("Motivo anulación", key=f"admin_mot_{nombre_tabla}_{fila['id']}")
+            if st.button(f"🚫 Anular en {nombre_modulo}", key=f"admin_anular_{nombre_tabla}_{fila['id']}"):
+                if anular(nombre_tabla, fila["id"], motivo):
+                    st.success("Registro anulado.")
+                    st.rerun()
 
 # =========================================================
 # CARGA GLOBAL
@@ -1089,8 +1104,6 @@ else:
     if tiene_permiso("puede_registrar_gastos"):
         menu_opciones += ["Gastos", "Catálogo de Gastos", "Gastos Dueño"]
     if tiene_permiso("puede_ver_reportes"):
-        if normalizar_texto(usuario_sesion().get("rol","")) in ["admin", "gerente"]:
-            menu_opciones += ["Dashboard"]
         menu_opciones += ["Reportes", "Estado de Resultados", "Auditoría", "Clientes", "Créditos"]
     menu_opciones = list(dict.fromkeys(menu_opciones))
 
@@ -1121,18 +1134,19 @@ if menu == "Dashboard":
     perdidas_tot = suma_col(perdidas_df, "valor")
     retiros_tot = suma_col(dueno_df, "monto")
 
-    utilidad_bruta_auto = suma_col(ventas_df, "ganancia_bruta")
-    usar_manual = puede_editar_todo() and st.checkbox("Usar utilidad bruta manual", value=False, key="dash_usa_manual")
-    utilidad_bruta = st.number_input("Utilidad bruta manual", min_value=0.0, step=1.0, value=float(utilidad_bruta_auto), key="dash_utilidad_bruta") if usar_manual else float(utilidad_bruta_auto)
+    utilidad_bruta_auto = utilidad_bruta_total_df(ventas_df)
+    utilidad_bruta_manual_extra = st.number_input("Utilidad bruta manual adicional", min_value=0.0, step=1.0, key="dash_utilidad_bruta")
+    utilidad_bruta = utilidad_bruta_auto + utilidad_bruta_manual_extra
     utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
 
     dueno_65 = utilidad_neta * 0.65
     gerente_35 = utilidad_neta * 0.35
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4x = st.columns(4)
     c1.metric("Ventas", f"RD$ {ventas_tot:,.2f}")
     c2.metric("Compras", f"RD$ {compras_tot:,.2f}")
     c3.metric("Pérdidas", f"RD$ {perdidas_tot:,.2f}")
+    c4x.metric("Utilidad bruta", f"RD$ {utilidad_bruta:,.2f}")
 
     adelantos_tot = suma_col(filtrar_por_fechas(DATA["adelantos_empleados"], desde, hasta), "monto")
     c4, c5, c6 = st.columns(3)
@@ -1332,7 +1346,6 @@ elif menu == "Productos":
             df = df[mask]
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "productos")
-        mostrar_crud_inline("productos", df, titulo="CRUD Productos")
     else:
         st.info("No hay productos registrados.")
 
@@ -1403,7 +1416,6 @@ elif menu == "Inventario Actual":
         invent = buscar_df(invent, txt)
         st.dataframe(invent, use_container_width=True)
         descargar_archivos(invent, "inventario_actual")
-        mostrar_crud_inline("inventario_actual", invent, titulo="CRUD Inventario actual")
     else:
         st.info("No hay inventario actual registrado.")
 
@@ -1470,7 +1482,6 @@ elif menu == "Conteo Inventario":
 
         st.dataframe(conteo_f, use_container_width=True)
         descargar_archivos(conteo_f, "conteo_inventario")
-        mostrar_crud_inline("conteo_inventario", conteo_f, titulo="CRUD Conteo inventario")
 
         st.subheader("⚙️ Procesar faltantes y sobrantes")
         pendientes = conteo_f[conteo_f["estado"].astype(str).str.lower().isin(["faltante", "sobrante"])] if not conteo_f.empty else pd.DataFrame()
@@ -1625,7 +1636,6 @@ elif menu == "Ajustes Inventario":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ajustes_inventario")
-        mostrar_crud_inline("ajustes_inventario", df, titulo="CRUD Ajustes inventario")
     else:
         st.info("No hay ajustes registrados.")
 
@@ -1658,39 +1668,67 @@ elif menu == "Ventas":
                 st.rerun()
 
     df = DATA["ventas"].copy()
+    d1, d2 = rango_fechas_ui("ventas")
     if not df.empty:
-        st.subheader("Resumen de utilidad")
-        st.metric("Utilidad bruta ventas registradas", f"RD$ {suma_col(df, 'ganancia_bruta'):,.2f}")
+        df = filtrar_por_fechas(df, d1, d2)
+    ventas_total = suma_col(df, "total") if not df.empty else 0.0
+    utilidad_auto = utilidad_bruta_total_df(df) if not df.empty else 0.0
+    gastos_fijos_v, gastos_variables_v = obtener_gastos_fijos_variables(DATA["gastos"], d1, d2)
+    empleados_total_v = obtener_empleados_fijos_periodo(DATA["empleados"], d1, d2) + obtener_empleados_variables_periodo(DATA["gastos"], d1, d2)
+    perdidas_total_v = suma_col(filtrar_por_fechas(DATA["perdidas"], d1, d2), "valor")
+    utilidad_manual_extra = st.number_input("Utilidad bruta manual adicional del período", min_value=0.0, step=1.0, key="venta_utilidad_manual")
+    utilidad_bruta_total = utilidad_auto + utilidad_manual_extra
+    utilidad_neta_total = utilidad_bruta_total - gastos_fijos_v - gastos_variables_v - empleados_total_v - perdidas_total_v
+    v1, v2, v3, v4 = st.columns(4)
+    v1.metric("Ventas del período", f"RD$ {ventas_total:,.2f}")
+    v2.metric("Utilidad bruta automática", f"RD$ {utilidad_auto:,.2f}")
+    v3.metric("Utilidad bruta total", f"RD$ {utilidad_bruta_total:,.2f}")
+    v4.metric("Utilidad neta", f"RD$ {utilidad_neta_total:,.2f}")
+
     with st.expander("➕ Agregar venta manual", expanded=True):
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             fecha = st.date_input("Fecha", value=date.today(), key="venta_fecha")
         with c2:
             total = st.number_input("Total", min_value=0.0, step=1.0, key="venta_total")
         with c3:
-            metodo = st.selectbox("Método", ["efectivo", "transferencia", "tarjeta"], key="venta_metodo")
+            metodo = st.selectbox("Método", ["efectivo", "transferencia", "tarjeta", "credito", "mixto"], key="venta_metodo")
+        with c4:
+            utilidad_manual = st.number_input("Utilidad bruta manual", min_value=0.0, step=1.0, key="venta_gan_manual")
         observacion = st.text_input("Observación", key="venta_obs")
 
         if st.button("Guardar venta"):
-            if insertar("ventas", {"fecha": str(fecha), "total": float(total), "metodo": metodo, "observacion": observacion}):
+            payload = {
+                "fecha": str(fecha),
+                "total": float(total),
+                "subtotal": float(total),
+                "metodo": metodo,
+                "metodo_pago": metodo,
+                "observacion": observacion,
+                "tipo_venta": "manual",
+                "estado": "completada",
+                "anulado": False,
+                "usuario": nombre_usuario_actual(),
+                "ganancia_bruta": float(utilidad_manual),
+                "ganancia_bruta_manual": float(utilidad_manual),
+                "modo_ganancia": "manual" if utilidad_manual > 0 else "automatica",
+            }
+            if insertar("ventas", payload):
                 st.success("Venta guardada.")
                 st.rerun()
 
-    df = DATA["ventas"].copy()
     if not df.empty:
-        d1, d2 = rango_fechas_ui("ventas")
-        df = filtrar_por_fechas(df, d1, d2)
-        cfil1, cfil2 = st.columns(2)
-        with cfil1:
-            txt = st.text_input("Buscar venta / no. factura", key="buscar_ventas")
-        with cfil2:
-            metodo_filtro = st.selectbox("Filtrar por método", ["Todos"] + sorted(df["metodo_pago"].dropna().astype(str).unique().tolist()) if "metodo_pago" in df.columns else ["Todos"], key="ventas_metodo_filtro")
+        metodo_f = st.selectbox("Filtrar por método", ["Todos"] + sorted([str(x) for x in df.get("metodo_pago", pd.Series(dtype=str)).dropna().unique().tolist()]), key="ventas_filtro_metodo") if "metodo_pago" in df.columns else "Todos"
+        txt = st.text_input("Buscar venta (factura, cliente, texto)", key="buscar_ventas")
+        if metodo_f != "Todos" and "metodo_pago" in df.columns:
+            df = df[df["metodo_pago"].astype(str) == metodo_f]
         df = buscar_df(df, txt)
-        if metodo_filtro != "Todos" and "metodo_pago" in df.columns:
-            df = df[df["metodo_pago"].astype(str) == metodo_filtro]
+        if "ganancia_bruta" not in df.columns:
+            df["ganancia_bruta"] = 0.0
+        if "ganancia_bruta_manual" not in df.columns:
+            df["ganancia_bruta_manual"] = 0.0
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ventas")
-        mostrar_crud_inline("ventas", df, titulo="CRUD Ventas")
     else:
         st.info("No hay ventas registradas.")
 
@@ -1835,7 +1873,6 @@ elif menu == "Compras":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "compras")
-        mostrar_crud_inline("compras", df, titulo="CRUD Compras")
     else:
         st.info("No hay compras registradas.")
 
@@ -1879,7 +1916,6 @@ elif menu == "Catálogo de Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "catalogo_gastos")
-        mostrar_crud_inline("catalogo_gastos", df, titulo="CRUD Catálogo de gastos")
     else:
         st.info("No hay catálogo de gastos.")
 
@@ -1973,7 +2009,6 @@ elif menu == "Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos")
-        mostrar_crud_inline("gastos", df, titulo="CRUD Gastos")
     else:
         st.info("No hay gastos registrados.")
 
@@ -2048,7 +2083,6 @@ elif menu == "Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "empleados")
-        mostrar_crud_inline("empleados", df, titulo="CRUD Empleados")
     else:
         st.info("No hay empleados registrados.")
 
@@ -2086,7 +2120,6 @@ elif menu == "Adelantos Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "adelantos_empleados")
-        mostrar_crud_inline("adelantos_empleados", df, titulo="CRUD Adelantos empleados")
     else:
         st.info("No hay adelantos registrados.")
 
@@ -2123,7 +2156,6 @@ elif menu == "Pérdidas":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "perdidas")
-        mostrar_crud_inline("perdidas", df, titulo="CRUD Pérdidas")
     else:
         st.info("No hay pérdidas registradas.")
 
@@ -2159,7 +2191,6 @@ elif menu == "Gastos Dueño":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos_dueno")
-        mostrar_crud_inline("gastos_dueno", df, titulo="CRUD Gastos dueño")
     else:
         st.info("No hay gastos del dueño registrados.")
 
@@ -2217,7 +2248,6 @@ elif menu == "Cierre de Caja":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "cierre_caja")
-        mostrar_crud_inline("cierre_caja", df, titulo="CRUD Cierre de caja")
     else:
         st.info("No hay cierres de caja registrados.")
 
@@ -2430,7 +2460,6 @@ elif menu == "POS":
                 "producto": nombre,
                 "cantidad": float(cantidad),
                 "precio_unitario": float(precio_base),
-                "costo_unitario": float(limpiar_numero(prod_row.get("costo_promedio")) or limpiar_numero(prod_row.get("costo")) or 0),
                 "total_linea": float(cantidad) * float(precio_base),
             })
 
@@ -2512,19 +2541,10 @@ elif menu == "POS":
             cambio = max(pagos_total - total_final, 0.0)
             faltante = max(total_final - pagos_total, 0.0)
             csum1, csum2, csum3, csum4 = st.columns(4)
-            utilidad_auto = 0.0
-            for item in carrito:
-                utilidad_auto += (float(item["precio_unitario"]) - float(item.get("costo_unitario", item.get("costo", 0) or 0))) * float(item["cantidad"])
             csum1.metric("Subtotal", f"RD$ {subtotal:,.2f}")
             csum2.metric("Recargo tarjeta", f"RD$ {recargo:,.2f}")
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
             csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
-            cgu1, cgu2 = st.columns(2)
-            with cgu1:
-                st.metric("Utilidad bruta automática", f"RD$ {utilidad_auto:,.2f}")
-            with cgu2:
-                usar_manual_pos = puede_editar_todo() and st.checkbox("Usar utilidad manual en esta venta", key="pos_usa_utilidad_manual")
-            utilidad_manual_pos = st.number_input("Utilidad bruta manual de la venta", min_value=0.0, step=1.0, value=float(utilidad_auto), key="pos_utilidad_manual") if usar_manual_pos else float(utilidad_auto)
             ncf = st.text_input("NCF (opcional)", key="pos_ncf")
             if st.button("💳 Cobrar", key="btn_pos_cobrar"):
                 if faltante > 0.001:
@@ -2642,7 +2662,6 @@ elif menu == "Clientes":
     if not df.empty:
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "clientes")
-        mostrar_crud_inline("clientes", df, titulo="CRUD Clientes")
     else:
         st.info("No hay clientes.")
 
@@ -2669,7 +2688,6 @@ elif menu == "Proveedores":
     if not df.empty:
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "proveedores")
-        mostrar_crud_inline("proveedores", df, titulo="CRUD Proveedores")
     else:
         st.info("No hay proveedores.")
 
@@ -2748,7 +2766,6 @@ elif menu == "Usuarios":
         df = DATA.get("usuarios", pd.DataFrame()).copy()
         if not df.empty:
             st.dataframe(df, use_container_width=True)
-            mostrar_crud_inline("usuarios", df, titulo="CRUD Usuarios")
 
 # =========================================================
 # CONFIGURACION
@@ -2785,4 +2802,30 @@ elif menu == "Configuración":
                     st.rerun()
             if cfg.get("logo_url"):
                 st.image(cfg.get("logo_url"), width=220)
-            mostrar_crud_inline("configuracion_sistema", DATA.get("configuracion_sistema", pd.DataFrame()).copy(), titulo="CRUD Configuración")
+
+
+# =========================================================
+# PANEL ADMINISTRATIVO DENTRO DE CADA MÓDULO
+# =========================================================
+_modulos_tablas = {
+    "Productos": ("productos", True, False),
+    "Clientes": ("clientes", True, False),
+    "Proveedores": ("proveedores", True, False),
+    "Inventario Actual": ("inventario_actual", True, False),
+    "Conteo Inventario": ("conteo_inventario", True, False),
+    "Ajustes Inventario": ("ajustes_inventario", True, False),
+    "Ventas": ("ventas", True, True),
+    "Compras": ("compras", True, True),
+    "Catálogo de Gastos": ("catalogo_gastos", True, False),
+    "Gastos": ("gastos", True, False),
+    "Empleados": ("empleados", True, False),
+    "Adelantos Empleados": ("adelantos_empleados", True, False),
+    "Pérdidas": ("perdidas", True, False),
+    "Gastos Dueño": ("gastos_dueno", True, False),
+    "Cierre de Caja": ("cierre_caja", True, True),
+    "Usuarios": ("usuarios", True, False),
+}
+if menu in _modulos_tablas:
+    _tabla, _perm_eliminar, _perm_anular = _modulos_tablas[menu]
+    _df = DATA.get(_tabla, pd.DataFrame()).copy()
+    mostrar_panel_admin_modulo(menu, _tabla, _df, permitir_eliminar=_perm_eliminar, permitir_anular=_perm_anular)
