@@ -18,6 +18,7 @@ st.markdown("""
 <style>
 :root{
   --brand-blue:#2563eb;
+  --brand-blue-dark:#1d4ed8;
   --brand-blue-soft:#dbeafe;
   --brand-green:#16a34a;
   --brand-green-soft:#dcfce7;
@@ -25,106 +26,231 @@ st.markdown("""
   --brand-red-soft:#fee2e2;
   --brand-amber:#d97706;
   --brand-amber-soft:#fef3c7;
+  --brand-purple:#7c3aed;
+  --brand-purple-soft:#ede9fe;
   --brand-slate:#0f172a;
   --brand-muted:#475569;
-  --surface:#f8fafc;
+  --surface:#f4f8fc;
   --card:#ffffff;
-  --border:#e2e8f0;
+  --border:#dbe4f0;
+  --shadow:0 10px 28px rgba(15,23,42,.07);
+}
+html, body, [class*="css"]{
+  font-family: "Inter", "Segoe UI", sans-serif;
 }
 .stApp{
-  background: linear-gradient(180deg,#f8fbff 0%,#f8fafc 100%);
+  background:
+    radial-gradient(circle at top right, rgba(37,99,235,.10), transparent 26%),
+    radial-gradient(circle at top left, rgba(22,163,74,.06), transparent 24%),
+    linear-gradient(180deg,#f7fbff 0%,#f3f7fb 100%);
 }
 .block-container{
-  padding-top: 1.2rem;
-  padding-bottom: 2rem;
+  padding-top: 1rem;
+  padding-bottom: 2.4rem;
+  max-width: 1450px;
 }
 div[data-testid="stSidebar"]{
-  background: linear-gradient(180deg,#0f172a 0%,#1e293b 100%);
+  background: linear-gradient(180deg,#0b1220 0%,#172033 100%);
+  border-right: 1px solid rgba(255,255,255,.08);
 }
 div[data-testid="stSidebar"] *{
   color: #f8fafc !important;
 }
-div[data-testid="stSidebar"] .stSelectbox label,
-div[data-testid="stSidebar"] .stButton button{
-  color: #f8fafc !important;
+div[data-testid="stSidebar"] .stSelectbox > div,
+div[data-testid="stSidebar"] .stTextInput > div,
+div[data-testid="stSidebar"] .stNumberInput > div{
+  background: rgba(255,255,255,.06);
+  border-radius: 14px;
 }
-.stButton>button{
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  font-weight: 700;
+div[data-testid="stSidebar"] .stButton>button{
+  background: linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);
+  border: none;
+  color: white !important;
 }
+h1, h2, h3{
+  color: var(--brand-slate);
+  letter-spacing: -.02em;
+}
+h1{
+  font-weight: 900 !important;
+}
+h2, h3{
+  font-weight: 800 !important;
+}
+.stButton>button,
 .stDownloadButton>button{
-  border-radius: 12px;
-  font-weight: 700;
+  border-radius: 14px;
+  border: 1px solid rgba(37,99,235,.14);
+  font-weight: 800;
+  background: linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+  box-shadow: 0 4px 14px rgba(37,99,235,.08);
+  transition: all .18s ease;
+}
+.stButton>button:hover,
+.stDownloadButton>button:hover{
+  border-color: rgba(37,99,235,.32);
+  color: var(--brand-blue-dark);
+  transform: translateY(-1px);
+}
+div[data-testid="stMetric"]{
+  background: linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+div[data-testid="stMetric"] label{
+  color: var(--brand-muted) !important;
+  font-weight: 700 !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"]{
+  color: var(--brand-slate);
+  font-weight: 900 !important;
+}
+div[data-baseweb="select"] > div,
+div[data-baseweb="input"] > div,
+div[data-baseweb="textarea"] > div{
+  border-radius: 14px !important;
+  border-color: var(--border) !important;
+  box-shadow: none !important;
+  background: rgba(255,255,255,.90) !important;
+}
+div[data-baseweb="select"] > div:focus-within,
+div[data-baseweb="input"] > div:focus-within,
+div[data-baseweb="textarea"] > div:focus-within{
+  border-color: rgba(37,99,235,.45) !important;
+  box-shadow: 0 0 0 4px rgba(37,99,235,.10) !important;
+}
+div[data-testid="stNumberInput"] button{
+  border-radius: 10px !important;
+}
+div[data-testid="stFileUploader"] section{
+  border-radius: 18px;
+  border: 1px dashed rgba(37,99,235,.35);
+  background: linear-gradient(180deg,#fbfdff 0%,#f6faff 100%);
+}
+div[data-testid="stExpander"]{
+  border: 1px solid var(--border);
+  border-radius: 18px !important;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  background: rgba(255,255,255,.88);
+}
+div[data-testid="stExpander"] details summary{
+  background: linear-gradient(180deg,#ffffff 0%,#f7fbff 100%);
+  font-weight: 800;
+}
+div[data-testid="stDataFrame"],
+div[data-testid="stTable"],
+div[data-testid="stDataEditor"]{
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  background: white;
+}
+div[data-testid="stTabs"] button{
+  border-radius: 999px !important;
+  padding: 8px 16px !important;
+  background: #eef4fb;
+  color: var(--brand-muted);
+  font-weight: 800;
+}
+div[data-testid="stTabs"] button[aria-selected="true"]{
+  background: linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%) !important;
+  color: white !important;
+}
+hr{
+  border-color: var(--border);
 }
 .kpi-card{
-  border-radius: 18px;
-  padding: 16px 18px;
-  background: var(--card);
+  border-radius: 20px;
+  padding: 18px 20px;
+  background: linear-gradient(180deg,#ffffff 0%,#fcfdff 100%);
   border: 1px solid var(--border);
-  box-shadow: 0 8px 24px rgba(15,23,42,.06);
+  box-shadow: var(--shadow);
   margin-bottom: 12px;
 }
 .kpi-card.blue{border-left: 8px solid var(--brand-blue);}
 .kpi-card.green{border-left: 8px solid var(--brand-green);}
 .kpi-card.red{border-left: 8px solid var(--brand-red);}
 .kpi-card.amber{border-left: 8px solid var(--brand-amber);}
+.kpi-card.purple{border-left: 8px solid var(--brand-purple);}
 .kpi-label{
   color: var(--brand-muted);
   font-size: .92rem;
-  font-weight: 600;
+  font-weight: 700;
   margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
 }
 .kpi-value{
   color: var(--brand-slate);
-  font-size: 1.7rem;
-  line-height: 1.1;
-  font-weight: 800;
+  font-size: 1.85rem;
+  line-height: 1.08;
+  font-weight: 900;
 }
 .section-title{
   font-size: 1.15rem;
-  font-weight: 800;
+  font-weight: 900;
   color: var(--brand-slate);
   margin: 4px 0 10px 0;
 }
 .page-hero{
-  background: linear-gradient(135deg,#eff6ff 0%,#ffffff 60%,#f0fdf4 100%);
+  background:
+    radial-gradient(circle at top right, rgba(37,99,235,.11), transparent 25%),
+    linear-gradient(135deg,#eff6ff 0%,#ffffff 58%,#ecfdf5 100%);
   border: 1px solid var(--border);
-  border-radius: 22px;
-  padding: 18px 22px;
-  margin-bottom: 14px;
-  box-shadow: 0 10px 30px rgba(37,99,235,.08);
+  border-radius: 24px;
+  padding: 22px 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 14px 32px rgba(37,99,235,.10);
 }
 .page-hero h1{
   margin: 0;
   color: var(--brand-slate);
-  font-size: 2rem;
+  font-size: 2.1rem;
 }
 .page-hero p{
-  margin: 6px 0 0 0;
+  margin: 8px 0 0 0;
   color: var(--brand-muted);
-  font-size: .98rem;
+  font-size: 1rem;
 }
 .notice-ok{
   background: var(--brand-green-soft);
   border-left: 6px solid var(--brand-green);
-  padding: 10px 14px;
+  padding: 12px 14px;
   border-radius: 14px;
   color: #14532d;
   margin-bottom: 8px;
+  font-weight: 700;
 }
 .notice-warn{
   background: var(--brand-amber-soft);
   border-left: 6px solid var(--brand-amber);
-  padding: 10px 14px;
+  padding: 12px 14px;
   border-radius: 14px;
   color: #92400e;
   margin-bottom: 8px;
+  font-weight: 700;
 }
-div[data-testid="stDataFrame"]{
-  border-radius: 16px;
-  overflow: hidden;
+.executive-panel{
+  background: linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
   border: 1px solid var(--border);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.executive-chip{
+  display:inline-block;
+  padding:6px 12px;
+  border-radius:999px;
+  background:#eef4ff;
+  color:#1d4ed8;
+  font-weight:800;
+  font-size:.82rem;
+  margin:0 8px 8px 0;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -157,6 +283,16 @@ def render_page_hero(title: str, subtitle: str = ""):
 def render_notice(texto: str, tipo: str = "ok"):
     clase = "notice-ok" if tipo == "ok" else "notice-warn"
     st.markdown(f'<div class="{clase}">{texto}</div>', unsafe_allow_html=True)
+
+
+def render_executive_panel(title: str = "", subtitle: str = ""):
+    html = '<div class="executive-panel">'
+    if title:
+        html += f'<div class="section-title">{title}</div>'
+    if subtitle:
+        html += f'<div style="color:var(--brand-muted);font-weight:600;margin-top:-2px;margin-bottom:6px;">{subtitle}</div>'
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # =========================================================
