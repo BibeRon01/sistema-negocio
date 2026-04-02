@@ -14,287 +14,6 @@ from supabase import Client, create_client
 st.set_page_config(page_title="Sistema de Negocio PRO", layout="wide")
 
 
-st.markdown("""
-<style>
-:root{
-  --brand-blue:#2563eb;
-  --brand-blue-dark:#1d4ed8;
-  --brand-blue-soft:#dbeafe;
-  --brand-green:#16a34a;
-  --brand-green-soft:#dcfce7;
-  --brand-red:#dc2626;
-  --brand-red-soft:#fee2e2;
-  --brand-amber:#d97706;
-  --brand-amber-soft:#fef3c7;
-  --brand-purple:#7c3aed;
-  --brand-purple-soft:#ede9fe;
-  --brand-slate:#0f172a;
-  --brand-muted:#475569;
-  --surface:#f4f8fc;
-  --card:#ffffff;
-  --border:#dbe4f0;
-  --shadow:0 10px 28px rgba(15,23,42,.07);
-}
-html, body, [class*="css"]{
-  font-family: "Inter", "Segoe UI", sans-serif;
-}
-.stApp{
-  background:
-    radial-gradient(circle at top right, rgba(37,99,235,.10), transparent 26%),
-    radial-gradient(circle at top left, rgba(22,163,74,.06), transparent 24%),
-    linear-gradient(180deg,#f7fbff 0%,#f3f7fb 100%);
-}
-.block-container{
-  padding-top: 1rem;
-  padding-bottom: 2.4rem;
-  max-width: 1450px;
-}
-div[data-testid="stSidebar"]{
-  background: linear-gradient(180deg,#0b1220 0%,#172033 100%);
-  border-right: 1px solid rgba(255,255,255,.08);
-}
-div[data-testid="stSidebar"] *{
-  color: #f8fafc !important;
-}
-div[data-testid="stSidebar"] .stSelectbox > div,
-div[data-testid="stSidebar"] .stTextInput > div,
-div[data-testid="stSidebar"] .stNumberInput > div{
-  background: rgba(255,255,255,.06);
-  border-radius: 14px;
-}
-div[data-testid="stSidebar"] .stButton>button{
-  background: linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);
-  border: none;
-  color: white !important;
-}
-h1, h2, h3{
-  color: var(--brand-slate);
-  letter-spacing: -.02em;
-}
-h1{
-  font-weight: 900 !important;
-}
-h2, h3{
-  font-weight: 800 !important;
-}
-.stButton>button,
-.stDownloadButton>button{
-  border-radius: 14px;
-  border: 1px solid rgba(37,99,235,.14);
-  font-weight: 800;
-  background: linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
-  box-shadow: 0 4px 14px rgba(37,99,235,.08);
-  transition: all .18s ease;
-}
-.stButton>button:hover,
-.stDownloadButton>button:hover{
-  border-color: rgba(37,99,235,.32);
-  color: var(--brand-blue-dark);
-  transform: translateY(-1px);
-}
-div[data-testid="stMetric"]{
-  background: linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 12px 14px;
-  box-shadow: var(--shadow);
-}
-div[data-testid="stMetric"] label{
-  color: var(--brand-muted) !important;
-  font-weight: 700 !important;
-}
-div[data-testid="stMetric"] [data-testid="stMetricValue"]{
-  color: var(--brand-slate);
-  font-weight: 900 !important;
-}
-div[data-baseweb="select"] > div,
-div[data-baseweb="input"] > div,
-div[data-baseweb="textarea"] > div{
-  border-radius: 14px !important;
-  border-color: var(--border) !important;
-  box-shadow: none !important;
-  background: rgba(255,255,255,.90) !important;
-}
-div[data-baseweb="select"] > div:focus-within,
-div[data-baseweb="input"] > div:focus-within,
-div[data-baseweb="textarea"] > div:focus-within{
-  border-color: rgba(37,99,235,.45) !important;
-  box-shadow: 0 0 0 4px rgba(37,99,235,.10) !important;
-}
-div[data-testid="stNumberInput"] button{
-  border-radius: 10px !important;
-}
-div[data-testid="stFileUploader"] section{
-  border-radius: 18px;
-  border: 1px dashed rgba(37,99,235,.35);
-  background: linear-gradient(180deg,#fbfdff 0%,#f6faff 100%);
-}
-div[data-testid="stExpander"]{
-  border: 1px solid var(--border);
-  border-radius: 18px !important;
-  overflow: hidden;
-  box-shadow: var(--shadow);
-  background: rgba(255,255,255,.88);
-}
-div[data-testid="stExpander"] details summary{
-  background: linear-gradient(180deg,#ffffff 0%,#f7fbff 100%);
-  font-weight: 800;
-}
-div[data-testid="stDataFrame"],
-div[data-testid="stTable"],
-div[data-testid="stDataEditor"]{
-  border-radius: 18px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  background: white;
-}
-div[data-testid="stTabs"] button{
-  border-radius: 999px !important;
-  padding: 8px 16px !important;
-  background: #eef4fb;
-  color: var(--brand-muted);
-  font-weight: 800;
-}
-div[data-testid="stTabs"] button[aria-selected="true"]{
-  background: linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%) !important;
-  color: white !important;
-}
-hr{
-  border-color: var(--border);
-}
-.kpi-card{
-  border-radius: 20px;
-  padding: 18px 20px;
-  background: linear-gradient(180deg,#ffffff 0%,#fcfdff 100%);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  margin-bottom: 12px;
-}
-.kpi-card.blue{border-left: 8px solid var(--brand-blue);}
-.kpi-card.green{border-left: 8px solid var(--brand-green);}
-.kpi-card.red{border-left: 8px solid var(--brand-red);}
-.kpi-card.amber{border-left: 8px solid var(--brand-amber);}
-.kpi-card.purple{border-left: 8px solid var(--brand-purple);}
-.kpi-label{
-  color: var(--brand-muted);
-  font-size: .92rem;
-  font-weight: 700;
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-}
-.kpi-value{
-  color: var(--brand-slate);
-  font-size: 1.85rem;
-  line-height: 1.08;
-  font-weight: 900;
-}
-.section-title{
-  font-size: 1.15rem;
-  font-weight: 900;
-  color: var(--brand-slate);
-  margin: 4px 0 10px 0;
-}
-.page-hero{
-  background:
-    radial-gradient(circle at top right, rgba(37,99,235,.11), transparent 25%),
-    linear-gradient(135deg,#eff6ff 0%,#ffffff 58%,#ecfdf5 100%);
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  padding: 22px 24px;
-  margin-bottom: 16px;
-  box-shadow: 0 14px 32px rgba(37,99,235,.10);
-}
-.page-hero h1{
-  margin: 0;
-  color: var(--brand-slate);
-  font-size: 2.1rem;
-}
-.page-hero p{
-  margin: 8px 0 0 0;
-  color: var(--brand-muted);
-  font-size: 1rem;
-}
-.notice-ok{
-  background: var(--brand-green-soft);
-  border-left: 6px solid var(--brand-green);
-  padding: 12px 14px;
-  border-radius: 14px;
-  color: #14532d;
-  margin-bottom: 8px;
-  font-weight: 700;
-}
-.notice-warn{
-  background: var(--brand-amber-soft);
-  border-left: 6px solid var(--brand-amber);
-  padding: 12px 14px;
-  border-radius: 14px;
-  color: #92400e;
-  margin-bottom: 8px;
-  font-weight: 700;
-}
-.executive-panel{
-  background: linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  box-shadow: var(--shadow);
-  padding: 16px 18px;
-  margin-bottom: 14px;
-}
-.executive-chip{
-  display:inline-block;
-  padding:6px 12px;
-  border-radius:999px;
-  background:#eef4ff;
-  color:#1d4ed8;
-  font-weight:800;
-  font-size:.82rem;
-  margin:0 8px 8px 0;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-def render_kpi_card(label: str, value: str, color: str = "blue"):
-    st.markdown(
-        f"""
-        <div class="kpi-card {color}">
-            <div class="kpi-label">{label}</div>
-            <div class="kpi-value">{value}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_page_hero(title: str, subtitle: str = ""):
-    st.markdown(
-        f"""
-        <div class="page-hero">
-            <h1>{title}</h1>
-            <p>{subtitle}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_notice(texto: str, tipo: str = "ok"):
-    clase = "notice-ok" if tipo == "ok" else "notice-warn"
-    st.markdown(f'<div class="{clase}">{texto}</div>', unsafe_allow_html=True)
-
-
-def render_executive_panel(title: str = "", subtitle: str = ""):
-    html = '<div class="executive-panel">'
-    if title:
-        html += f'<div class="section-title">{title}</div>'
-    if subtitle:
-        html += f'<div style="color:var(--brand-muted);font-weight:600;margin-top:-2px;margin-bottom:6px;">{subtitle}</div>'
-    html += '</div>'
-    st.markdown(html, unsafe_allow_html=True)
-
-
 # =========================================================
 # SECRETS / CONEXIÓN
 # =========================================================
@@ -440,6 +159,9 @@ def login_simple() -> bool:
 
 if not login_simple():
     st.stop()
+
+if "pos_venta_finalizada" not in st.session_state:
+    st.session_state["pos_venta_finalizada"] = None
 
 
 # =========================================================
@@ -1238,79 +960,6 @@ def serie_periodica(df: pd.DataFrame, columna: str, frecuencia: str = "M") -> pd
     return out
 
 
-
-
-def usuario_id_actual():
-    user = usuario_sesion()
-    return user.get("id")
-
-
-def obtener_caja_abierta():
-    usuario_id = usuario_id_actual()
-    if not usuario_id:
-        return None
-    try:
-        resp = (
-            supabase.table("caja")
-            .select("*")
-            .eq("usuario_id", str(usuario_id))
-            .eq("estado", "abierta")
-            .order("fecha_apertura", desc=True)
-            .limit(1)
-            .execute()
-        )
-        filas = resp.data or []
-        return filas[0] if filas else None
-    except Exception:
-        return None
-
-
-def abrir_caja(monto_inicial: float, observacion: str = "") -> tuple[bool, str]:
-    if obtener_caja_abierta() is not None:
-        return False, "Ya tienes una caja abierta."
-    usuario_id = usuario_id_actual()
-    if not usuario_id:
-        return False, "No se encontró el usuario actual."
-    try:
-        supabase.table("caja").insert({
-            "usuario_id": str(usuario_id),
-            "fecha_apertura": datetime.now().isoformat(),
-            "monto_inicial": float(monto_inicial),
-            "estado": "abierta",
-            "dia_operativo": ahora_str(),
-            "observacion": observacion,
-            "anulado": False,
-        }).execute()
-        registrar_auditoria("abrir_caja", "caja", f"monto_inicial={monto_inicial}")
-        return True, "Caja abierta correctamente."
-    except Exception as exc:
-        return False, f"No se pudo abrir caja: {exc}"
-
-
-def cerrar_caja(caja_row: dict, monto_cierre: float, observacion: str = "") -> tuple[bool, str]:
-    try:
-        monto_inicial = float(limpiar_numero(caja_row.get("monto_inicial")) or 0)
-        diferencia = float(monto_cierre) - monto_inicial
-        supabase.table("caja").update({
-            "fecha_cierre": datetime.now().isoformat(),
-            "monto_cierre": float(monto_cierre),
-            "diferencia": float(diferencia),
-            "observacion": observacion or caja_row.get("observacion") or "",
-            "estado": "cerrada",
-        }).eq("id", caja_row["id"]).execute()
-        insertar("cierre_caja", {
-            "fecha": datetime.now().isoformat(),
-            "apertura": monto_inicial,
-            "efectivo_sistema": monto_inicial,
-            "efectivo_fisico": float(monto_cierre),
-            "diferencia": float(diferencia),
-            "detalle": observacion,
-        })
-        registrar_auditoria("cerrar_caja", "caja", f"id={caja_row['id']} monto_cierre={monto_cierre}")
-        return True, "Caja cerrada correctamente."
-    except Exception as exc:
-        return False, f"No se pudo cerrar caja: {exc}"
-
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1355,14 +1004,18 @@ menu_base = [
 ]
 
 if es_admin() or tiene_permiso("puede_configurar"):
-    menu_opciones = ["Dashboard", "Caja"] + [m for m in menu_base if m not in ["Dashboard", "Cierre de Caja"]]
+    menu_opciones = menu_base
 else:
-    menu_opciones = []
+    menu_opciones = ["Dashboard"]
     if tiene_permiso("puede_vender"):
-        menu_opciones += ["Caja", "POS", "Ventas"]
+        menu_opciones += ["POS", "Ventas", "Cierre de Caja"]
+    if tiene_permiso("puede_registrar_compras"):
+        menu_opciones += ["Compras", "Proveedores", "Productos", "Inventario Actual"]
+    if tiene_permiso("puede_registrar_gastos"):
+        menu_opciones += ["Gastos", "Catálogo de Gastos", "Gastos Dueño"]
     if tiene_permiso("puede_ver_reportes"):
-        menu_opciones += ["Clientes", "Créditos"]
-    menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
+        menu_opciones += ["Reportes", "Estado de Resultados", "Auditoría", "Clientes", "Créditos"]
+    menu_opciones = list(dict.fromkeys(menu_opciones))
 
 menu = st.sidebar.selectbox("Menú", menu_opciones)
 
@@ -1373,10 +1026,7 @@ if st.sidebar.button("🔄 Recargar nube"):
 # DASHBOARD
 # =========================================================
 if menu == "Dashboard":
-    render_page_hero(
-        "📊 Dashboard PRO",
-        "Resumen visual del negocio con todas las funciones del dashboard conservadas."
-    )
+    st.title("📊 Dashboard PRO")
 
     desde, hasta = rango_fechas_ui("dash")
 
@@ -1393,119 +1043,57 @@ if menu == "Dashboard":
     empleados_variables = obtener_empleados_variables_periodo(DATA["gastos"], desde, hasta)
     perdidas_tot = suma_col(perdidas_df, "valor")
     retiros_tot = suma_col(dueno_df, "monto")
-    adelantos_tot = suma_col(filtrar_por_fechas(DATA["adelantos_empleados"], desde, hasta), "monto")
 
-    utilidad_bruta = st.number_input(
-        "Utilidad bruta manual",
-        min_value=0.0,
-        step=1.0,
-        key="dash_utilidad_bruta",
-        help="Puedes escribir la utilidad bruta general si quieres llevarla manual."
-    )
+    utilidad_bruta = st.number_input("Utilidad bruta manual", min_value=0.0, step=1.0, key="dash_utilidad_bruta")
     utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
 
     dueno_65 = utilidad_neta * 0.65
     gerente_35 = utilidad_neta * 0.35
 
-    st.markdown('<div class="section-title">Resumen general</div>', unsafe_allow_html=True)
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        render_kpi_card("Ventas", f"RD$ {ventas_tot:,.2f}", "blue")
-    with k2:
-        render_kpi_card("Compras", f"RD$ {compras_tot:,.2f}", "amber")
-    with k3:
-        render_kpi_card("Utilidad bruta", f"RD$ {utilidad_bruta:,.2f}", "green")
-    with k4:
-        color_neta = "green" if utilidad_neta >= 0 else "red"
-        render_kpi_card("Utilidad neta", f"RD$ {utilidad_neta:,.2f}", color_neta)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Ventas", f"RD$ {ventas_tot:,.2f}")
+    c2.metric("Compras", f"RD$ {compras_tot:,.2f}")
+    c3.metric("Pérdidas", f"RD$ {perdidas_tot:,.2f}")
 
-    k5, k6, k7, k8 = st.columns(4)
-    with k5:
-        render_kpi_card("Gastos fijos", f"RD$ {gastos_fijos:,.2f}", "amber")
-    with k6:
-        render_kpi_card("Gastos variables", f"RD$ {gastos_variables:,.2f}", "amber")
-    with k7:
-        render_kpi_card("Pago empleados", f"RD$ {(empleados_fijos + empleados_variables):,.2f}", "red")
-    with k8:
-        render_kpi_card("Pérdidas", f"RD$ {perdidas_tot:,.2f}", "red")
+    adelantos_tot = suma_col(filtrar_por_fechas(DATA["adelantos_empleados"], desde, hasta), "monto")
+    c4, c5, c6 = st.columns(3)
+    c4.metric("Gastos fijos", f"RD$ {gastos_fijos:,.2f}")
+    c5.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
+    c6.metric("Retiros dueño", f"RD$ {retiros_tot:,.2f}")
 
-    k9, k10, k11, k12 = st.columns(4)
-    with k9:
-        render_kpi_card("Retiros dueño", f"RD$ {retiros_tot:,.2f}", "amber")
-    with k10:
-        render_kpi_card("Adelantos", f"RD$ {adelantos_tot:,.2f}", "amber")
-    with k11:
-        render_kpi_card("65% dueña", f"RD$ {dueno_65:,.2f}", "blue")
-    with k12:
-        render_kpi_card("35% gerente", f"RD$ {gerente_35:,.2f}", "blue")
+    c7, c8, c9 = st.columns(3)
+    c7.metric("Empleados fijos", f"RD$ {empleados_fijos:,.2f}")
+    c8.metric("Empleados variables", f"RD$ {empleados_variables:,.2f}")
+    c9.metric("Adelantos", f"RD$ {adelantos_tot:,.2f}")
 
-    render_notice(
-        "La utilidad neta se calcula restando a la utilidad bruta: gastos fijos, gastos variables, pago de empleados y pérdida de mercancía.",
-        "ok",
-    )
+    c10, c11, c12 = st.columns(3)
+    c10.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
+    c11.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
+    c12.metric("35% gerente", f"RD$ {gerente_35:,.2f}")
 
-    st.markdown('<div class="section-title">Gráficos</div>', unsafe_allow_html=True)
+    st.subheader("📈 Gráficos")
     v_mes = agrupar_mensual(ventas_df, "total")
     g_mes = agrupar_mensual(gastos_df, "monto")
     p_mes = agrupar_mensual(perdidas_df, "valor")
     c_mes = agrupar_mensual(compras_df, "monto")
 
-    gf_df = pd.DataFrame(
-        {
-            "concepto": ["Gastos fijos", "Gastos variables", "Empleados", "Pérdidas"],
-            "valor": [gastos_fijos, gastos_variables, empleados_fijos + empleados_variables, perdidas_tot],
-        }
-    )
+    if not v_mes.empty:
+        st.write("Ventas por mes")
+        st.line_chart(v_mes.set_index("mes"))
 
-    metodos_df = pd.DataFrame()
-    if not ventas_df.empty:
-        col_metodo = "metodo_pago" if "metodo_pago" in ventas_df.columns else "metodo" if "metodo" in ventas_df.columns else None
-        if col_metodo is not None:
-            temp_met = ventas_df.copy()
-            temp_met[col_metodo] = temp_met[col_metodo].fillna("sin método").astype(str)
-            metodos_df = (
-                temp_met.groupby(col_metodo, as_index=False)["total"]
-                .sum()
-                .rename(columns={col_metodo: "metodo"})
-            )
+    if not c_mes.empty:
+        st.write("Compras por mes")
+        st.bar_chart(c_mes.set_index("mes"))
 
-    gc1, gc2 = st.columns(2)
-    with gc1:
-        if not v_mes.empty:
-            st.write("Ventas por mes")
-            st.line_chart(v_mes.set_index("mes"))
-        else:
-            st.info("No hay ventas en el rango seleccionado.")
-    with gc2:
-        if not c_mes.empty:
-            st.write("Compras por mes")
-            st.bar_chart(c_mes.set_index("mes"))
-        else:
-            st.info("No hay compras en el rango seleccionado.")
+    if not g_mes.empty:
+        st.write("Gastos por mes")
+        st.bar_chart(g_mes.set_index("mes"))
 
-    gc3, gc4 = st.columns(2)
-    with gc3:
-        if not gf_df.empty:
-            st.write("Composición de gastos y pérdidas")
-            st.bar_chart(gf_df.set_index("concepto"))
-    with gc4:
-        if not metodos_df.empty:
-            st.write("Ventas por método de pago")
-            st.bar_chart(metodos_df.set_index("metodo"))
-        else:
-            st.info("No hay métodos de pago para graficar en el rango.")
+    if not p_mes.empty:
+        st.write("Pérdidas por mes")
+        st.line_chart(p_mes.set_index("mes"))
 
-    gc5, gc6 = st.columns(2)
-    with gc5:
-        if not g_mes.empty:
-            st.write("Gastos por mes")
-            st.area_chart(g_mes.set_index("mes"))
-    with gc6:
-        if not p_mes.empty:
-            st.write("Pérdidas por mes")
-            st.line_chart(p_mes.set_index("mes"))
-
-    st.markdown('<div class="section-title">Análisis del negocio</div>', unsafe_allow_html=True)
+    st.subheader("🧠 Análisis del negocio")
     for mensaje in analisis_negocio(
         ventas_tot,
         compras_tot,
@@ -1516,9 +1104,9 @@ if menu == "Dashboard":
         perdidas_tot,
         utilidad_neta,
     ):
-        render_notice(mensaje, "warn" if ("🔴" in mensaje or "🟡" in mensaje) else "ok")
+        st.write(mensaje)
 
-    st.markdown('<div class="section-title">Pérdidas por producto</div>', unsafe_allow_html=True)
+    st.subheader("🧾 Pérdidas por producto")
     if not perdidas_df.empty and "producto" in perdidas_df.columns:
         cols = columnas_disponibles(perdidas_df, ["cantidad", "valor"])
         rep = perdidas_df.groupby("producto", as_index=False)[cols].sum().sort_values(cols[-1], ascending=False)
@@ -1531,6 +1119,7 @@ if menu == "Dashboard":
 # =========================================================
 # PRODUCTOS
 # =========================================================
+
 elif menu == "Productos":
     st.title("📦 Productos")
     st.caption("Catálogo maestro de productos con código, precios múltiples y control de inventario.")
@@ -2477,47 +2066,48 @@ elif menu == "Gastos Dueño":
 # =========================================================
 # CIERRE DE CAJA
 # =========================================================
-elif menu == "Caja":
-    st.title("💵 Caja")
-    caja_activa = obtener_caja_abierta()
+elif menu == "Cierre de Caja":
+    st.title("🧾 Cierre de Caja")
 
-    if caja_activa is None:
-        st.subheader("Abrir caja")
-        c1, c2 = st.columns(2)
-        with c1:
-            monto_inicial = st.number_input("Fondo inicial", min_value=0.0, step=1.0, key="caja_monto_inicial")
-        with c2:
-            observacion_apertura = st.text_input("Observación", key="caja_obs_apertura")
-        if st.button("Abrir caja", key="btn_abrir_caja"):
-            ok, msg = abrir_caja(monto_inicial, observacion_apertura)
-            if ok:
-                st.success(msg)
+    with st.expander("➕ Registrar cierre de caja", expanded=True):
+        fecha = st.date_input("Fecha de cierre", value=date.today(), key="caja_fecha")
+        apertura = st.number_input("Fondo / apertura", min_value=0.0, step=1.0, key="caja_apertura")
+
+        ventas_hoy = filtrar_por_fechas(DATA["ventas"], fecha, fecha)
+        compras_hoy = filtrar_por_fechas(DATA["compras"], fecha, fecha)
+        gastos_hoy = filtrar_por_fechas(DATA["gastos"], fecha, fecha)
+        adelantos_hoy = filtrar_por_fechas(DATA["adelantos_empleados"], fecha, fecha)
+        dueno_hoy = filtrar_por_fechas(DATA["gastos_dueno"], fecha, fecha)
+
+        ventas_efectivo = suma_col(ventas_hoy[ventas_hoy["metodo"].astype(str).str.lower() == "efectivo"], "total") if not ventas_hoy.empty and "metodo" in ventas_hoy.columns else 0.0
+        compras_efectivo = suma_col(compras_hoy[compras_hoy["metodo"].astype(str).str.lower() == "efectivo"], "monto") if not compras_hoy.empty and "metodo" in compras_hoy.columns else 0.0
+        gastos_efectivo = suma_col(gastos_hoy[gastos_hoy["metodo_pago"].astype(str).str.lower() == "efectivo"], "monto") if not gastos_hoy.empty and "metodo_pago" in gastos_hoy.columns else 0.0
+        adelantos_total = suma_col(adelantos_hoy, "monto")
+        dueno_total = suma_col(dueno_hoy, "monto")
+
+        efectivo_sistema = apertura + ventas_efectivo - compras_efectivo - gastos_efectivo - adelantos_total - dueno_total
+        st.info(f"Efectivo esperado en sistema: RD$ {efectivo_sistema:,.2f}")
+
+        efectivo_fisico = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_fisico")
+        detalle = st.text_area("Detalle / observación", key="caja_detalle")
+        diferencia = float(efectivo_fisico) - float(efectivo_sistema)
+        st.write(f"Diferencia: RD$ {diferencia:,.2f}")
+
+        if st.button("Guardar cierre de caja"):
+            if insertar(
+                "cierre_caja",
+                {
+                    "fecha": str(fecha),
+                    "apertura": float(apertura),
+                    "efectivo_sistema": float(efectivo_sistema),
+                    "efectivo_fisico": float(efectivo_fisico),
+                    "diferencia": float(diferencia),
+                    "detalle": detalle,
+                },
+            ):
+                st.success("Cierre de caja guardado.")
                 st.rerun()
-            else:
-                st.error(msg)
-    else:
-        st.success("Tienes una caja abierta.")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Apertura", f"RD$ {float(limpiar_numero(caja_activa.get('monto_inicial')) or 0):,.2f}")
-        c2.metric("Fecha apertura", limpiar_texto(caja_activa.get("fecha_apertura")))
-        c3.metric("Estado", limpiar_texto(caja_activa.get("estado")))
 
-        ventas_hoy = filtrar_por_fechas(DATA["ventas"], date.today(), date.today())
-        ventas_usuario = ventas_hoy[ventas_hoy["usuario"].astype(str) == nombre_usuario_actual()] if not ventas_hoy.empty and "usuario" in ventas_hoy.columns else ventas_hoy
-        total_ventas_hoy = suma_col(ventas_usuario, "total")
-        st.info(f"Ventas del usuario hoy: RD$ {total_ventas_hoy:,.2f}")
-
-        monto_cierre = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_monto_cierre")
-        observacion_cierre = st.text_area("Observación de cierre", key="caja_obs_cierre")
-        if st.button("Cerrar caja", key="btn_cerrar_caja"):
-            ok, msg = cerrar_caja(caja_activa, monto_cierre, observacion_cierre)
-            if ok:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-
-    st.subheader("Historial de cierres")
     df = DATA["cierre_caja"].copy()
     if not df.empty:
         d1, d2 = rango_fechas_ui("caja")
@@ -2532,7 +2122,6 @@ elif menu == "Caja":
 
 # =========================================================
 # ESTADO DE RESULTADOS
-
 # =========================================================
 elif menu == "Estado de Resultados":
     st.title("📊 Estado de Resultados")
@@ -2714,10 +2303,6 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
-    caja_activa = obtener_caja_abierta()
-    if caja_activa is None:
-        st.warning("Debes abrir la caja antes de vender.")
-        st.stop()
     cfg = obtener_configuracion()
     productos_df = DATA["productos"].copy()
     if not productos_df.empty and "activo" in productos_df.columns:
@@ -2914,13 +2499,76 @@ elif menu == "POS":
                                 "usuario": nombre_usuario_actual(),
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
-                        st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
+                        metodo_final = "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito")
+                        st.session_state["pos_venta_finalizada"] = {
+                            "venta_id": str(venta_id),
+                            "total": float(total_final),
+                            "cambio": float(cambio),
+                            "cliente": cliente_nombre,
+                            "metodo_pago": metodo_final,
+                        }
                         st.session_state["pos_carrito"] = []
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo registrar la venta: {exc}")
+
+            venta_final = st.session_state.get("pos_venta_finalizada")
+            if venta_final:
+                st.markdown("---")
+                st.markdown(
+                    f"""
+                    <div style="background:#ffffff;border:2px solid #dbeafe;border-radius:18px;padding:24px;box-shadow:0 6px 18px rgba(0,0,0,0.08);text-align:center;margin-top:10px;">
+                        <h2 style="margin:0;color:#111827;">FACTURA: {venta_final['venta_id']}</h2>
+                        <p style="font-size:20px;margin-top:12px;color:#374151;">CAMBIO</p>
+                        <div style="background:#ecfeff;border-radius:14px;padding:22px;font-size:42px;font-weight:700;color:#111827;margin:10px auto 20px auto;max-width:420px;">
+                            RD$ {venta_final['cambio']:,.2f}
+                        </div>
+                        <p style="color:#6b7280;font-size:16px;">Total cobrado: RD$ {venta_final['total']:,.2f}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                b1, b2, b3 = st.columns(3)
+                with b1:
+                    if st.button("🧾 Imprimir Ticket", key="btn_imprimir_ticket_final", use_container_width=True):
+                        st.info("Impresión de ticket pendiente de conectar.")
+                with b2:
+                    if st.button("📄 Imprimir Factura", key="btn_imprimir_factura_final", use_container_width=True):
+                        st.info("Impresión de factura pendiente de conectar.")
+                with b3:
+                    if st.button("✅ Cerrar", key="btn_cerrar_venta_final", use_container_width=True):
+                        st.session_state["pos_venta_finalizada"] = None
+                        st.rerun()
         else:
-            st.info("Carrito vacío.")
+            venta_final = st.session_state.get("pos_venta_finalizada")
+            if venta_final:
+                st.markdown("---")
+                st.markdown(
+                    f"""
+                    <div style="background:#ffffff;border:2px solid #dbeafe;border-radius:18px;padding:24px;box-shadow:0 6px 18px rgba(0,0,0,0.08);text-align:center;margin-top:10px;">
+                        <h2 style="margin:0;color:#111827;">FACTURA: {venta_final['venta_id']}</h2>
+                        <p style="font-size:20px;margin-top:12px;color:#374151;">CAMBIO</p>
+                        <div style="background:#ecfeff;border-radius:14px;padding:22px;font-size:42px;font-weight:700;color:#111827;margin:10px auto 20px auto;max-width:420px;">
+                            RD$ {venta_final['cambio']:,.2f}
+                        </div>
+                        <p style="color:#6b7280;font-size:16px;">Total cobrado: RD$ {venta_final['total']:,.2f}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                b1, b2, b3 = st.columns(3)
+                with b1:
+                    if st.button("🧾 Imprimir Ticket", key="btn_imprimir_ticket_final_vacio", use_container_width=True):
+                        st.info("Impresión de ticket pendiente de conectar.")
+                with b2:
+                    if st.button("📄 Imprimir Factura", key="btn_imprimir_factura_final_vacio", use_container_width=True):
+                        st.info("Impresión de factura pendiente de conectar.")
+                with b3:
+                    if st.button("✅ Cerrar", key="btn_cerrar_venta_final_vacio", use_container_width=True):
+                        st.session_state["pos_venta_finalizada"] = None
+                        st.rerun()
+            else:
+                st.info("Carrito vacío.")
 
 # =========================================================
 # CLIENTES
