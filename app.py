@@ -41,6 +41,32 @@ except Exception as exc:
 
 
 
+
+# =========================================================
+# ESTILO VISUAL EJECUTIVO
+# =========================================================
+st.markdown("""
+<style>
+:root {
+  --bg:#f6f9fc; --card:#ffffff; --ink:#0f172a; --muted:#475569;
+  --blue:#0f6efd; --green:#10b981; --red:#ef4444; --border:#dbe4f0;
+}
+.stApp {background: linear-gradient(180deg,#f8fbff 0%,#eef4fb 100%);}
+section[data-testid="stSidebar"] {background: linear-gradient(180deg,#0f172a 0%,#111827 100%); border-right:1px solid rgba(255,255,255,.08);}
+section[data-testid="stSidebar"] * {color:#f8fafc !important;}
+section[data-testid="stSidebar"] .stSelectbox label, section[data-testid="stSidebar"] .stButton button {color:#0f172a !important;}
+section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {color:#0f172a !important;}
+.block-container {padding-top:1.25rem;}
+h1,h2,h3 {color:var(--ink); font-weight:800;}
+div[data-testid="metric-container"] {background:var(--card); border:1px solid var(--border); border-radius:18px; padding:14px 16px; box-shadow:0 10px 30px rgba(15,23,42,.06);}
+.stButton > button {border-radius:12px; border:1px solid var(--border); box-shadow:0 4px 14px rgba(15,23,42,.06); font-weight:700;}
+.stButton > button[kind="primary"] {background:linear-gradient(90deg,#0f6efd,#2563eb); color:white; border:none;}
+[data-testid="stDataFrame"] {background:var(--card); border:1px solid var(--border); border-radius:16px; overflow:hidden;}
+.streamlit-expanderHeader {font-weight:800; color:var(--ink);}
+div[data-testid="stForm"] {background:rgba(255,255,255,.72); border:1px solid var(--border); border-radius:18px; padding:14px;}
+</style>
+""", unsafe_allow_html=True)
+
 # =========================================================
 # UTILIDADES BÁSICAS TEMPRANAS (PARA LOGIN)
 # =========================================================
@@ -615,35 +641,29 @@ def render_popup_post_venta():
     data = st.session_state.get("pos_venta_finalizada")
     if not data:
         return
-
-    factura = data.get('factura') or data.get('venta_id')
     st.markdown(
         f"""
-        <div style='background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);border:2px solid #bfdbfe;border-radius:22px;padding:24px;box-shadow:0 18px 40px rgba(15,23,42,.14);margin:8px 0 18px 0;'>
-            <div style='font-size:18px;font-weight:700;color:#475569;text-align:center;'>Factura</div>
-            <div style='font-size:34px;font-weight:900;color:#0f172a;text-align:center;margin-bottom:12px;'>{factura}</div>
-            <div style='font-size:22px;font-weight:800;color:#334155;text-align:center;margin-bottom:10px;'>CAMBIO</div>
-            <div style='background:#ecfeff;border:2px solid #a5f3fc;border-radius:16px;padding:18px;text-align:center;font-size:48px;font-weight:900;color:#0f172a;margin-bottom:16px;'>
+        <div style='background:#ffffff;border:2px solid #c7d2fe;border-radius:20px;padding:20px 22px;box-shadow:0 10px 25px rgba(15,23,42,.12);margin-bottom:18px;'>
+            <div style='font-size:28px;font-weight:900;text-align:center;margin-bottom:6px;color:#0f172a;'>FACTURA: {data.get('factura') or data.get('venta_id')}</div>
+            <div style='font-size:18px;color:#475569;text-align:center;margin-bottom:12px;'>CAMBIO</div>
+            <div style='background:#ecfeff;border:1px solid #bae6fd;border-radius:14px;padding:18px;text-align:center;font-size:44px;font-weight:900;color:#0f172a;margin-bottom:14px;'>
                 {_formato_moneda(data.get('cambio', 0))}
             </div>
-            <div style='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px;'>
-                <div style='background:#eff6ff;border-radius:14px;padding:12px;text-align:center;'><div style='font-size:12px;color:#64748b;'>Total</div><div style='font-size:24px;font-weight:800;color:#0f172a;'>{_formato_moneda(data.get('total', 0))}</div></div>
-                <div style='background:#f0fdf4;border-radius:14px;padding:12px;text-align:center;'><div style='font-size:12px;color:#64748b;'>Recibido</div><div style='font-size:24px;font-weight:800;color:#0f172a;'>{_formato_moneda(data.get('recibido', 0))}</div></div>
-            </div>
-            <div style='background:#fff7ed;border:1px solid #fdba74;border-radius:12px;padding:10px 12px;text-align:center;color:#9a3412;font-size:14px;font-weight:700;'>
-                Elige imprimir Ticket o Factura y luego entrega el cambio o colócalo en caja.
+            <div style='display:flex;gap:12px;justify-content:center;color:#475569;font-size:15px;flex-wrap:wrap;'>
+                <div><b>Total:</b> {_formato_moneda(data.get('total', 0))}</div>
+                <div><b>Recibido:</b> {_formato_moneda(data.get('recibido', 0))}</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    c1, c2, c3 = st.columns([1, 1, 0.8])
+    st.info("Primero confirma el cambio y luego elige si quieres imprimir ticket o factura.")
+    c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
         st.download_button(
             "🖨️ Imprimir Ticket",
             data=construir_texto_impresion(data, "ticket"),
-            file_name=f"ticket_{factura}.txt",
+            file_name=f"ticket_{data.get('factura') or data.get('venta_id')}.txt",
             mime="text/plain",
             use_container_width=True,
             key=f"dl_ticket_{data.get('venta_id')}"
@@ -652,7 +672,7 @@ def render_popup_post_venta():
         st.download_button(
             "🧾 Imprimir Factura",
             data=construir_texto_impresion(data, "factura"),
-            file_name=f"factura_{factura}.txt",
+            file_name=f"factura_{data.get('factura') or data.get('venta_id')}.txt",
             mime="text/plain",
             use_container_width=True,
             key=f"dl_factura_{data.get('venta_id')}"
@@ -1086,17 +1106,26 @@ menu_base = [
     "Auditoría",
 ]
 
+rol_actual_menu = normalizar_texto(usuario_sesion().get("rol", ""))
 if es_admin() or tiene_permiso("puede_configurar"):
     menu_opciones = menu_base
+elif rol_actual_menu == "gerente" and tiene_permiso("puede_ver_reportes"):
+    menu_opciones = [
+        "Dashboard", "POS", "Productos", "Clientes", "Proveedores", "Inventario Actual",
+        "Ventas", "Compras", "Gastos", "Empleados", "Pérdidas", "Cierre de Caja",
+        "Estado de Resultados", "Reportes", "Créditos"
+    ]
+elif rol_actual_menu == "cajera":
+    menu_opciones = ["POS", "Ventas", "Cierre de Caja"]
 else:
-    menu_opciones = ["Dashboard"]
+    menu_opciones = []
     if tiene_permiso("puede_vender"):
         menu_opciones += ["POS", "Ventas", "Cierre de Caja"]
     if tiene_permiso("puede_registrar_compras"):
         menu_opciones += ["Compras", "Proveedores", "Productos", "Inventario Actual"]
     if tiene_permiso("puede_registrar_gastos"):
         menu_opciones += ["Gastos", "Catálogo de Gastos", "Gastos Dueño"]
-    if tiene_permiso("puede_ver_reportes"):
+    if tiene_permiso("puede_ver_reportes") and rol_actual_menu != "cajera":
         menu_opciones += ["Reportes", "Estado de Resultados", "Auditoría", "Clientes", "Créditos"]
     menu_opciones = list(dict.fromkeys(menu_opciones))
 
