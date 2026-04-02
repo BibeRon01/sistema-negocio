@@ -41,32 +41,6 @@ except Exception as exc:
 
 
 
-
-# =========================================================
-# ESTILO VISUAL EJECUTIVO
-# =========================================================
-st.markdown("""
-<style>
-:root {
-  --bg:#f6f9fc; --card:#ffffff; --ink:#0f172a; --muted:#475569;
-  --blue:#0f6efd; --green:#10b981; --red:#ef4444; --border:#dbe4f0;
-}
-.stApp {background: linear-gradient(180deg,#f8fbff 0%,#eef4fb 100%);}
-section[data-testid="stSidebar"] {background: linear-gradient(180deg,#0f172a 0%,#111827 100%); border-right:1px solid rgba(255,255,255,.08);}
-section[data-testid="stSidebar"] * {color:#f8fafc !important;}
-section[data-testid="stSidebar"] .stSelectbox label, section[data-testid="stSidebar"] .stButton button {color:#0f172a !important;}
-section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {color:#0f172a !important;}
-.block-container {padding-top:1.25rem;}
-h1,h2,h3 {color:var(--ink); font-weight:800;}
-div[data-testid="metric-container"] {background:var(--card); border:1px solid var(--border); border-radius:18px; padding:14px 16px; box-shadow:0 10px 30px rgba(15,23,42,.06);}
-.stButton > button {border-radius:12px; border:1px solid var(--border); box-shadow:0 4px 14px rgba(15,23,42,.06); font-weight:700;}
-.stButton > button[kind="primary"] {background:linear-gradient(90deg,#0f6efd,#2563eb); color:white; border:none;}
-[data-testid="stDataFrame"] {background:var(--card); border:1px solid var(--border); border-radius:16px; overflow:hidden;}
-.streamlit-expanderHeader {font-weight:800; color:var(--ink);}
-div[data-testid="stForm"] {background:rgba(255,255,255,.72); border:1px solid var(--border); border-radius:18px; padding:14px;}
-</style>
-""", unsafe_allow_html=True)
-
 # =========================================================
 # UTILIDADES BÁSICAS TEMPRANAS (PARA LOGIN)
 # =========================================================
@@ -603,124 +577,30 @@ def registrar_auditoria(accion: str, tabla: str, detalle: str = ""):
         pass
 
 
-def _formato_moneda(valor: float) -> str:
-    return f"RD$ {float(valor or 0):,.2f}"
-
-
-def construir_texto_impresion(data: dict, tipo: str = "ticket") -> str:
-    lineas = []
-    lineas.append("BIBE RON 01")
-    lineas.append(tipo.upper())
-    lineas.append("=" * 32)
-    lineas.append(f"Factura: {data.get('factura') or data.get('venta_id')}")
-    lineas.append(f"Fecha: {data.get('fecha')}")
-    lineas.append(f"Cliente: {data.get('cliente_nombre') or 'Venta general'}")
-    lineas.append(f"Vendedor: {data.get('usuario') or ''}")
-    lineas.append(f"Método: {data.get('metodo_pago') or ''}")
-    lineas.append("-" * 32)
-    for item in data.get('items', []):
-        nombre = str(item.get('producto') or '')[:28]
-        cantidad = float(item.get('cantidad') or 0)
-        precio = float(item.get('precio_unitario') or 0)
-        total = float(item.get('total_linea') or 0)
-        lineas.append(nombre)
-        lineas.append(f"{cantidad:,.0f} x {precio:,.2f} = {total:,.2f}")
-    lineas.append("-" * 32)
-    lineas.append(f"Subtotal: {_formato_moneda(data.get('subtotal', 0))}")
-    lineas.append(f"Descuento: {_formato_moneda(data.get('descuento', 0))}")
-    lineas.append(f"Recargo: {_formato_moneda(data.get('recargo', 0))}")
-    lineas.append(f"TOTAL: {_formato_moneda(data.get('total', 0))}")
-    lineas.append(f"Recibido: {_formato_moneda(data.get('recibido', 0))}")
-    lineas.append(f"Cambio: {_formato_moneda(data.get('cambio', 0))}")
-    lineas.append("=" * 32)
-    lineas.append("Gracias por su compra")
-    return "\n".join(lineas)
-
-
-def render_popup_post_venta():
-    data = st.session_state.get("pos_venta_finalizada")
-    if not data:
-        return
-    st.markdown(
-        f"""
-        <div style='background:#ffffff;border:2px solid #c7d2fe;border-radius:20px;padding:20px 22px;box-shadow:0 10px 25px rgba(15,23,42,.12);margin-bottom:18px;'>
-            <div style='font-size:28px;font-weight:900;text-align:center;margin-bottom:6px;color:#0f172a;'>FACTURA: {data.get('factura') or data.get('venta_id')}</div>
-            <div style='font-size:18px;color:#475569;text-align:center;margin-bottom:12px;'>CAMBIO</div>
-            <div style='background:#ecfeff;border:1px solid #bae6fd;border-radius:14px;padding:18px;text-align:center;font-size:44px;font-weight:900;color:#0f172a;margin-bottom:14px;'>
-                {_formato_moneda(data.get('cambio', 0))}
-            </div>
-            <div style='display:flex;gap:12px;justify-content:center;color:#475569;font-size:15px;flex-wrap:wrap;'>
-                <div><b>Total:</b> {_formato_moneda(data.get('total', 0))}</div>
-                <div><b>Recibido:</b> {_formato_moneda(data.get('recibido', 0))}</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.info("Primero confirma el cambio y luego elige si quieres imprimir ticket o factura.")
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1:
-        st.download_button(
-            "🖨️ Imprimir Ticket",
-            data=construir_texto_impresion(data, "ticket"),
-            file_name=f"ticket_{data.get('factura') or data.get('venta_id')}.txt",
-            mime="text/plain",
-            use_container_width=True,
-            key=f"dl_ticket_{data.get('venta_id')}"
-        )
-    with c2:
-        st.download_button(
-            "🧾 Imprimir Factura",
-            data=construir_texto_impresion(data, "factura"),
-            file_name=f"factura_{data.get('factura') or data.get('venta_id')}.txt",
-            mime="text/plain",
-            use_container_width=True,
-            key=f"dl_factura_{data.get('venta_id')}"
-        )
-    with c3:
-        if st.button("✅ Terminar", use_container_width=True, key=f"cerrar_popup_{data.get('venta_id')}"):
-            st.session_state.pop("pos_venta_finalizada", None)
-            st.rerun()
-
-
-
-def _pk_col_tabla(nombre_tabla: str) -> str:
-    especiales = {
-        "ventas": "identificación",
-    }
-    return especiales.get(nombre_tabla, "id")
-
-
-def _normalizar_df_tabla(nombre_tabla: str, df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    if nombre_tabla == "ventas":
-        if "identificación" in df.columns and "id" not in df.columns:
-            df = df.copy()
-            df["id"] = df["identificación"]
-        if "metodo" not in df.columns and "metodo_pago" in df.columns:
-            df = df.copy()
-            df["metodo"] = df["metodo_pago"]
-    return df
-
 
 def leer_tabla(nombre_tabla: str, order_by: str = "id") -> pd.DataFrame:
-    candidatos = []
-    pk = _pk_col_tabla(nombre_tabla)
-    for c in [order_by, pk, "fecha", "created_at", None]:
-        if c not in candidatos:
-            candidatos.append(c)
-    for campo in candidatos:
+    try:
+        resp = supabase.table(nombre_tabla).select("*").order(order_by).execute()
+        data = resp.data if resp.data else []
+        df = pd.DataFrame(data)
+    except Exception:
         try:
-            q = supabase.table(nombre_tabla).select("*")
-            if campo:
-                q = q.order(campo)
-            resp = q.execute()
+            resp = supabase.table(nombre_tabla).select("*").execute()
             data = resp.data if resp.data else []
-            return _normalizar_df_tabla(nombre_tabla, pd.DataFrame(data))
+            df = pd.DataFrame(data)
         except Exception:
-            continue
-    return pd.DataFrame()
+            return pd.DataFrame()
+
+    if not df.empty:
+        if "identificación" in df.columns and "id" not in df.columns:
+            df["id"] = df["identificación"]
+        if "metodo_pago" not in df.columns and "método_pago" in df.columns:
+            df["metodo_pago"] = df["método_pago"]
+        if "metodo" not in df.columns and "método" in df.columns:
+            df["metodo"] = df["método"]
+        if "cliente_nombre" not in df.columns and "cliente_nombr" in df.columns:
+            df["cliente_nombre"] = df["cliente_nombr"]
+    return df
 
 
 
@@ -735,39 +615,54 @@ def insertar(nombre_tabla: str, datos: dict) -> bool:
 
 
 
+def _campos_pk(nombre_tabla: str) -> list[str]:
+    if nombre_tabla == "ventas":
+        return ["id", "identificación"]
+    return ["id"]
+
+
 def actualizar(nombre_tabla: str, fila_id: Any, datos: dict) -> bool:
-    try:
-        pk = _pk_col_tabla(nombre_tabla)
-        supabase.table(nombre_tabla).update(datos).eq(pk, fila_id).execute()
-        registrar_auditoria("actualizar", nombre_tabla, f"{pk}={fila_id} | {str(datos)[:500]}")
-        return True
-    except Exception as exc:
-        st.error(f"Error al actualizar en {nombre_tabla}: {exc}")
-        return False
+    campos = _campos_pk(nombre_tabla)
+    ultimo_error = None
+    for campo in campos:
+        try:
+            supabase.table(nombre_tabla).update(datos).eq(campo, fila_id).execute()
+            registrar_auditoria("actualizar", nombre_tabla, f"{campo}={fila_id} | {str(datos)[:500]}")
+            return True
+        except Exception as exc:
+            ultimo_error = exc
+    st.error(f"Error al actualizar en {nombre_tabla}: {ultimo_error}")
+    return False
 
 
 
 def eliminar(nombre_tabla: str, fila_id: Any) -> bool:
-    try:
-        pk = _pk_col_tabla(nombre_tabla)
-        supabase.table(nombre_tabla).delete().eq(pk, fila_id).execute()
-        registrar_auditoria("eliminar", nombre_tabla, f"{pk}={fila_id}")
-        return True
-    except Exception as exc:
-        st.error(f"Error al eliminar en {nombre_tabla}: {exc}")
-        return False
+    campos = _campos_pk(nombre_tabla)
+    ultimo_error = None
+    for campo in campos:
+        try:
+            supabase.table(nombre_tabla).delete().eq(campo, fila_id).execute()
+            registrar_auditoria("eliminar", nombre_tabla, f"{campo}={fila_id}")
+            return True
+        except Exception as exc:
+            ultimo_error = exc
+    st.error(f"Error al eliminar en {nombre_tabla}: {ultimo_error}")
+    return False
 
 
 
 def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
-    try:
-        pk = _pk_col_tabla(nombre_tabla)
-        supabase.table(nombre_tabla).update({"anulado": True, "motivo_anulacion": motivo}).eq(pk, fila_id).execute()
-        registrar_auditoria("anular", nombre_tabla, f"{pk}={fila_id} motivo={motivo}")
-        return True
-    except Exception as exc:
-        st.error(f"Error al anular en {nombre_tabla}: {exc}")
-        return False
+    campos = _campos_pk(nombre_tabla)
+    ultimo_error = None
+    for campo in campos:
+        try:
+            supabase.table(nombre_tabla).update({"anulado": True, "motivo_anulacion": motivo}).eq(campo, fila_id).execute()
+            registrar_auditoria("anular", nombre_tabla, f"{campo}={fila_id} motivo={motivo}")
+            return True
+        except Exception as exc:
+            ultimo_error = exc
+    st.error(f"Error al anular en {nombre_tabla}: {ultimo_error}")
+    return False
 
 # =========================================================
 # CARGA GLOBAL
@@ -1096,6 +991,79 @@ def serie_periodica(df: pd.DataFrame, columna: str, frecuencia: str = "M") -> pd
     return out
 
 
+
+
+def usuario_id_actual():
+    user = usuario_sesion()
+    return user.get("id")
+
+
+def obtener_caja_abierta():
+    usuario_id = usuario_id_actual()
+    if not usuario_id:
+        return None
+    try:
+        resp = (
+            supabase.table("caja")
+            .select("*")
+            .eq("usuario_id", str(usuario_id))
+            .eq("estado", "abierta")
+            .order("fecha_apertura", desc=True)
+            .limit(1)
+            .execute()
+        )
+        filas = resp.data or []
+        return filas[0] if filas else None
+    except Exception:
+        return None
+
+
+def abrir_caja(monto_inicial: float, observacion: str = "") -> tuple[bool, str]:
+    if obtener_caja_abierta() is not None:
+        return False, "Ya tienes una caja abierta."
+    usuario_id = usuario_id_actual()
+    if not usuario_id:
+        return False, "No se encontró el usuario actual."
+    try:
+        supabase.table("caja").insert({
+            "usuario_id": str(usuario_id),
+            "fecha_apertura": datetime.now().isoformat(),
+            "monto_inicial": float(monto_inicial),
+            "estado": "abierta",
+            "dia_operativo": ahora_str(),
+            "observacion": observacion,
+            "anulado": False,
+        }).execute()
+        registrar_auditoria("abrir_caja", "caja", f"monto_inicial={monto_inicial}")
+        return True, "Caja abierta correctamente."
+    except Exception as exc:
+        return False, f"No se pudo abrir caja: {exc}"
+
+
+def cerrar_caja(caja_row: dict, monto_cierre: float, observacion: str = "") -> tuple[bool, str]:
+    try:
+        monto_inicial = float(limpiar_numero(caja_row.get("monto_inicial")) or 0)
+        diferencia = float(monto_cierre) - monto_inicial
+        supabase.table("caja").update({
+            "fecha_cierre": datetime.now().isoformat(),
+            "monto_cierre": float(monto_cierre),
+            "diferencia": float(diferencia),
+            "observacion": observacion or caja_row.get("observacion") or "",
+            "estado": "cerrada",
+        }).eq("id", caja_row["id"]).execute()
+        insertar("cierre_caja", {
+            "fecha": datetime.now().isoformat(),
+            "apertura": monto_inicial,
+            "efectivo_sistema": monto_inicial,
+            "efectivo_fisico": float(monto_cierre),
+            "diferencia": float(diferencia),
+            "detalle": observacion,
+        })
+        registrar_auditoria("cerrar_caja", "caja", f"id={caja_row['id']} monto_cierre={monto_cierre}")
+        return True, "Caja cerrada correctamente."
+    except Exception as exc:
+        return False, f"No se pudo cerrar caja: {exc}"
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1139,28 +1107,15 @@ menu_base = [
     "Auditoría",
 ]
 
-rol_actual_menu = normalizar_texto(usuario_sesion().get("rol", ""))
 if es_admin() or tiene_permiso("puede_configurar"):
-    menu_opciones = menu_base
-elif rol_actual_menu == "gerente" and tiene_permiso("puede_ver_reportes"):
-    menu_opciones = [
-        "Dashboard", "POS", "Productos", "Clientes", "Proveedores", "Inventario Actual",
-        "Ventas", "Compras", "Gastos", "Empleados", "Pérdidas", "Cierre de Caja",
-        "Estado de Resultados", "Reportes", "Créditos"
-    ]
-elif rol_actual_menu == "cajera":
-    menu_opciones = ["POS", "Ventas", "Cierre de Caja"]
+    menu_opciones = ["Dashboard", "Caja"] + [m for m in menu_base if m not in ["Dashboard", "Cierre de Caja"]]
 else:
     menu_opciones = []
     if tiene_permiso("puede_vender"):
-        menu_opciones += ["POS", "Ventas", "Cierre de Caja"]
-    if tiene_permiso("puede_registrar_compras"):
-        menu_opciones += ["Compras", "Proveedores", "Productos", "Inventario Actual"]
-    if tiene_permiso("puede_registrar_gastos"):
-        menu_opciones += ["Gastos", "Catálogo de Gastos", "Gastos Dueño"]
-    if tiene_permiso("puede_ver_reportes") and rol_actual_menu != "cajera":
-        menu_opciones += ["Reportes", "Estado de Resultados", "Auditoría", "Clientes", "Créditos"]
-    menu_opciones = list(dict.fromkeys(menu_opciones))
+        menu_opciones += ["Caja", "POS", "Ventas"]
+    if tiene_permiso("puede_ver_reportes"):
+        menu_opciones += ["Clientes", "Créditos"]
+    menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
 
 menu = st.sidebar.selectbox("Menú", menu_opciones)
 
@@ -1734,26 +1689,12 @@ elif menu == "Ventas":
                 st.success("Venta guardada.")
                 st.rerun()
 
-    df = leer_tabla("ventas", order_by="fecha").copy()
-    df = _normalizar_df_tabla("ventas", df)
+    df = DATA["ventas"].copy()
     if not df.empty:
-        if "fecha" in df.columns:
-            df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
         d1, d2 = rango_fechas_ui("ventas")
         df = filtrar_por_fechas(df, d1, d2)
         txt = st.text_input("Buscar venta", key="buscar_ventas")
-        if txt:
-            txt_n = normalizar_texto(txt)
-            columnas_busqueda = [c for c in ["id", "identificación", "cliente_nombre", "usuario", "metodo", "metodo_pago", "ncf"] if c in df.columns]
-            if columnas_busqueda:
-                mask = pd.Series(False, index=df.index)
-                for col in columnas_busqueda:
-                    mask = mask | df[col].astype(str).str.lower().str.contains(txt_n, na=False)
-                df = df[mask]
-        # columnas amigables primero
-        preferidas = [c for c in ["id", "identificación", "fecha", "cliente_nombre", "usuario", "metodo_pago", "metodo", "subtotal", "descuento", "recargo", "total", "ganancia_bruta", "ganancia_bruta_manual", "anulado", "motivo_anulacion"] if c in df.columns]
-        otras = [c for c in df.columns if c not in preferidas]
-        df = df[preferidas + otras]
+        df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ventas")
     else:
@@ -2225,48 +2166,47 @@ elif menu == "Gastos Dueño":
 # =========================================================
 # CIERRE DE CAJA
 # =========================================================
-elif menu == "Cierre de Caja":
-    st.title("🧾 Cierre de Caja")
+elif menu == "Caja":
+    st.title("💵 Caja")
+    caja_activa = obtener_caja_abierta()
 
-    with st.expander("➕ Registrar cierre de caja", expanded=True):
-        fecha = st.date_input("Fecha de cierre", value=date.today(), key="caja_fecha")
-        apertura = st.number_input("Fondo / apertura", min_value=0.0, step=1.0, key="caja_apertura")
-
-        ventas_hoy = filtrar_por_fechas(DATA["ventas"], fecha, fecha)
-        compras_hoy = filtrar_por_fechas(DATA["compras"], fecha, fecha)
-        gastos_hoy = filtrar_por_fechas(DATA["gastos"], fecha, fecha)
-        adelantos_hoy = filtrar_por_fechas(DATA["adelantos_empleados"], fecha, fecha)
-        dueno_hoy = filtrar_por_fechas(DATA["gastos_dueno"], fecha, fecha)
-
-        ventas_efectivo = suma_col(ventas_hoy[ventas_hoy["metodo"].astype(str).str.lower() == "efectivo"], "total") if not ventas_hoy.empty and "metodo" in ventas_hoy.columns else 0.0
-        compras_efectivo = suma_col(compras_hoy[compras_hoy["metodo"].astype(str).str.lower() == "efectivo"], "monto") if not compras_hoy.empty and "metodo" in compras_hoy.columns else 0.0
-        gastos_efectivo = suma_col(gastos_hoy[gastos_hoy["metodo_pago"].astype(str).str.lower() == "efectivo"], "monto") if not gastos_hoy.empty and "metodo_pago" in gastos_hoy.columns else 0.0
-        adelantos_total = suma_col(adelantos_hoy, "monto")
-        dueno_total = suma_col(dueno_hoy, "monto")
-
-        efectivo_sistema = apertura + ventas_efectivo - compras_efectivo - gastos_efectivo - adelantos_total - dueno_total
-        st.info(f"Efectivo esperado en sistema: RD$ {efectivo_sistema:,.2f}")
-
-        efectivo_fisico = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_fisico")
-        detalle = st.text_area("Detalle / observación", key="caja_detalle")
-        diferencia = float(efectivo_fisico) - float(efectivo_sistema)
-        st.write(f"Diferencia: RD$ {diferencia:,.2f}")
-
-        if st.button("Guardar cierre de caja"):
-            if insertar(
-                "cierre_caja",
-                {
-                    "fecha": str(fecha),
-                    "apertura": float(apertura),
-                    "efectivo_sistema": float(efectivo_sistema),
-                    "efectivo_fisico": float(efectivo_fisico),
-                    "diferencia": float(diferencia),
-                    "detalle": detalle,
-                },
-            ):
-                st.success("Cierre de caja guardado.")
+    if caja_activa is None:
+        st.subheader("Abrir caja")
+        c1, c2 = st.columns(2)
+        with c1:
+            monto_inicial = st.number_input("Fondo inicial", min_value=0.0, step=1.0, key="caja_monto_inicial")
+        with c2:
+            observacion_apertura = st.text_input("Observación", key="caja_obs_apertura")
+        if st.button("Abrir caja", key="btn_abrir_caja"):
+            ok, msg = abrir_caja(monto_inicial, observacion_apertura)
+            if ok:
+                st.success(msg)
                 st.rerun()
+            else:
+                st.error(msg)
+    else:
+        st.success("Tienes una caja abierta.")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Apertura", f"RD$ {float(limpiar_numero(caja_activa.get('monto_inicial')) or 0):,.2f}")
+        c2.metric("Fecha apertura", limpiar_texto(caja_activa.get("fecha_apertura")))
+        c3.metric("Estado", limpiar_texto(caja_activa.get("estado")))
 
+        ventas_hoy = filtrar_por_fechas(DATA["ventas"], date.today(), date.today())
+        ventas_usuario = ventas_hoy[ventas_hoy["usuario"].astype(str) == nombre_usuario_actual()] if not ventas_hoy.empty and "usuario" in ventas_hoy.columns else ventas_hoy
+        total_ventas_hoy = suma_col(ventas_usuario, "total")
+        st.info(f"Ventas del usuario hoy: RD$ {total_ventas_hoy:,.2f}")
+
+        monto_cierre = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_monto_cierre")
+        observacion_cierre = st.text_area("Observación de cierre", key="caja_obs_cierre")
+        if st.button("Cerrar caja", key="btn_cerrar_caja"):
+            ok, msg = cerrar_caja(caja_activa, monto_cierre, observacion_cierre)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    st.subheader("Historial de cierres")
     df = DATA["cierre_caja"].copy()
     if not df.empty:
         d1, d2 = rango_fechas_ui("caja")
@@ -2281,6 +2221,7 @@ elif menu == "Cierre de Caja":
 
 # =========================================================
 # ESTADO DE RESULTADOS
+
 # =========================================================
 elif menu == "Estado de Resultados":
     st.title("📊 Estado de Resultados")
@@ -2462,7 +2403,10 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
-    render_popup_post_venta()
+    caja_activa = obtener_caja_abierta()
+    if caja_activa is None:
+        st.warning("Debes abrir la caja antes de vender.")
+        st.stop()
     cfg = obtener_configuracion()
     productos_df = DATA["productos"].copy()
     if not productos_df.empty and "activo" in productos_df.columns:
@@ -2574,7 +2518,7 @@ elif menu == "POS":
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
             csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
             ncf = st.text_input("NCF (opcional)", key="pos_ncf")
-            if st.button("💾 Guardar e imprimir", key="btn_pos_cobrar"):
+            if st.button("💳 Cobrar", key="btn_pos_cobrar"):
                 if faltante > 0.001:
                     st.error("Los pagos no cubren el total final.")
                 elif pago_credito > 0 and cliente_nombre == "Venta general":
@@ -2659,21 +2603,7 @@ elif menu == "POS":
                                 "usuario": nombre_usuario_actual(),
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
-                        st.session_state["pos_venta_finalizada"] = {
-                            "venta_id": str(venta_id),
-                            "factura": ncf or str(venta_id)[:8].upper(),
-                            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "cliente_nombre": cliente_nombre,
-                            "usuario": nombre_usuario_actual(),
-                            "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
-                            "subtotal": float(subtotal),
-                            "descuento": float(descuento_global),
-                            "recargo": float(recargo),
-                            "total": float(total_final),
-                            "recibido": float(pagos_total),
-                            "cambio": float(cambio),
-                            "items": [dict(x) for x in carrito],
-                        }
+                        st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
                         st.session_state["pos_carrito"] = []
                         st.rerun()
                     except Exception as exc:
