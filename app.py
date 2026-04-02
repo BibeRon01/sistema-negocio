@@ -1669,7 +1669,19 @@ elif menu == "Ventas":
                     metodo = limpiar_texto(row["metodo"])
                     observacion = limpiar_texto(row["observacion"]) if "observacion" in df.columns else ""
                     if fecha:
-                        insertar("ventas", {"fecha": fecha, "total": float(total), "metodo": metodo, "observacion": observacion})
+                        insertar(
+                            "ventas",
+                            {
+                                "fecha": fecha,
+                                "total": float(total),
+                                "metodo": metodo,
+                                "metodo_pago": metodo,
+                                "observacion": observacion,
+                                "usuario": nombre_usuario_actual(),
+                                "cliente_nombre": "Venta general",
+                                "anulado": False,
+                            },
+                        )
                         count += 1
                 st.success(f"Se cargaron {count} ventas.")
                 st.rerun()
@@ -1685,20 +1697,73 @@ elif menu == "Ventas":
         observacion = st.text_input("Observación", key="venta_obs")
 
         if st.button("Guardar venta"):
-            if insertar("ventas", {"fecha": str(fecha), "total": float(total), "metodo": metodo, "observacion": observacion}):
+            if insertar(
+                "ventas",
+                {
+                    "fecha": str(fecha),
+                    "total": float(total),
+                    "metodo": metodo,
+                    "metodo_pago": metodo,
+                    "observacion": observacion,
+                    "usuario": nombre_usuario_actual(),
+                    "cliente_nombre": "Venta general",
+                    "anulado": False,
+                },
+            ):
                 st.success("Venta guardada.")
                 st.rerun()
 
-    df = DATA["ventas"].copy()
+    df = leer_tabla("ventas")
     if not df.empty:
+        if "id" not in df.columns and "identificación" in df.columns:
+            df["id"] = df["identificación"]
+        if "metodo" not in df.columns and "metodo_pago" in df.columns:
+            df["metodo"] = df["metodo_pago"]
+        if "cliente_nombre" not in df.columns:
+            df["cliente_nombre"] = "Venta general"
+        if "usuario" not in df.columns:
+            df["usuario"] = ""
+
         d1, d2 = rango_fechas_ui("ventas")
         df = filtrar_por_fechas(df, d1, d2)
         txt = st.text_input("Buscar venta", key="buscar_ventas")
-        df = buscar_df(df, txt)
-        st.dataframe(df, use_container_width=True)
+        metodo_filtro = st.selectbox(
+            "Filtrar por método",
+            ["Todos", "efectivo", "transferencia", "tarjeta", "credito", "mixto"],
+            key="ventas_filtro_metodo",
+        )
+
+        if txt:
+            df = buscar_df(df, txt)
+        col_metodo = "metodo_pago" if "metodo_pago" in df.columns else "metodo" if "metodo" in df.columns else None
+        if metodo_filtro != "Todos" and col_metodo:
+            df = df[df[col_metodo].astype(str).str.lower() == metodo_filtro.lower()]
+
+        columnas_preferidas = [
+            c
+            for c in [
+                "id",
+                "fecha",
+                "total",
+                "subtotal",
+                "descuento",
+                "recargo",
+                "metodo_pago",
+                "metodo",
+                "cliente_nombre",
+                "usuario",
+                "anulado",
+                "motivo_anulacion",
+                "ganancia_bruta",
+                "ganancia_bruta_manual",
+            ]
+            if c in df.columns
+        ]
+        st.dataframe(df[columnas_preferidas] if columnas_preferidas else df, use_container_width=True)
         descargar_archivos(df, "ventas")
     else:
         st.info("No hay ventas registradas.")
+
 
 
 # =========================================================
@@ -2485,7 +2550,23 @@ elif menu == "POS":
         if carrito:
             df_carrito = pd.DataFrame(carrito)
             st.data_editor(df_carrito, use_container_width=True, disabled=["producto_id", "codigo", "producto"], key="editor_carrito")
+
+            st.caption("Si te equivocas antes de cobrar, quita el producto aquí mismo.")
+            for i, item in enumerate(list(carrito)):
+                col_q1, col_q2, col_q3, col_q4 = st.columns([4, 2, 2, 1])
+                with col_q1:
+                    st.write(item["producto"])
+                with col_q2:
+                    st.write(f"Cant. {float(item['cantidad']):,.0f}")
+                with col_q3:
+                    st.write(f"RD$ {float(item['total_linea']):,.2f}")
+                with col_q4:
+                    if st.button("❌", key=f"quitar_pos_{i}"):
+                        carrito.pop(i)
+                        st.rerun()
+
             subtotal = float(df_carrito["total_linea"].sum())
+
             descuento_global = st.number_input("Descuento global", min_value=0.0, step=1.0, key="pos_desc_global")
             cliente_df = DATA.get("clientes", pd.DataFrame()).copy()
             cliente_nombre = "Venta general"
@@ -2603,6 +2684,7 @@ elif menu == "POS":
                                 "usuario": nombre_usuario_actual(),
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
+                        DATA.update(cargar_datos())
                         st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
                         st.session_state["pos_carrito"] = []
                         st.rerun()
