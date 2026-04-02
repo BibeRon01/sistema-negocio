@@ -476,11 +476,8 @@ def filtrar_por_fechas(df: pd.DataFrame, desde, hasta) -> pd.DataFrame:
         return df.copy()
     out = df.copy()
     out["fecha"] = pd.to_datetime(out["fecha"], errors="coerce")
-    out = out.dropna(subset=["fecha"])
-    if out.empty:
-        return out
-    desde_dt = pd.to_datetime(desde).normalize()
-    hasta_dt = pd.to_datetime(hasta).normalize() + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+    desde_dt = pd.to_datetime(desde)
+    hasta_dt = pd.to_datetime(hasta)
     return out[(out["fecha"] >= desde_dt) & (out["fecha"] <= hasta_dt)]
 
 
@@ -1656,6 +1653,9 @@ elif menu == "Ajustes Inventario":
 elif menu == "Ventas":
     st.title("💰 Ventas")
 
+    puede_gestionar_ventas = es_admin() or tiene_permiso("puede_editar_ventas") or tiene_permiso("puede_eliminar") or tiene_permiso("puede_anular")
+    puede_ver_utilidad = es_admin() or normalizar_texto(usuario_sesion().get("rol", "")) == "gerente" or tiene_permiso("puede_ver_reportes") or tiene_permiso("puede_configurar")
+
     with st.expander("📥 Subir Excel / CSV de ventas"):
         st.write("Columnas esperadas: fecha, total, metodo. Observación opcional.")
         archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_ventas")
@@ -1716,37 +1716,41 @@ elif menu == "Ventas":
                 st.success("Venta guardada.")
                 st.rerun()
 
-    # leer fresco desde Supabase para evitar caché local
+    # Lectura robusta: sin filtros cerrados para no ocultar ventas registradas
     try:
-        resp_ventas = supabase.table("ventas").select("*").execute()
-        df = pd.DataFrame(resp_ventas.data or [])
+        resp_v = supabase.table("ventas").select("*").order("fecha", desc=True).execute()
+        df = pd.DataFrame(resp_v.data or [])
     except Exception:
         df = leer_tabla("ventas")
 
     if not df.empty:
         if "id" not in df.columns and "identificación" in df.columns:
             df["id"] = df["identificación"]
+        if "identificacion" not in df.columns and "identificación" in df.columns:
+            df["identificacion"] = df["identificación"]
+        if "identificación" not in df.columns and "identificacion" in df.columns:
+            df["identificación"] = df["identificacion"]
         if "metodo" not in df.columns and "metodo_pago" in df.columns:
             df["metodo"] = df["metodo_pago"]
         if "metodo_pago" not in df.columns and "metodo" in df.columns:
             df["metodo_pago"] = df["metodo"]
-        if "cliente_nombre" not in df.columns and "cliente_nombr" in df.columns:
-            df["cliente_nombre"] = df["cliente_nombr"]
         if "cliente_nombre" not in df.columns:
             df["cliente_nombre"] = "Venta general"
-        if "usuario" not in df.columns and "usuario_id" in df.columns:
-            df["usuario"] = df["usuario_id"]
         if "usuario" not in df.columns:
             df["usuario"] = ""
         if "anulado" not in df.columns:
             df["anulado"] = False
+        if "motivo_anulacion" not in df.columns:
+            df["motivo_anulacion"] = ""
         if "ganancia_bruta" not in df.columns:
             df["ganancia_bruta"] = 0.0
         if "ganancia_bruta_manual" not in df.columns:
             df["ganancia_bruta_manual"] = 0.0
 
         d1, d2 = rango_fechas_ui("ventas")
-        df = filtrar_por_fechas(df, d1, d2)
+        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+        df = df[(df["fecha"] >= pd.to_datetime(d1)) & (df["fecha"] <= pd.to_datetime(d2) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))]
+
         txt = st.text_input("Buscar venta", key="buscar_ventas")
         metodo_filtro = st.selectbox(
             "Filtrar por método",
@@ -1760,25 +1764,16 @@ elif menu == "Ventas":
         if metodo_filtro != "Todos" and col_metodo:
             df = df[df[col_metodo].astype(str).str.lower() == metodo_filtro.lower()]
 
-        ventas_activas = df.copy()
-        if "anulado" in ventas_activas.columns:
-            ventas_activas = ventas_activas[ventas_activas["anulado"].fillna(False) == False]
-
-        total_vendido = float(pd.to_numeric(ventas_activas.get("total", 0), errors="coerce").fillna(0).sum()) if not ventas_activas.empty else 0.0
-        utilidad_visible = 0.0
-        if not ventas_activas.empty:
-            utilidad_visible = float(pd.to_numeric(ventas_activas.get("ganancia_bruta", 0), errors="coerce").fillna(0).sum())
-            utilidad_visible += float(pd.to_numeric(ventas_activas.get("ganancia_bruta_manual", 0), errors="coerce").fillna(0).sum())
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Ventas registradas", f"{len(ventas_activas):,.0f}")
+        total_vendido = float(pd.to_numeric(df.get("total", 0), errors="coerce").fillna(0).sum()) if not df.empty else 0.0
+        utilidad_visible = float(pd.to_numeric(df.get("ganancia_bruta", 0), errors="coerce").fillna(0).sum()) if not df.empty else 0.0
+        c1, c2 = st.columns(2 if not puede_ver_utilidad else 3)
+        c1.metric("Ventas registradas", int(len(df.index)))
         c2.metric("Total vendido", f"RD$ {total_vendido:,.2f}")
-        c3.metric("Utilidad bruta visible", f"RD$ {utilidad_visible:,.2f}")
+        if puede_ver_utilidad:
+            c3 = st.columns(3)[2]
+            c3.metric("Utilidad bruta visible", f"RD$ {utilidad_visible:,.2f}")
 
-        if "fecha" in df.columns:
-            df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
-            df = df.sort_values("fecha", ascending=False, na_position="last")
-
+        df_show = df.copy().sort_values("fecha", ascending=False)
         columnas_preferidas = [
             c
             for c in [
@@ -1798,10 +1793,59 @@ elif menu == "Ventas":
                 "ganancia_bruta",
                 "ganancia_bruta_manual",
             ]
-            if c in df.columns
+            if c in df_show.columns
         ]
-        st.dataframe(df[columnas_preferidas] if columnas_preferidas else df, use_container_width=True)
-        descargar_archivos(df, "ventas")
+        if not puede_ver_utilidad:
+            columnas_preferidas = [c for c in columnas_preferidas if c not in ["ganancia_bruta", "ganancia_bruta_manual"]]
+        st.dataframe(df_show[columnas_preferidas] if columnas_preferidas else df_show, use_container_width=True)
+        descargar_archivos(df_show[columnas_preferidas] if columnas_preferidas else df_show, "ventas")
+
+        if puede_gestionar_ventas:
+            with st.expander("🛠️ Editar / eliminar ventas", expanded=False):
+                opciones = []
+                mapa_ids = {}
+                for _, row in df_show.iterrows():
+                    row_id = row.get("id") or row.get("identificación")
+                    etiqueta = f"{row_id} | {row.get('fecha')} | RD$ {float(limpiar_numero(row.get('total')) or 0):,.2f} | {row.get('metodo_pago') or row.get('metodo') or ''}"
+                    opciones.append(etiqueta)
+                    mapa_ids[etiqueta] = row
+                if opciones:
+                    venta_sel = st.selectbox("Selecciona una venta", opciones, key="ventas_sel_edit")
+                    venta_row = mapa_ids[venta_sel]
+                    venta_id = venta_row.get("id") or venta_row.get("identificación")
+                    ce1, ce2, ce3 = st.columns(3)
+                    with ce1:
+                        fecha_edit = st.date_input("Fecha edición", value=pd.to_datetime(venta_row.get("fecha")).date() if pd.notna(pd.to_datetime(venta_row.get("fecha"), errors="coerce")) else date.today(), key="venta_edit_fecha")
+                    with ce2:
+                        total_edit = st.number_input("Total edición", min_value=0.0, step=1.0, value=float(limpiar_numero(venta_row.get("total")) or 0), key="venta_edit_total")
+                    with ce3:
+                        metodo_edit = st.selectbox("Método edición", ["efectivo", "transferencia", "tarjeta", "credito", "mixto"], index=["efectivo", "transferencia", "tarjeta", "credito", "mixto"].index(str((venta_row.get("metodo_pago") or venta_row.get("metodo") or "efectivo")).lower()) if str((venta_row.get("metodo_pago") or venta_row.get("metodo") or "efectivo")).lower() in ["efectivo", "transferencia", "tarjeta", "credito", "mixto"] else 0, key="venta_edit_metodo")
+                    obs_edit = st.text_input("Observación edición", value=limpiar_texto(venta_row.get("observacion")), key="venta_edit_obs")
+                    cl1, cl2, cl3 = st.columns(3)
+                    with cl1:
+                        if (es_admin() or tiene_permiso("puede_editar_ventas")) and st.button("💾 Guardar cambios", key="btn_guardar_cambios_venta"):
+                            ok = actualizar("ventas", venta_id, {
+                                "fecha": str(fecha_edit),
+                                "total": float(total_edit),
+                                "metodo": metodo_edit,
+                                "metodo_pago": metodo_edit,
+                                "observacion": obs_edit,
+                            })
+                            if ok:
+                                st.success("Venta actualizada.")
+                                st.rerun()
+                    with cl2:
+                        if (es_admin() or tiene_permiso("puede_anular")) and st.button("🚫 Anular venta", key="btn_anular_venta_admin"):
+                            ok = anular("ventas", venta_id, "Anulada manualmente desde módulo Ventas")
+                            if ok:
+                                st.success("Venta anulada.")
+                                st.rerun()
+                    with cl3:
+                        if (es_admin() or tiene_permiso("puede_eliminar")) and st.button("🗑️ Eliminar venta", key="btn_eliminar_venta_admin"):
+                            ok = eliminar("ventas", venta_id)
+                            if ok:
+                                st.success("Venta eliminada.")
+                                st.rerun()
     else:
         st.info("No hay ventas registradas.")
 
