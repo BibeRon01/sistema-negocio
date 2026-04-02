@@ -776,6 +776,156 @@ def upsert_inventario_actual(producto: str, costo: float, precio: float, existen
 
 
 
+
+
+def upsert_conteo_base(producto: str, existencia: float, fecha_mov, observacion: str = "") -> bool:
+    conteo = DATA.get("conteo_inventario", pd.DataFrame()).copy()
+    producto_n = normalizar_texto(producto)
+    fecha_txt = str(fecha_mov)
+    if not conteo.empty and "producto" in conteo.columns:
+        tmp = conteo.copy()
+        tmp["_n"] = tmp["producto"].astype(str).apply(normalizar_texto)
+        if "fecha" in tmp.columns:
+            tmp["_f"] = pd.to_datetime(tmp["fecha"], errors="coerce").dt.date.astype(str)
+            match = tmp[(tmp["_n"] == producto_n) & (tmp["_f"] == fecha_txt)]
+        else:
+            match = tmp[tmp["_n"] == producto_n]
+        if not match.empty:
+            fila = match.iloc[0]
+            existencia_fisica = limpiar_numero(fila.get("existencia_fisica"))
+            if existencia_fisica is None:
+                existencia_fisica = float(existencia)
+            diferencia = float(existencia_fisica) - float(existencia)
+            estado = "cuadrado" if abs(diferencia) < 0.0001 else ("faltante" if diferencia < 0 else "sobrante")
+            return actualizar(
+                "conteo_inventario",
+                fila["id"],
+                {
+                    "fecha": fecha_txt,
+                    "producto": limpiar_texto(producto),
+                    "existencia_sistema": float(existencia),
+                    "existencia_fisica": float(existencia_fisica),
+                    "diferencia": float(diferencia),
+                    "estado": estado,
+                    "observacion": observacion or fila.get("observacion") or "Sincronizado desde productos",
+                },
+            )
+    return insertar(
+        "conteo_inventario",
+        {
+            "fecha": fecha_txt,
+            "producto": limpiar_texto(producto),
+            "existencia_sistema": float(existencia),
+            "existencia_fisica": float(existencia),
+            "diferencia": 0.0,
+            "estado": "cuadrado",
+            "observacion": observacion or "Sincronizado desde productos",
+        },
+    )
+
+
+def sincronizar_producto_inventario(producto_row: pd.Series | dict, fecha_mov=None, observacion: str = "") -> bool:
+    if fecha_mov is None:
+        fecha_mov = ahora_str()
+    nombre = obtener_nombre_producto(producto_row)
+    costo = float(limpiar_numero(producto_row.get("costo")) or 0)
+    precio = float(limpiar_numero(producto_row.get("precio")) or 0)
+    existencia = float(obtener_existencia_producto(producto_row))
+    ok1 = upsert_inventario_actual(nombre, costo, precio, existencia, fecha_mov, observacion or "Sincronizado desde productos")
+    ok2 = upsert_conteo_base(nombre, existencia, fecha_mov, observacion or "Sincronizado desde productos")
+    return bool(ok1 and ok2)
+
+
+def refrescar_producto_por_id(producto_id: Any):
+    try:
+        resp = supabase.table("productos").select("*").eq("id", producto_id).limit(1).execute()
+        filas = resp.data or []
+        if filas:
+            return pd.Series(filas[0])
+    except Exception:
+        pass
+    return None
+
+
+def revertir_inventario_de_venta(venta_id: Any, marcar_detalle_anulado: bool = False) -> bool:
+    try:
+        resp = supabase.table("detalle_venta").select("*").eq("venta_id", str(venta_id)).execute()
+        detalles = resp.data or []
+    except Exception as exc:
+        st.error(f"No se pudo leer el detalle de venta: {exc}")
+        return False
+    for det in detalles:
+        producto_id = det.get("producto_id")
+        cantidad = float(limpiar_numero(det.get("cantidad")) or 0)
+        if not producto_id or cantidad <= 0:
+            continue
+        prod = refrescar_producto_por_id(producto_id)
+        if prod is None:
+            continue
+        nueva_cant = float(obtener_existencia_producto(prod)) + cantidad
+        actualizar_existencia_producto(prod, nueva_cant)
+        prod2 = refrescar_producto_por_id(producto_id) or prod
+        sincronizar_producto_inventario(prod2, ahora_str(), f"Reintegro por venta {venta_id}")
+        registrar_movimiento_inventario(producto_id, obtener_nombre_producto(prod2), "reversa_venta", "ventas", venta_id, cantidad, float(limpiar_numero(det.get("costo_unitario")) or 0), "Reversa por anulación/eliminación de venta")
+        if marcar_detalle_anulado and det.get("id"):
+            try:
+                supabase.table("detalle_venta").update({"anulado": True}).eq("id", det.get("id")).execute()
+            except Exception:
+                pass
+    return True
+
+
+def eliminar_venta_completa_app(venta_id: Any) -> bool:
+    if not revertir_inventario_de_venta(venta_id, marcar_detalle_anulado=False):
+        return False
+    try:
+        try:
+            cxc = supabase.table("cuentas_por_cobrar").select("id").eq("venta_id", str(venta_id)).execute().data or []
+            for row in cxc:
+                supabase.table("abonos_credito").delete().eq("cuenta_id", str(row.get("id"))).execute()
+            supabase.table("cuentas_por_cobrar").delete().eq("venta_id", str(venta_id)).execute()
+        except Exception:
+            pass
+        for tabla in ["ventas_pagos", "detalle_venta"]:
+            try:
+                supabase.table(tabla).delete().eq("venta_id", str(venta_id)).execute()
+            except Exception:
+                pass
+        ok = eliminar("ventas", venta_id)
+        if ok:
+            registrar_auditoria("eliminar_venta_completa", "ventas", f"venta_id={venta_id}")
+        return ok
+    except Exception as exc:
+        st.error(f"No se pudo eliminar la venta completa: {exc}")
+        return False
+
+
+def anular_venta_completa_app(venta_id: Any, motivo: str = "") -> bool:
+    if not revertir_inventario_de_venta(venta_id, marcar_detalle_anulado=True):
+        return False
+    try:
+        try:
+            supabase.table("ventas_pagos").update({"anulado": True}).eq("venta_id", str(venta_id)).execute()
+        except Exception:
+            pass
+        ok = actualizar("ventas", venta_id, {
+            "anulado": True,
+            "motivo_anulacion": motivo or "Anulada manualmente",
+            "estado": "anulada",
+            "total": 0.0,
+            "subtotal": 0.0,
+            "descuento": 0.0,
+            "recargo": 0.0,
+            "ganancia_bruta": 0.0,
+            "ganancia_bruta_manual": 0.0,
+        })
+        if ok:
+            registrar_auditoria("anular_venta_completa", "ventas", f"venta_id={venta_id}")
+        return ok
+    except Exception as exc:
+        st.error(f"No se pudo anular la venta completa: {exc}")
+        return False
+
 def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdida, observacion="") -> bool:
     cantidad = float(cantidad)
     costo_unitario = float(costo_unitario)
@@ -1388,6 +1538,8 @@ elif menu == "Productos":
                             if "stock" in existente.index:
                                 payload["stock"] = float(nueva_cant)
                         actualizar("productos", existente["id"], payload)
+                        prod_sync = refrescar_producto_por_id(existente["id"]) or existente
+                        sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
                     else:
                         payload = {
                             "fecha": fecha_row,
@@ -1404,6 +1556,9 @@ elif menu == "Productos":
                         if "stock" in DATA["productos"].columns:
                             payload["stock"] = float(cantidad)
                         insertar("productos", payload)
+                        prod_sync = get_producto_por_codigo(codigo) if codigo else get_producto_por_nombre(nombre)
+                        if prod_sync is not None:
+                            sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
                     procesados += 1
                 st.success(f"Se procesaron {procesados} productos.")
                 st.rerun()
@@ -1452,11 +1607,16 @@ elif menu == "Productos":
                 if existente is not None:
                     ok = actualizar("productos", existente["id"], payload)
                     if ok:
+                        prod_sync = refrescar_producto_por_id(existente["id"]) or existente
+                        sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto actualizado sin duplicarse.")
                         st.rerun()
                 else:
                     ok = insertar("productos", payload)
                     if ok:
+                        prod_sync = get_producto_por_codigo(limpiar_texto(codigo)) if limpiar_texto(codigo) else get_producto_por_nombre(limpiar_texto(nombre))
+                        if prod_sync is not None:
+                            sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto creado.")
                         st.rerun()
 
@@ -1954,13 +2114,13 @@ elif menu == "Ventas":
                                 st.rerun()
                     with cl2:
                         if (es_admin() or tiene_permiso("puede_anular")) and st.button("🚫 Anular venta", key="btn_anular_venta_admin"):
-                            ok = anular("ventas", venta_id, "Anulada manualmente desde módulo Ventas")
+                            ok = anular_venta_completa_app(venta_id, "Anulada manualmente desde módulo Ventas")
                             if ok:
                                 st.success("Venta anulada.")
                                 st.rerun()
                     with cl3:
                         if (es_admin() or tiene_permiso("puede_eliminar")) and st.button("🗑️ Eliminar venta", key="btn_eliminar_venta_admin"):
-                            ok = eliminar("ventas", venta_id)
+                            ok = eliminar_venta_completa_app(venta_id)
                             if ok:
                                 st.success("Venta eliminada.")
                                 st.rerun()
@@ -2874,6 +3034,8 @@ elif menu == "POS":
                             if producto_tiene_inventario(prod):
                                 nueva_cant = max(obtener_existencia_producto(prod) - float(item["cantidad"]), 0.0)
                                 actualizar_existencia_producto(prod, nueva_cant)
+                                prod_sync = refrescar_producto_por_id(prod["id"]) or prod
+                                sincronizar_producto_inventario(prod_sync, ahora_str(), f"Salida por venta {venta_id}")
                                 aplicar_consumo_fifo(movimientos_fifo)
                                 registrar_movimiento_inventario(prod["id"], obtener_nombre_producto(prod), "salida_venta", "ventas", venta_id, -float(item["cantidad"]), costo_unit, "Salida por venta POS")
                         pagos = {"efectivo": pago_efectivo, "transferencia": pago_transferencia, "tarjeta": pago_tarjeta, "credito": pago_credito}
