@@ -708,6 +708,10 @@ def cargar_datos() -> dict[str, pd.DataFrame]:
 
 DATA = cargar_datos()
 
+if "pos_post_venta" not in st.session_state:
+    st.session_state["pos_post_venta"] = None
+
+
 
 # =========================================================
 # HELPERS DE NEGOCIO
@@ -2631,6 +2635,27 @@ elif menu == "POS":
                         st.rerun()
 
         st.subheader("🧾 Carrito")
+
+        post_venta = st.session_state.get("pos_post_venta")
+        if post_venta:
+            st.success(f"Venta registrada correctamente. Factura/ID: {post_venta.get('venta_id','')}")
+            p1, p2, p3 = st.columns(3)
+            p1.metric("Total", f"RD$ {float(post_venta.get('total', 0)):,.2f}")
+            p2.metric("Cambio", f"RD$ {float(post_venta.get('cambio', 0)):,.2f}")
+            p3.metric("Método", str(post_venta.get('metodo_pago', '')))
+            b1, b2, b3 = st.columns(3)
+            with b1:
+                if st.button("🧾 Imprimir Ticket", key="btn_print_ticket"):
+                    st.info("Ticket listo para imprimir desde el navegador.")
+            with b2:
+                if st.button("🧾 Imprimir Factura", key="btn_print_factura"):
+                    st.info("Factura lista para imprimir desde el navegador.")
+            with b3:
+                if st.button("✅ Terminar", key="btn_pos_post_venta_terminar"):
+                    st.session_state["pos_post_venta"] = None
+                    st.rerun()
+            st.markdown("---")
+
         if carrito:
             df_carrito = pd.DataFrame(carrito)
             st.data_editor(df_carrito, use_container_width=True, disabled=["producto_id", "codigo", "producto"], key="editor_carrito")
@@ -2769,7 +2794,14 @@ elif menu == "POS":
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
                         DATA.update(cargar_datos())
-                        st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
+                        st.session_state["pos_post_venta"] = {
+                            "venta_id": str(venta_id),
+                            "total": float(total_final),
+                            "cambio": float(cambio),
+                            "cliente_nombre": cliente_nombre,
+                            "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
+                            "ncf": ncf,
+                        }
                         st.session_state["pos_carrito"] = []
                         st.rerun()
                     except Exception as exc:
