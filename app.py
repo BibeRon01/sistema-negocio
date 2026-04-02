@@ -684,13 +684,43 @@ def render_popup_post_venta():
 
 
 
+def _pk_col_tabla(nombre_tabla: str) -> str:
+    especiales = {
+        "ventas": "identificación",
+    }
+    return especiales.get(nombre_tabla, "id")
+
+
+def _normalizar_df_tabla(nombre_tabla: str, df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    if nombre_tabla == "ventas":
+        if "identificación" in df.columns and "id" not in df.columns:
+            df = df.copy()
+            df["id"] = df["identificación"]
+        if "metodo" not in df.columns and "metodo_pago" in df.columns:
+            df = df.copy()
+            df["metodo"] = df["metodo_pago"]
+    return df
+
+
 def leer_tabla(nombre_tabla: str, order_by: str = "id") -> pd.DataFrame:
-    try:
-        resp = supabase.table(nombre_tabla).select("*").order(order_by).execute()
-        data = resp.data if resp.data else []
-        return pd.DataFrame(data)
-    except Exception:
-        return pd.DataFrame()
+    candidatos = []
+    pk = _pk_col_tabla(nombre_tabla)
+    for c in [order_by, pk, "fecha", "created_at", None]:
+        if c not in candidatos:
+            candidatos.append(c)
+    for campo in candidatos:
+        try:
+            q = supabase.table(nombre_tabla).select("*")
+            if campo:
+                q = q.order(campo)
+            resp = q.execute()
+            data = resp.data if resp.data else []
+            return _normalizar_df_tabla(nombre_tabla, pd.DataFrame(data))
+        except Exception:
+            continue
+    return pd.DataFrame()
 
 
 
@@ -707,8 +737,9 @@ def insertar(nombre_tabla: str, datos: dict) -> bool:
 
 def actualizar(nombre_tabla: str, fila_id: Any, datos: dict) -> bool:
     try:
-        supabase.table(nombre_tabla).update(datos).eq("id", fila_id).execute()
-        registrar_auditoria("actualizar", nombre_tabla, f"id={fila_id} | {str(datos)[:500]}")
+        pk = _pk_col_tabla(nombre_tabla)
+        supabase.table(nombre_tabla).update(datos).eq(pk, fila_id).execute()
+        registrar_auditoria("actualizar", nombre_tabla, f"{pk}={fila_id} | {str(datos)[:500]}")
         return True
     except Exception as exc:
         st.error(f"Error al actualizar en {nombre_tabla}: {exc}")
@@ -718,8 +749,9 @@ def actualizar(nombre_tabla: str, fila_id: Any, datos: dict) -> bool:
 
 def eliminar(nombre_tabla: str, fila_id: Any) -> bool:
     try:
-        supabase.table(nombre_tabla).delete().eq("id", fila_id).execute()
-        registrar_auditoria("eliminar", nombre_tabla, f"id={fila_id}")
+        pk = _pk_col_tabla(nombre_tabla)
+        supabase.table(nombre_tabla).delete().eq(pk, fila_id).execute()
+        registrar_auditoria("eliminar", nombre_tabla, f"{pk}={fila_id}")
         return True
     except Exception as exc:
         st.error(f"Error al eliminar en {nombre_tabla}: {exc}")
@@ -729,8 +761,9 @@ def eliminar(nombre_tabla: str, fila_id: Any) -> bool:
 
 def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
     try:
-        supabase.table(nombre_tabla).update({"anulado": True, "motivo_anulacion": motivo}).eq("id", fila_id).execute()
-        registrar_auditoria("anular", nombre_tabla, f"id={fila_id} motivo={motivo}")
+        pk = _pk_col_tabla(nombre_tabla)
+        supabase.table(nombre_tabla).update({"anulado": True, "motivo_anulacion": motivo}).eq(pk, fila_id).execute()
+        registrar_auditoria("anular", nombre_tabla, f"{pk}={fila_id} motivo={motivo}")
         return True
     except Exception as exc:
         st.error(f"Error al anular en {nombre_tabla}: {exc}")
@@ -1701,12 +1734,26 @@ elif menu == "Ventas":
                 st.success("Venta guardada.")
                 st.rerun()
 
-    df = DATA["ventas"].copy()
+    df = leer_tabla("ventas", order_by="fecha").copy()
+    df = _normalizar_df_tabla("ventas", df)
     if not df.empty:
+        if "fecha" in df.columns:
+            df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
         d1, d2 = rango_fechas_ui("ventas")
         df = filtrar_por_fechas(df, d1, d2)
         txt = st.text_input("Buscar venta", key="buscar_ventas")
-        df = buscar_df(df, txt)
+        if txt:
+            txt_n = normalizar_texto(txt)
+            columnas_busqueda = [c for c in ["id", "identificación", "cliente_nombre", "usuario", "metodo", "metodo_pago", "ncf"] if c in df.columns]
+            if columnas_busqueda:
+                mask = pd.Series(False, index=df.index)
+                for col in columnas_busqueda:
+                    mask = mask | df[col].astype(str).str.lower().str.contains(txt_n, na=False)
+                df = df[mask]
+        # columnas amigables primero
+        preferidas = [c for c in ["id", "identificación", "fecha", "cliente_nombre", "usuario", "metodo_pago", "metodo", "subtotal", "descuento", "recargo", "total", "ganancia_bruta", "ganancia_bruta_manual", "anulado", "motivo_anulacion"] if c in df.columns]
+        otras = [c for c in df.columns if c not in preferidas]
+        df = df[preferidas + otras]
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ventas")
     else:
