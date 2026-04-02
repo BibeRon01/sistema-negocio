@@ -1203,6 +1203,8 @@ else:
     menu_opciones = list(dict.fromkeys(menu_opciones))
 
 menu = st.sidebar.selectbox("Menú", menu_opciones)
+if es_admin():
+    st.sidebar.caption("🛠️ Como administradora, usa Admin CRUD para editar, eliminar o anular registros.")
 
 if st.sidebar.button("🔄 Recargar nube"):
     st.rerun()
@@ -2886,6 +2888,7 @@ elif menu == "Configuración":
 # =========================================================
 elif menu == "Admin CRUD":
     st.title("🛠️ Admin CRUD")
+    st.info("Desde aquí solo la administradora puede editar, eliminar o anular. Selecciona la tabla, el registro y guarda los cambios.")
     if not es_admin():
         st.error("Solo la administradora puede entrar aquí.")
     else:
