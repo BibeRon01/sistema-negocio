@@ -1766,12 +1766,11 @@ elif menu == "Ventas":
 
         total_vendido = float(pd.to_numeric(df.get("total", 0), errors="coerce").fillna(0).sum()) if not df.empty else 0.0
         utilidad_visible = float(pd.to_numeric(df.get("ganancia_bruta", 0), errors="coerce").fillna(0).sum()) if not df.empty else 0.0
-        c1, c2 = st.columns(2 if not puede_ver_utilidad else 3)
-        c1.metric("Ventas registradas", int(len(df.index)))
-        c2.metric("Total vendido", f"RD$ {total_vendido:,.2f}")
+        metric_cols = st.columns(3) if puede_ver_utilidad else st.columns(2)
+        metric_cols[0].metric("Ventas registradas", int(len(df.index)))
+        metric_cols[1].metric("Total vendido", f"RD$ {total_vendido:,.2f}")
         if puede_ver_utilidad:
-            c3 = st.columns(3)[2]
-            c3.metric("Utilidad bruta visible", f"RD$ {utilidad_visible:,.2f}")
+            metric_cols[2].metric("Utilidad bruta visible", f"RD$ {utilidad_visible:,.2f}")
 
         df_show = df.copy().sort_values("fecha", ascending=False)
         columnas_preferidas = [
