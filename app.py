@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import Client, create_client
 
 # =========================================================
@@ -1066,6 +1067,122 @@ def cerrar_caja(caja_row: dict, monto_cierre: float, observacion: str = "") -> t
     except Exception as exc:
         return False, f"No se pudo cerrar caja: {exc}"
 
+
+
+def html_escape(valor: Any) -> str:
+    txt = limpiar_texto(valor)
+    return (
+        txt.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def construir_html_impresion(post_venta: dict, tipo: str = "factura") -> str:
+    negocio = obtener_configuracion().get("negocio_nombre") or "Sistema de Negocio PRO"
+    titulo = "TICKET" if tipo == "ticket" else "FACTURA"
+    items = post_venta.get("items") or []
+    filas = ""
+    for item in items:
+        filas += f"""
+        <tr>
+            <td>{html_escape(item.get('producto'))}</td>
+            <td style='text-align:center'>{float(item.get('cantidad', 0)):.0f}</td>
+            <td style='text-align:right'>RD$ {float(item.get('precio_unitario', 0)):,.2f}</td>
+            <td style='text-align:right'>RD$ {float(item.get('total_linea', 0)):,.2f}</td>
+        </tr>
+        """
+    if not filas:
+        filas = "<tr><td colspan='4' style='text-align:center'>Sin detalle</td></tr>"
+
+    ncf = html_escape(post_venta.get("ncf") or post_venta.get("venta_id") or "")
+    cliente = html_escape(post_venta.get("cliente_nombre") or "Venta general")
+    metodo = html_escape(post_venta.get("metodo_pago") or "")
+    fecha_txt = html_escape(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    total = float(post_venta.get("total", 0) or 0)
+    cambio = float(post_venta.get("cambio", 0) or 0)
+
+    return f"""
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>{titulo} - {html_escape(negocio)}</title>
+      <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; color: #111; }}
+        .wrap {{ max-width: 800px; margin: 0 auto; }}
+        h1,h2,h3,p {{ margin: 0 0 8px 0; }}
+        .top {{ text-align: center; margin-bottom: 16px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
+        th, td {{ border-bottom: 1px solid #ddd; padding: 8px; font-size: 14px; }}
+        th {{ background: #f7f7f7; text-align: left; }}
+        .totales {{ margin-top: 18px; width: 100%; }}
+        .totales td {{ border: none; padding: 6px 0; }}
+        .right {{ text-align: right; }}
+        .strong {{ font-weight: bold; }}
+        @media print {{
+          body {{ padding: 0; }}
+          .no-print {{ display: none; }}
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="top">
+          <h2>{html_escape(negocio)}</h2>
+          <h1>{titulo}</h1>
+          <p><strong>No./NCF:</strong> {ncf}</p>
+          <p><strong>Fecha:</strong> {fecha_txt}</p>
+          <p><strong>Cliente:</strong> {cliente}</p>
+          <p><strong>Método:</strong> {metodo}</p>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Cant.</th>
+              <th>Precio</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filas}
+          </tbody>
+        </table>
+
+        <table class="totales">
+          <tr><td class="strong">Total</td><td class="right strong">RD$ {total:,.2f}</td></tr>
+          <tr><td class="strong">Cambio</td><td class="right">RD$ {cambio:,.2f}</td></tr>
+        </table>
+      </div>
+    </body>
+    </html>
+    """
+
+
+def lanzar_impresion_navegador(html_doc: str):
+    html_js = f"""
+    <html>
+    <body>
+    <script>
+      const contenido = {html_doc!r};
+      const w = window.open('', '_blank');
+      if (w) {{
+        w.document.open();
+        w.document.write(contenido);
+        w.document.close();
+        w.focus();
+        setTimeout(() => {{
+          w.print();
+        }}, 300);
+      }}
+    </script>
+    </body>
+    </html>
+    """
+    components.html(html_js, height=0, width=0)
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -2644,10 +2761,14 @@ elif menu == "POS":
             b1, b2, b3 = st.columns(3)
             with b1:
                 if st.button("🧾 Imprimir Ticket", key="btn_print_ticket"):
-                    st.info("Ticket listo para imprimir desde el navegador.")
+                    html_ticket = construir_html_impresion(post_venta, "ticket")
+                    lanzar_impresion_navegador(html_ticket)
+                    st.success("Enviando ticket al navegador para imprimir.")
             with b2:
                 if st.button("🧾 Imprimir Factura", key="btn_print_factura"):
-                    st.info("Factura lista para imprimir desde el navegador.")
+                    html_factura = construir_html_impresion(post_venta, "factura")
+                    lanzar_impresion_navegador(html_factura)
+                    st.success("Enviando factura al navegador para imprimir.")
             with b3:
                 if st.button("✅ Terminar", key="btn_pos_post_venta_terminar"):
                     st.session_state["pos_post_venta"] = None
@@ -2799,6 +2920,7 @@ elif menu == "POS":
                             "cliente_nombre": cliente_nombre,
                             "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
                             "ncf": ncf,
+                            "items": [dict(x) for x in carrito],
                         }
                         st.session_state["pos_carrito"] = []
                         st.rerun()
