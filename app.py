@@ -41,6 +41,32 @@ except Exception as exc:
 
 
 
+
+# =========================================================
+# ESTILO VISUAL EJECUTIVO
+# =========================================================
+st.markdown("""
+<style>
+:root {
+  --bg:#f6f9fc; --card:#ffffff; --ink:#0f172a; --muted:#475569;
+  --blue:#0f6efd; --green:#10b981; --red:#ef4444; --border:#dbe4f0;
+}
+.stApp {background: linear-gradient(180deg,#f8fbff 0%,#eef4fb 100%);}
+section[data-testid="stSidebar"] {background: linear-gradient(180deg,#0f172a 0%,#111827 100%); border-right:1px solid rgba(255,255,255,.08);}
+section[data-testid="stSidebar"] * {color:#f8fafc !important;}
+section[data-testid="stSidebar"] .stSelectbox label, section[data-testid="stSidebar"] .stButton button {color:#0f172a !important;}
+section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {color:#0f172a !important;}
+.block-container {padding-top:1.25rem;}
+h1,h2,h3 {color:var(--ink); font-weight:800;}
+div[data-testid="metric-container"] {background:var(--card); border:1px solid var(--border); border-radius:18px; padding:14px 16px; box-shadow:0 10px 30px rgba(15,23,42,.06);}
+.stButton > button {border-radius:12px; border:1px solid var(--border); box-shadow:0 4px 14px rgba(15,23,42,.06); font-weight:700;}
+.stButton > button[kind="primary"] {background:linear-gradient(90deg,#0f6efd,#2563eb); color:white; border:none;}
+[data-testid="stDataFrame"] {background:var(--card); border:1px solid var(--border); border-radius:16px; overflow:hidden;}
+.streamlit-expanderHeader {font-weight:800; color:var(--ink);}
+div[data-testid="stForm"] {background:rgba(255,255,255,.72); border:1px solid var(--border); border-radius:18px; padding:14px;}
+</style>
+""", unsafe_allow_html=True)
+
 # =========================================================
 # UTILIDADES BÁSICAS TEMPRANAS (PARA LOGIN)
 # =========================================================
@@ -159,9 +185,6 @@ def login_simple() -> bool:
 
 if not login_simple():
     st.stop()
-
-if "pos_venta_finalizada" not in st.session_state:
-    st.session_state["pos_venta_finalizada"] = None
 
 
 # =========================================================
@@ -578,6 +601,85 @@ def registrar_auditoria(accion: str, tabla: str, detalle: str = ""):
         ).execute()
     except Exception:
         pass
+
+
+def _formato_moneda(valor: float) -> str:
+    return f"RD$ {float(valor or 0):,.2f}"
+
+
+def construir_texto_impresion(data: dict, tipo: str = "ticket") -> str:
+    lineas = []
+    lineas.append("BIBE RON 01")
+    lineas.append(tipo.upper())
+    lineas.append("=" * 32)
+    lineas.append(f"Factura: {data.get('factura') or data.get('venta_id')}")
+    lineas.append(f"Fecha: {data.get('fecha')}")
+    lineas.append(f"Cliente: {data.get('cliente_nombre') or 'Venta general'}")
+    lineas.append(f"Vendedor: {data.get('usuario') or ''}")
+    lineas.append(f"Método: {data.get('metodo_pago') or ''}")
+    lineas.append("-" * 32)
+    for item in data.get('items', []):
+        nombre = str(item.get('producto') or '')[:28]
+        cantidad = float(item.get('cantidad') or 0)
+        precio = float(item.get('precio_unitario') or 0)
+        total = float(item.get('total_linea') or 0)
+        lineas.append(nombre)
+        lineas.append(f"{cantidad:,.0f} x {precio:,.2f} = {total:,.2f}")
+    lineas.append("-" * 32)
+    lineas.append(f"Subtotal: {_formato_moneda(data.get('subtotal', 0))}")
+    lineas.append(f"Descuento: {_formato_moneda(data.get('descuento', 0))}")
+    lineas.append(f"Recargo: {_formato_moneda(data.get('recargo', 0))}")
+    lineas.append(f"TOTAL: {_formato_moneda(data.get('total', 0))}")
+    lineas.append(f"Recibido: {_formato_moneda(data.get('recibido', 0))}")
+    lineas.append(f"Cambio: {_formato_moneda(data.get('cambio', 0))}")
+    lineas.append("=" * 32)
+    lineas.append("Gracias por su compra")
+    return "\n".join(lineas)
+
+
+def render_popup_post_venta():
+    data = st.session_state.get("pos_venta_finalizada")
+    if not data:
+        return
+    st.markdown(
+        f"""
+        <div style='background:#ffffff;border:2px solid #dbeafe;border-radius:18px;padding:20px 22px;box-shadow:0 8px 24px rgba(0,0,0,.08);margin-bottom:18px;'>
+            <div style='font-size:26px;font-weight:800;text-align:center;margin-bottom:6px;'>FACTURA: {data.get('factura') or data.get('venta_id')}</div>
+            <div style='font-size:18px;color:#334155;text-align:center;margin-bottom:12px;'>Cambio</div>
+            <div style='background:#ecfeff;border-radius:14px;padding:18px;text-align:center;font-size:44px;font-weight:800;color:#0f172a;margin-bottom:14px;'>
+                {_formato_moneda(data.get('cambio', 0))}
+            </div>
+            <div style='display:flex;gap:12px;justify-content:center;color:#475569;font-size:15px;'>
+                <div><b>Total:</b> {_formato_moneda(data.get('total', 0))}</div>
+                <div><b>Recibido:</b> {_formato_moneda(data.get('recibido', 0))}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        st.download_button(
+            "🖨️ Ticket",
+            data=construir_texto_impresion(data, "ticket"),
+            file_name=f"ticket_{data.get('factura') or data.get('venta_id')}.txt",
+            mime="text/plain",
+            use_container_width=True,
+            key=f"dl_ticket_{data.get('venta_id')}"
+        )
+    with c2:
+        st.download_button(
+            "🧾 Factura",
+            data=construir_texto_impresion(data, "factura"),
+            file_name=f"factura_{data.get('factura') or data.get('venta_id')}.txt",
+            mime="text/plain",
+            use_container_width=True,
+            key=f"dl_factura_{data.get('venta_id')}"
+        )
+    with c3:
+        if st.button("✅ Cerrar", use_container_width=True, key=f"cerrar_popup_{data.get('venta_id')}"):
+            st.session_state.pop("pos_venta_finalizada", None)
+            st.rerun()
 
 
 
@@ -1005,8 +1107,14 @@ menu_base = [
 
 if es_admin() or tiene_permiso("puede_configurar"):
     menu_opciones = menu_base
+elif normalizar_texto(usuario_sesion().get("rol", "")) == "gerente" and tiene_permiso("puede_ver_reportes"):
+    menu_opciones = [
+        "Dashboard", "POS", "Productos", "Clientes", "Proveedores", "Inventario Actual",
+        "Ventas", "Compras", "Gastos", "Empleados", "Pérdidas", "Cierre de Caja",
+        "Estado de Resultados", "Reportes", "Créditos"
+    ]
 else:
-    menu_opciones = ["Dashboard"]
+    menu_opciones = []
     if tiene_permiso("puede_vender"):
         menu_opciones += ["POS", "Ventas", "Cierre de Caja"]
     if tiene_permiso("puede_registrar_compras"):
@@ -2303,6 +2411,7 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
+    render_popup_post_venta()
     cfg = obtener_configuracion()
     productos_df = DATA["productos"].copy()
     if not productos_df.empty and "activo" in productos_df.columns:
@@ -2499,76 +2608,27 @@ elif menu == "POS":
                                 "usuario": nombre_usuario_actual(),
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
-                        metodo_final = "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito")
                         st.session_state["pos_venta_finalizada"] = {
                             "venta_id": str(venta_id),
+                            "factura": ncf or str(venta_id)[:8].upper(),
+                            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "cliente_nombre": cliente_nombre,
+                            "usuario": nombre_usuario_actual(),
+                            "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
+                            "subtotal": float(subtotal),
+                            "descuento": float(descuento_global),
+                            "recargo": float(recargo),
                             "total": float(total_final),
+                            "recibido": float(pagos_total),
                             "cambio": float(cambio),
-                            "cliente": cliente_nombre,
-                            "metodo_pago": metodo_final,
+                            "items": [dict(x) for x in carrito],
                         }
                         st.session_state["pos_carrito"] = []
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo registrar la venta: {exc}")
-
-            venta_final = st.session_state.get("pos_venta_finalizada")
-            if venta_final:
-                st.markdown("---")
-                st.markdown(
-                    f"""
-                    <div style="background:#ffffff;border:2px solid #dbeafe;border-radius:18px;padding:24px;box-shadow:0 6px 18px rgba(0,0,0,0.08);text-align:center;margin-top:10px;">
-                        <h2 style="margin:0;color:#111827;">FACTURA: {venta_final['venta_id']}</h2>
-                        <p style="font-size:20px;margin-top:12px;color:#374151;">CAMBIO</p>
-                        <div style="background:#ecfeff;border-radius:14px;padding:22px;font-size:42px;font-weight:700;color:#111827;margin:10px auto 20px auto;max-width:420px;">
-                            RD$ {venta_final['cambio']:,.2f}
-                        </div>
-                        <p style="color:#6b7280;font-size:16px;">Total cobrado: RD$ {venta_final['total']:,.2f}</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                b1, b2, b3 = st.columns(3)
-                with b1:
-                    if st.button("🧾 Imprimir Ticket", key="btn_imprimir_ticket_final", use_container_width=True):
-                        st.info("Impresión de ticket pendiente de conectar.")
-                with b2:
-                    if st.button("📄 Imprimir Factura", key="btn_imprimir_factura_final", use_container_width=True):
-                        st.info("Impresión de factura pendiente de conectar.")
-                with b3:
-                    if st.button("✅ Cerrar", key="btn_cerrar_venta_final", use_container_width=True):
-                        st.session_state["pos_venta_finalizada"] = None
-                        st.rerun()
         else:
-            venta_final = st.session_state.get("pos_venta_finalizada")
-            if venta_final:
-                st.markdown("---")
-                st.markdown(
-                    f"""
-                    <div style="background:#ffffff;border:2px solid #dbeafe;border-radius:18px;padding:24px;box-shadow:0 6px 18px rgba(0,0,0,0.08);text-align:center;margin-top:10px;">
-                        <h2 style="margin:0;color:#111827;">FACTURA: {venta_final['venta_id']}</h2>
-                        <p style="font-size:20px;margin-top:12px;color:#374151;">CAMBIO</p>
-                        <div style="background:#ecfeff;border-radius:14px;padding:22px;font-size:42px;font-weight:700;color:#111827;margin:10px auto 20px auto;max-width:420px;">
-                            RD$ {venta_final['cambio']:,.2f}
-                        </div>
-                        <p style="color:#6b7280;font-size:16px;">Total cobrado: RD$ {venta_final['total']:,.2f}</p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                b1, b2, b3 = st.columns(3)
-                with b1:
-                    if st.button("🧾 Imprimir Ticket", key="btn_imprimir_ticket_final_vacio", use_container_width=True):
-                        st.info("Impresión de ticket pendiente de conectar.")
-                with b2:
-                    if st.button("📄 Imprimir Factura", key="btn_imprimir_factura_final_vacio", use_container_width=True):
-                        st.info("Impresión de factura pendiente de conectar.")
-                with b3:
-                    if st.button("✅ Cerrar", key="btn_cerrar_venta_final_vacio", use_container_width=True):
-                        st.session_state["pos_venta_finalizada"] = None
-                        st.rerun()
-            else:
-                st.info("Carrito vacío.")
+            st.info("Carrito vacío.")
 
 # =========================================================
 # CLIENTES
