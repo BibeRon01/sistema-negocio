@@ -14,6 +14,151 @@ from supabase import Client, create_client
 st.set_page_config(page_title="Sistema de Negocio PRO", layout="wide")
 
 
+st.markdown("""
+<style>
+:root{
+  --brand-blue:#2563eb;
+  --brand-blue-soft:#dbeafe;
+  --brand-green:#16a34a;
+  --brand-green-soft:#dcfce7;
+  --brand-red:#dc2626;
+  --brand-red-soft:#fee2e2;
+  --brand-amber:#d97706;
+  --brand-amber-soft:#fef3c7;
+  --brand-slate:#0f172a;
+  --brand-muted:#475569;
+  --surface:#f8fafc;
+  --card:#ffffff;
+  --border:#e2e8f0;
+}
+.stApp{
+  background: linear-gradient(180deg,#f8fbff 0%,#f8fafc 100%);
+}
+.block-container{
+  padding-top: 1.2rem;
+  padding-bottom: 2rem;
+}
+div[data-testid="stSidebar"]{
+  background: linear-gradient(180deg,#0f172a 0%,#1e293b 100%);
+}
+div[data-testid="stSidebar"] *{
+  color: #f8fafc !important;
+}
+div[data-testid="stSidebar"] .stSelectbox label,
+div[data-testid="stSidebar"] .stButton button{
+  color: #f8fafc !important;
+}
+.stButton>button{
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  font-weight: 700;
+}
+.stDownloadButton>button{
+  border-radius: 12px;
+  font-weight: 700;
+}
+.kpi-card{
+  border-radius: 18px;
+  padding: 16px 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(15,23,42,.06);
+  margin-bottom: 12px;
+}
+.kpi-card.blue{border-left: 8px solid var(--brand-blue);}
+.kpi-card.green{border-left: 8px solid var(--brand-green);}
+.kpi-card.red{border-left: 8px solid var(--brand-red);}
+.kpi-card.amber{border-left: 8px solid var(--brand-amber);}
+.kpi-label{
+  color: var(--brand-muted);
+  font-size: .92rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.kpi-value{
+  color: var(--brand-slate);
+  font-size: 1.7rem;
+  line-height: 1.1;
+  font-weight: 800;
+}
+.section-title{
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--brand-slate);
+  margin: 4px 0 10px 0;
+}
+.page-hero{
+  background: linear-gradient(135deg,#eff6ff 0%,#ffffff 60%,#f0fdf4 100%);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 18px 22px;
+  margin-bottom: 14px;
+  box-shadow: 0 10px 30px rgba(37,99,235,.08);
+}
+.page-hero h1{
+  margin: 0;
+  color: var(--brand-slate);
+  font-size: 2rem;
+}
+.page-hero p{
+  margin: 6px 0 0 0;
+  color: var(--brand-muted);
+  font-size: .98rem;
+}
+.notice-ok{
+  background: var(--brand-green-soft);
+  border-left: 6px solid var(--brand-green);
+  padding: 10px 14px;
+  border-radius: 14px;
+  color: #14532d;
+  margin-bottom: 8px;
+}
+.notice-warn{
+  background: var(--brand-amber-soft);
+  border-left: 6px solid var(--brand-amber);
+  padding: 10px 14px;
+  border-radius: 14px;
+  color: #92400e;
+  margin-bottom: 8px;
+}
+div[data-testid="stDataFrame"]{
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+def render_kpi_card(label: str, value: str, color: str = "blue"):
+    st.markdown(
+        f"""
+        <div class="kpi-card {color}">
+            <div class="kpi-label">{label}</div>
+            <div class="kpi-value">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_page_hero(title: str, subtitle: str = ""):
+    st.markdown(
+        f"""
+        <div class="page-hero">
+            <h1>{title}</h1>
+            <p>{subtitle}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_notice(texto: str, tipo: str = "ok"):
+    clase = "notice-ok" if tipo == "ok" else "notice-warn"
+    st.markdown(f'<div class="{clase}">{texto}</div>', unsafe_allow_html=True)
+
+
 # =========================================================
 # SECRETS / CONEXIÓN
 # =========================================================
@@ -93,18 +238,6 @@ def tiene_permiso(flag: str) -> bool:
     if es_admin():
         return True
     return bool(user.get(flag, False))
-
-
-def es_gerente_autorizado() -> bool:
-    rol = normalizar_texto(usuario_sesion().get("rol", ""))
-    if rol != "gerente":
-        return False
-    user = usuario_sesion()
-    return bool(user.get("puede_editar_todo", False) or user.get("puede_configurar", False))
-
-
-def puede_editar_registros() -> bool:
-    return es_admin() or es_gerente_autorizado()
 
 
 
@@ -642,87 +775,6 @@ def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
         st.error(f"Error al anular en {nombre_tabla}: {exc}")
         return False
 
-
-def utilidad_bruta_fila(row: pd.Series | dict) -> float:
-    datos = row if isinstance(row, dict) else row.to_dict()
-    modo = normalizar_texto(datos.get("modo_ganancia", "automatica"))
-    manual = limpiar_numero(datos.get("ganancia_bruta_manual")) or 0.0
-    auto = limpiar_numero(datos.get("ganancia_bruta")) or 0.0
-    return manual if modo == "manual" and manual > 0 else auto
-
-
-def utilidad_bruta_total_df(df: pd.DataFrame) -> float:
-    if df.empty:
-        return 0.0
-    return float(sum(utilidad_bruta_fila(row) for _, row in df.iterrows()))
-
-
-def _widget_valor_admin(col: str, valor: Any, key: str):
-    try:
-        if pd.isna(valor):
-            valor = None
-    except Exception:
-        pass
-    txt_col = normalizar_texto(col)
-    if isinstance(valor, bool):
-        return st.checkbox(col, value=bool(valor), key=key)
-    if txt_col in ["anulado", "activo", "usa_inventario", "editable"]:
-        return st.checkbox(col, value=bool(valor), key=key)
-    if isinstance(valor, (int, float)):
-        return st.number_input(col, value=float(valor), step=1.0, key=key)
-    num_guess = limpiar_numero(valor)
-    if num_guess is not None and txt_col not in ["codigo", "telefono", "cedula rnc", "cedula_rnc", "rnc", "ncf"]:
-        return st.number_input(col, value=float(num_guess), step=1.0, key=key)
-    return st.text_input(col, value="" if valor is None else str(valor), key=key)
-
-
-def mostrar_panel_admin_modulo(nombre_modulo: str, nombre_tabla: str, df: pd.DataFrame, permitir_eliminar: bool = True, permitir_anular: bool = False):
-    if not puede_editar_registros():
-        return
-    st.divider()
-    st.subheader(f"🛠️ Administración de {nombre_modulo}")
-    if df.empty or "id" not in df.columns:
-        st.info("No hay registros para editar en este módulo.")
-        return
-    base_df = df.copy()
-    base_df["__label__"] = base_df.apply(lambda r: f"{r['id']} | " + " | ".join([str(r[c]) for c in base_df.columns if c != 'id'][:3]), axis=1)
-    opciones = base_df["__label__"].tolist()
-    seleccion = st.selectbox(f"Selecciona registro de {nombre_modulo}", opciones, key=f"admin_sel_{nombre_tabla}_{nombre_modulo}")
-    fila = base_df[base_df["__label__"] == seleccion].iloc[0].drop(labels=["__label__"])
-    nuevos = {}
-    cols = [c for c in fila.index if c != "id"]
-    ncols = 2
-    columnas = st.columns(ncols)
-    for idx, col in enumerate(cols):
-        with columnas[idx % ncols]:
-            nuevos[col] = _widget_valor_admin(col, fila[col], key=f"admin_edit_{nombre_tabla}_{fila['id']}_{col}")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button(f"💾 Guardar cambios en {nombre_modulo}", key=f"admin_save_{nombre_tabla}_{fila['id']}"):
-            if actualizar(nombre_tabla, fila["id"], nuevos):
-                st.success("Registro actualizado.")
-                st.rerun()
-    with c2:
-        if permitir_eliminar and st.button(f"🗑️ Eliminar de {nombre_modulo}", key=f"admin_del_{nombre_tabla}_{fila['id']}"):
-            if nombre_tabla == "ventas":
-                try:
-                    supabase.rpc("eliminar_venta_completa", {"p_venta_id": str(fila["id"]) }).execute()
-                    registrar_auditoria("eliminar_completo", nombre_tabla, f"id={fila['id']}")
-                    st.success("Venta eliminada completa.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Error al eliminar venta completa: {exc}")
-            elif eliminar(nombre_tabla, fila["id"]):
-                st.success("Registro eliminado.")
-                st.rerun()
-    with c3:
-        if permitir_anular:
-            motivo = st.text_input("Motivo anulación", key=f"admin_mot_{nombre_tabla}_{fila['id']}")
-            if st.button(f"🚫 Anular en {nombre_modulo}", key=f"admin_anular_{nombre_tabla}_{fila['id']}"):
-                if anular(nombre_tabla, fila["id"], motivo):
-                    st.success("Registro anulado.")
-                    st.rerun()
-
 # =========================================================
 # CARGA GLOBAL
 # =========================================================
@@ -1050,6 +1102,79 @@ def serie_periodica(df: pd.DataFrame, columna: str, frecuencia: str = "M") -> pd
     return out
 
 
+
+
+def usuario_id_actual():
+    user = usuario_sesion()
+    return user.get("id")
+
+
+def obtener_caja_abierta():
+    usuario_id = usuario_id_actual()
+    if not usuario_id:
+        return None
+    try:
+        resp = (
+            supabase.table("caja")
+            .select("*")
+            .eq("usuario_id", str(usuario_id))
+            .eq("estado", "abierta")
+            .order("fecha_apertura", desc=True)
+            .limit(1)
+            .execute()
+        )
+        filas = resp.data or []
+        return filas[0] if filas else None
+    except Exception:
+        return None
+
+
+def abrir_caja(monto_inicial: float, observacion: str = "") -> tuple[bool, str]:
+    if obtener_caja_abierta() is not None:
+        return False, "Ya tienes una caja abierta."
+    usuario_id = usuario_id_actual()
+    if not usuario_id:
+        return False, "No se encontró el usuario actual."
+    try:
+        supabase.table("caja").insert({
+            "usuario_id": str(usuario_id),
+            "fecha_apertura": datetime.now().isoformat(),
+            "monto_inicial": float(monto_inicial),
+            "estado": "abierta",
+            "dia_operativo": ahora_str(),
+            "observacion": observacion,
+            "anulado": False,
+        }).execute()
+        registrar_auditoria("abrir_caja", "caja", f"monto_inicial={monto_inicial}")
+        return True, "Caja abierta correctamente."
+    except Exception as exc:
+        return False, f"No se pudo abrir caja: {exc}"
+
+
+def cerrar_caja(caja_row: dict, monto_cierre: float, observacion: str = "") -> tuple[bool, str]:
+    try:
+        monto_inicial = float(limpiar_numero(caja_row.get("monto_inicial")) or 0)
+        diferencia = float(monto_cierre) - monto_inicial
+        supabase.table("caja").update({
+            "fecha_cierre": datetime.now().isoformat(),
+            "monto_cierre": float(monto_cierre),
+            "diferencia": float(diferencia),
+            "observacion": observacion or caja_row.get("observacion") or "",
+            "estado": "cerrada",
+        }).eq("id", caja_row["id"]).execute()
+        insertar("cierre_caja", {
+            "fecha": datetime.now().isoformat(),
+            "apertura": monto_inicial,
+            "efectivo_sistema": monto_inicial,
+            "efectivo_fisico": float(monto_cierre),
+            "diferencia": float(diferencia),
+            "detalle": observacion,
+        })
+        registrar_auditoria("cerrar_caja", "caja", f"id={caja_row['id']} monto_cierre={monto_cierre}")
+        return True, "Caja cerrada correctamente."
+    except Exception as exc:
+        return False, f"No se pudo cerrar caja: {exc}"
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1094,18 +1219,14 @@ menu_base = [
 ]
 
 if es_admin() or tiene_permiso("puede_configurar"):
-    menu_opciones = menu_base
+    menu_opciones = ["Dashboard", "Caja"] + [m for m in menu_base if m not in ["Dashboard", "Cierre de Caja"]]
 else:
     menu_opciones = []
     if tiene_permiso("puede_vender"):
-        menu_opciones += ["POS", "Ventas", "Cierre de Caja"]
-    if tiene_permiso("puede_registrar_compras"):
-        menu_opciones += ["Compras", "Proveedores", "Productos", "Inventario Actual"]
-    if tiene_permiso("puede_registrar_gastos"):
-        menu_opciones += ["Gastos", "Catálogo de Gastos", "Gastos Dueño"]
+        menu_opciones += ["Caja", "POS", "Ventas"]
     if tiene_permiso("puede_ver_reportes"):
-        menu_opciones += ["Reportes", "Estado de Resultados", "Auditoría", "Clientes", "Créditos"]
-    menu_opciones = list(dict.fromkeys(menu_opciones))
+        menu_opciones += ["Clientes", "Créditos"]
+    menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
 
 menu = st.sidebar.selectbox("Menú", menu_opciones)
 
@@ -1116,7 +1237,10 @@ if st.sidebar.button("🔄 Recargar nube"):
 # DASHBOARD
 # =========================================================
 if menu == "Dashboard":
-    st.title("📊 Dashboard PRO")
+    render_page_hero(
+        "📊 Dashboard PRO",
+        "Resumen visual del negocio con todas las funciones del dashboard conservadas."
+    )
 
     desde, hasta = rango_fechas_ui("dash")
 
@@ -1133,60 +1257,119 @@ if menu == "Dashboard":
     empleados_variables = obtener_empleados_variables_periodo(DATA["gastos"], desde, hasta)
     perdidas_tot = suma_col(perdidas_df, "valor")
     retiros_tot = suma_col(dueno_df, "monto")
+    adelantos_tot = suma_col(filtrar_por_fechas(DATA["adelantos_empleados"], desde, hasta), "monto")
 
-    utilidad_bruta_auto = utilidad_bruta_total_df(ventas_df)
-    utilidad_bruta_manual_extra = st.number_input("Utilidad bruta manual adicional", min_value=0.0, step=1.0, key="dash_utilidad_bruta")
-    utilidad_bruta = utilidad_bruta_auto + utilidad_bruta_manual_extra
+    utilidad_bruta = st.number_input(
+        "Utilidad bruta manual",
+        min_value=0.0,
+        step=1.0,
+        key="dash_utilidad_bruta",
+        help="Puedes escribir la utilidad bruta general si quieres llevarla manual."
+    )
     utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
 
     dueno_65 = utilidad_neta * 0.65
     gerente_35 = utilidad_neta * 0.35
 
-    c1, c2, c3, c4x = st.columns(4)
-    c1.metric("Ventas", f"RD$ {ventas_tot:,.2f}")
-    c2.metric("Compras", f"RD$ {compras_tot:,.2f}")
-    c3.metric("Pérdidas", f"RD$ {perdidas_tot:,.2f}")
-    c4x.metric("Utilidad bruta", f"RD$ {utilidad_bruta:,.2f}")
+    st.markdown('<div class="section-title">Resumen general</div>', unsafe_allow_html=True)
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        render_kpi_card("Ventas", f"RD$ {ventas_tot:,.2f}", "blue")
+    with k2:
+        render_kpi_card("Compras", f"RD$ {compras_tot:,.2f}", "amber")
+    with k3:
+        render_kpi_card("Utilidad bruta", f"RD$ {utilidad_bruta:,.2f}", "green")
+    with k4:
+        color_neta = "green" if utilidad_neta >= 0 else "red"
+        render_kpi_card("Utilidad neta", f"RD$ {utilidad_neta:,.2f}", color_neta)
 
-    adelantos_tot = suma_col(filtrar_por_fechas(DATA["adelantos_empleados"], desde, hasta), "monto")
-    c4, c5, c6 = st.columns(3)
-    c4.metric("Gastos fijos", f"RD$ {gastos_fijos:,.2f}")
-    c5.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
-    c6.metric("Retiros dueño", f"RD$ {retiros_tot:,.2f}")
+    k5, k6, k7, k8 = st.columns(4)
+    with k5:
+        render_kpi_card("Gastos fijos", f"RD$ {gastos_fijos:,.2f}", "amber")
+    with k6:
+        render_kpi_card("Gastos variables", f"RD$ {gastos_variables:,.2f}", "amber")
+    with k7:
+        render_kpi_card("Pago empleados", f"RD$ {(empleados_fijos + empleados_variables):,.2f}", "red")
+    with k8:
+        render_kpi_card("Pérdidas", f"RD$ {perdidas_tot:,.2f}", "red")
 
-    c7, c8, c9 = st.columns(3)
-    c7.metric("Empleados fijos", f"RD$ {empleados_fijos:,.2f}")
-    c8.metric("Empleados variables", f"RD$ {empleados_variables:,.2f}")
-    c9.metric("Adelantos", f"RD$ {adelantos_tot:,.2f}")
+    k9, k10, k11, k12 = st.columns(4)
+    with k9:
+        render_kpi_card("Retiros dueño", f"RD$ {retiros_tot:,.2f}", "amber")
+    with k10:
+        render_kpi_card("Adelantos", f"RD$ {adelantos_tot:,.2f}", "amber")
+    with k11:
+        render_kpi_card("65% dueña", f"RD$ {dueno_65:,.2f}", "blue")
+    with k12:
+        render_kpi_card("35% gerente", f"RD$ {gerente_35:,.2f}", "blue")
 
-    c10, c11, c12 = st.columns(3)
-    c10.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
-    c11.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
-    c12.metric("35% gerente", f"RD$ {gerente_35:,.2f}")
+    render_notice(
+        "La utilidad neta se calcula restando a la utilidad bruta: gastos fijos, gastos variables, pago de empleados y pérdida de mercancía.",
+        "ok",
+    )
 
-    st.subheader("📈 Gráficos")
+    st.markdown('<div class="section-title">Gráficos</div>', unsafe_allow_html=True)
     v_mes = agrupar_mensual(ventas_df, "total")
     g_mes = agrupar_mensual(gastos_df, "monto")
     p_mes = agrupar_mensual(perdidas_df, "valor")
     c_mes = agrupar_mensual(compras_df, "monto")
 
-    if not v_mes.empty:
-        st.write("Ventas por mes")
-        st.line_chart(v_mes.set_index("mes"))
+    gf_df = pd.DataFrame(
+        {
+            "concepto": ["Gastos fijos", "Gastos variables", "Empleados", "Pérdidas"],
+            "valor": [gastos_fijos, gastos_variables, empleados_fijos + empleados_variables, perdidas_tot],
+        }
+    )
 
-    if not c_mes.empty:
-        st.write("Compras por mes")
-        st.bar_chart(c_mes.set_index("mes"))
+    metodos_df = pd.DataFrame()
+    if not ventas_df.empty:
+        col_metodo = "metodo_pago" if "metodo_pago" in ventas_df.columns else "metodo" if "metodo" in ventas_df.columns else None
+        if col_metodo is not None:
+            temp_met = ventas_df.copy()
+            temp_met[col_metodo] = temp_met[col_metodo].fillna("sin método").astype(str)
+            metodos_df = (
+                temp_met.groupby(col_metodo, as_index=False)["total"]
+                .sum()
+                .rename(columns={col_metodo: "metodo"})
+            )
 
-    if not g_mes.empty:
-        st.write("Gastos por mes")
-        st.bar_chart(g_mes.set_index("mes"))
+    gc1, gc2 = st.columns(2)
+    with gc1:
+        if not v_mes.empty:
+            st.write("Ventas por mes")
+            st.line_chart(v_mes.set_index("mes"))
+        else:
+            st.info("No hay ventas en el rango seleccionado.")
+    with gc2:
+        if not c_mes.empty:
+            st.write("Compras por mes")
+            st.bar_chart(c_mes.set_index("mes"))
+        else:
+            st.info("No hay compras en el rango seleccionado.")
 
-    if not p_mes.empty:
-        st.write("Pérdidas por mes")
-        st.line_chart(p_mes.set_index("mes"))
+    gc3, gc4 = st.columns(2)
+    with gc3:
+        if not gf_df.empty:
+            st.write("Composición de gastos y pérdidas")
+            st.bar_chart(gf_df.set_index("concepto"))
+    with gc4:
+        if not metodos_df.empty:
+            st.write("Ventas por método de pago")
+            st.bar_chart(metodos_df.set_index("metodo"))
+        else:
+            st.info("No hay métodos de pago para graficar en el rango.")
 
-    st.subheader("🧠 Análisis del negocio")
+    gc5, gc6 = st.columns(2)
+    with gc5:
+        if not g_mes.empty:
+            st.write("Gastos por mes")
+            st.area_chart(g_mes.set_index("mes"))
+    with gc6:
+        if not p_mes.empty:
+            st.write("Pérdidas por mes")
+            st.line_chart(p_mes.set_index("mes"))
+
+    st.markdown('<div class="section-title">Análisis del negocio</div>', unsafe_allow_html=True)
     for mensaje in analisis_negocio(
         ventas_tot,
         compras_tot,
@@ -1197,9 +1380,9 @@ if menu == "Dashboard":
         perdidas_tot,
         utilidad_neta,
     ):
-        st.write(mensaje)
+        render_notice(mensaje, "warn" if ("🔴" in mensaje or "🟡" in mensaje) else "ok")
 
-    st.subheader("🧾 Pérdidas por producto")
+    st.markdown('<div class="section-title">Pérdidas por producto</div>', unsafe_allow_html=True)
     if not perdidas_df.empty and "producto" in perdidas_df.columns:
         cols = columnas_disponibles(perdidas_df, ["cantidad", "valor"])
         rep = perdidas_df.groupby("producto", as_index=False)[cols].sum().sort_values(cols[-1], ascending=False)
@@ -1212,7 +1395,6 @@ if menu == "Dashboard":
 # =========================================================
 # PRODUCTOS
 # =========================================================
-
 elif menu == "Productos":
     st.title("📦 Productos")
     st.caption("Catálogo maestro de productos con código, precios múltiples y control de inventario.")
@@ -1667,66 +1849,27 @@ elif menu == "Ventas":
                 st.success(f"Se cargaron {count} ventas.")
                 st.rerun()
 
-    df = DATA["ventas"].copy()
-    d1, d2 = rango_fechas_ui("ventas")
-    if not df.empty:
-        df = filtrar_por_fechas(df, d1, d2)
-    ventas_total = suma_col(df, "total") if not df.empty else 0.0
-    utilidad_auto = utilidad_bruta_total_df(df) if not df.empty else 0.0
-    gastos_fijos_v, gastos_variables_v = obtener_gastos_fijos_variables(DATA["gastos"], d1, d2)
-    empleados_total_v = obtener_empleados_fijos_periodo(DATA["empleados"], d1, d2) + obtener_empleados_variables_periodo(DATA["gastos"], d1, d2)
-    perdidas_total_v = suma_col(filtrar_por_fechas(DATA["perdidas"], d1, d2), "valor")
-    utilidad_manual_extra = st.number_input("Utilidad bruta manual adicional del período", min_value=0.0, step=1.0, key="venta_utilidad_manual")
-    utilidad_bruta_total = utilidad_auto + utilidad_manual_extra
-    utilidad_neta_total = utilidad_bruta_total - gastos_fijos_v - gastos_variables_v - empleados_total_v - perdidas_total_v
-    v1, v2, v3, v4 = st.columns(4)
-    v1.metric("Ventas del período", f"RD$ {ventas_total:,.2f}")
-    v2.metric("Utilidad bruta automática", f"RD$ {utilidad_auto:,.2f}")
-    v3.metric("Utilidad bruta total", f"RD$ {utilidad_bruta_total:,.2f}")
-    v4.metric("Utilidad neta", f"RD$ {utilidad_neta_total:,.2f}")
-
     with st.expander("➕ Agregar venta manual", expanded=True):
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3 = st.columns(3)
         with c1:
             fecha = st.date_input("Fecha", value=date.today(), key="venta_fecha")
         with c2:
             total = st.number_input("Total", min_value=0.0, step=1.0, key="venta_total")
         with c3:
-            metodo = st.selectbox("Método", ["efectivo", "transferencia", "tarjeta", "credito", "mixto"], key="venta_metodo")
-        with c4:
-            utilidad_manual = st.number_input("Utilidad bruta manual", min_value=0.0, step=1.0, key="venta_gan_manual")
+            metodo = st.selectbox("Método", ["efectivo", "transferencia", "tarjeta"], key="venta_metodo")
         observacion = st.text_input("Observación", key="venta_obs")
 
         if st.button("Guardar venta"):
-            payload = {
-                "fecha": str(fecha),
-                "total": float(total),
-                "subtotal": float(total),
-                "metodo": metodo,
-                "metodo_pago": metodo,
-                "observacion": observacion,
-                "tipo_venta": "manual",
-                "estado": "completada",
-                "anulado": False,
-                "usuario": nombre_usuario_actual(),
-                "ganancia_bruta": float(utilidad_manual),
-                "ganancia_bruta_manual": float(utilidad_manual),
-                "modo_ganancia": "manual" if utilidad_manual > 0 else "automatica",
-            }
-            if insertar("ventas", payload):
+            if insertar("ventas", {"fecha": str(fecha), "total": float(total), "metodo": metodo, "observacion": observacion}):
                 st.success("Venta guardada.")
                 st.rerun()
 
+    df = DATA["ventas"].copy()
     if not df.empty:
-        metodo_f = st.selectbox("Filtrar por método", ["Todos"] + sorted([str(x) for x in df.get("metodo_pago", pd.Series(dtype=str)).dropna().unique().tolist()]), key="ventas_filtro_metodo") if "metodo_pago" in df.columns else "Todos"
-        txt = st.text_input("Buscar venta (factura, cliente, texto)", key="buscar_ventas")
-        if metodo_f != "Todos" and "metodo_pago" in df.columns:
-            df = df[df["metodo_pago"].astype(str) == metodo_f]
+        d1, d2 = rango_fechas_ui("ventas")
+        df = filtrar_por_fechas(df, d1, d2)
+        txt = st.text_input("Buscar venta", key="buscar_ventas")
         df = buscar_df(df, txt)
-        if "ganancia_bruta" not in df.columns:
-            df["ganancia_bruta"] = 0.0
-        if "ganancia_bruta_manual" not in df.columns:
-            df["ganancia_bruta_manual"] = 0.0
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ventas")
     else:
@@ -2198,48 +2341,47 @@ elif menu == "Gastos Dueño":
 # =========================================================
 # CIERRE DE CAJA
 # =========================================================
-elif menu == "Cierre de Caja":
-    st.title("🧾 Cierre de Caja")
+elif menu == "Caja":
+    st.title("💵 Caja")
+    caja_activa = obtener_caja_abierta()
 
-    with st.expander("➕ Registrar cierre de caja", expanded=True):
-        fecha = st.date_input("Fecha de cierre", value=date.today(), key="caja_fecha")
-        apertura = st.number_input("Fondo / apertura", min_value=0.0, step=1.0, key="caja_apertura")
-
-        ventas_hoy = filtrar_por_fechas(DATA["ventas"], fecha, fecha)
-        compras_hoy = filtrar_por_fechas(DATA["compras"], fecha, fecha)
-        gastos_hoy = filtrar_por_fechas(DATA["gastos"], fecha, fecha)
-        adelantos_hoy = filtrar_por_fechas(DATA["adelantos_empleados"], fecha, fecha)
-        dueno_hoy = filtrar_por_fechas(DATA["gastos_dueno"], fecha, fecha)
-
-        ventas_efectivo = suma_col(ventas_hoy[ventas_hoy["metodo"].astype(str).str.lower() == "efectivo"], "total") if not ventas_hoy.empty and "metodo" in ventas_hoy.columns else 0.0
-        compras_efectivo = suma_col(compras_hoy[compras_hoy["metodo"].astype(str).str.lower() == "efectivo"], "monto") if not compras_hoy.empty and "metodo" in compras_hoy.columns else 0.0
-        gastos_efectivo = suma_col(gastos_hoy[gastos_hoy["metodo_pago"].astype(str).str.lower() == "efectivo"], "monto") if not gastos_hoy.empty and "metodo_pago" in gastos_hoy.columns else 0.0
-        adelantos_total = suma_col(adelantos_hoy, "monto")
-        dueno_total = suma_col(dueno_hoy, "monto")
-
-        efectivo_sistema = apertura + ventas_efectivo - compras_efectivo - gastos_efectivo - adelantos_total - dueno_total
-        st.info(f"Efectivo esperado en sistema: RD$ {efectivo_sistema:,.2f}")
-
-        efectivo_fisico = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_fisico")
-        detalle = st.text_area("Detalle / observación", key="caja_detalle")
-        diferencia = float(efectivo_fisico) - float(efectivo_sistema)
-        st.write(f"Diferencia: RD$ {diferencia:,.2f}")
-
-        if st.button("Guardar cierre de caja"):
-            if insertar(
-                "cierre_caja",
-                {
-                    "fecha": str(fecha),
-                    "apertura": float(apertura),
-                    "efectivo_sistema": float(efectivo_sistema),
-                    "efectivo_fisico": float(efectivo_fisico),
-                    "diferencia": float(diferencia),
-                    "detalle": detalle,
-                },
-            ):
-                st.success("Cierre de caja guardado.")
+    if caja_activa is None:
+        st.subheader("Abrir caja")
+        c1, c2 = st.columns(2)
+        with c1:
+            monto_inicial = st.number_input("Fondo inicial", min_value=0.0, step=1.0, key="caja_monto_inicial")
+        with c2:
+            observacion_apertura = st.text_input("Observación", key="caja_obs_apertura")
+        if st.button("Abrir caja", key="btn_abrir_caja"):
+            ok, msg = abrir_caja(monto_inicial, observacion_apertura)
+            if ok:
+                st.success(msg)
                 st.rerun()
+            else:
+                st.error(msg)
+    else:
+        st.success("Tienes una caja abierta.")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Apertura", f"RD$ {float(limpiar_numero(caja_activa.get('monto_inicial')) or 0):,.2f}")
+        c2.metric("Fecha apertura", limpiar_texto(caja_activa.get("fecha_apertura")))
+        c3.metric("Estado", limpiar_texto(caja_activa.get("estado")))
 
+        ventas_hoy = filtrar_por_fechas(DATA["ventas"], date.today(), date.today())
+        ventas_usuario = ventas_hoy[ventas_hoy["usuario"].astype(str) == nombre_usuario_actual()] if not ventas_hoy.empty and "usuario" in ventas_hoy.columns else ventas_hoy
+        total_ventas_hoy = suma_col(ventas_usuario, "total")
+        st.info(f"Ventas del usuario hoy: RD$ {total_ventas_hoy:,.2f}")
+
+        monto_cierre = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_monto_cierre")
+        observacion_cierre = st.text_area("Observación de cierre", key="caja_obs_cierre")
+        if st.button("Cerrar caja", key="btn_cerrar_caja"):
+            ok, msg = cerrar_caja(caja_activa, monto_cierre, observacion_cierre)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    st.subheader("Historial de cierres")
     df = DATA["cierre_caja"].copy()
     if not df.empty:
         d1, d2 = rango_fechas_ui("caja")
@@ -2254,6 +2396,7 @@ elif menu == "Cierre de Caja":
 
 # =========================================================
 # ESTADO DE RESULTADOS
+
 # =========================================================
 elif menu == "Estado de Resultados":
     st.title("📊 Estado de Resultados")
@@ -2435,6 +2578,10 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
+    caja_activa = obtener_caja_abierta()
+    if caja_activa is None:
+        st.warning("Debes abrir la caja antes de vender.")
+        st.stop()
     cfg = obtener_configuracion()
     productos_df = DATA["productos"].copy()
     if not productos_df.empty and "activo" in productos_df.columns:
@@ -2802,30 +2949,3 @@ elif menu == "Configuración":
                     st.rerun()
             if cfg.get("logo_url"):
                 st.image(cfg.get("logo_url"), width=220)
-
-
-# =========================================================
-# PANEL ADMINISTRATIVO DENTRO DE CADA MÓDULO
-# =========================================================
-_modulos_tablas = {
-    "Productos": ("productos", True, False),
-    "Clientes": ("clientes", True, False),
-    "Proveedores": ("proveedores", True, False),
-    "Inventario Actual": ("inventario_actual", True, False),
-    "Conteo Inventario": ("conteo_inventario", True, False),
-    "Ajustes Inventario": ("ajustes_inventario", True, False),
-    "Ventas": ("ventas", True, True),
-    "Compras": ("compras", True, True),
-    "Catálogo de Gastos": ("catalogo_gastos", True, False),
-    "Gastos": ("gastos", True, False),
-    "Empleados": ("empleados", True, False),
-    "Adelantos Empleados": ("adelantos_empleados", True, False),
-    "Pérdidas": ("perdidas", True, False),
-    "Gastos Dueño": ("gastos_dueno", True, False),
-    "Cierre de Caja": ("cierre_caja", True, True),
-    "Usuarios": ("usuarios", True, False),
-}
-if menu in _modulos_tablas:
-    _tabla, _perm_eliminar, _perm_anular = _modulos_tablas[menu]
-    _df = DATA.get(_tabla, pd.DataFrame()).copy()
-    mostrar_panel_admin_modulo(menu, _tabla, _df, permitir_eliminar=_perm_eliminar, permitir_anular=_perm_anular)
