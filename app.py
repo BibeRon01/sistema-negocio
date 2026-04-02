@@ -41,32 +41,6 @@ except Exception as exc:
 
 
 
-
-# =========================================================
-# ESTILO VISUAL EJECUTIVO
-# =========================================================
-st.markdown("""
-<style>
-:root {
-  --bg:#f6f9fc; --card:#ffffff; --ink:#0f172a; --muted:#475569;
-  --blue:#0f6efd; --green:#10b981; --red:#ef4444; --border:#dbe4f0;
-}
-.stApp {background: linear-gradient(180deg,#f8fbff 0%,#eef4fb 100%);}
-section[data-testid="stSidebar"] {background: linear-gradient(180deg,#0f172a 0%,#111827 100%); border-right:1px solid rgba(255,255,255,.08);}
-section[data-testid="stSidebar"] * {color:#f8fafc !important;}
-section[data-testid="stSidebar"] .stSelectbox label, section[data-testid="stSidebar"] .stButton button {color:#0f172a !important;}
-section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {color:#0f172a !important;}
-.block-container {padding-top:1.25rem;}
-h1,h2,h3 {color:var(--ink); font-weight:800;}
-div[data-testid="metric-container"] {background:var(--card); border:1px solid var(--border); border-radius:18px; padding:14px 16px; box-shadow:0 10px 30px rgba(15,23,42,.06);}
-.stButton > button {border-radius:12px; border:1px solid var(--border); box-shadow:0 4px 14px rgba(15,23,42,.06); font-weight:700;}
-.stButton > button[kind="primary"] {background:linear-gradient(90deg,#0f6efd,#2563eb); color:white; border:none;}
-[data-testid="stDataFrame"] {background:var(--card); border:1px solid var(--border); border-radius:16px; overflow:hidden;}
-.streamlit-expanderHeader {font-weight:800; color:var(--ink);}
-div[data-testid="stForm"] {background:rgba(255,255,255,.72); border:1px solid var(--border); border-radius:18px; padding:14px;}
-</style>
-""", unsafe_allow_html=True)
-
 # =========================================================
 # UTILIDADES BÁSICAS TEMPRANAS (PARA LOGIN)
 # =========================================================
@@ -641,43 +615,50 @@ def render_popup_post_venta():
     data = st.session_state.get("pos_venta_finalizada")
     if not data:
         return
+
+    factura = data.get('factura') or data.get('venta_id')
     st.markdown(
         f"""
-        <div style='background:#ffffff;border:2px solid #dbeafe;border-radius:18px;padding:20px 22px;box-shadow:0 8px 24px rgba(0,0,0,.08);margin-bottom:18px;'>
-            <div style='font-size:26px;font-weight:800;text-align:center;margin-bottom:6px;'>FACTURA: {data.get('factura') or data.get('venta_id')}</div>
-            <div style='font-size:18px;color:#334155;text-align:center;margin-bottom:12px;'>Cambio</div>
-            <div style='background:#ecfeff;border-radius:14px;padding:18px;text-align:center;font-size:44px;font-weight:800;color:#0f172a;margin-bottom:14px;'>
+        <div style='background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);border:2px solid #bfdbfe;border-radius:22px;padding:24px;box-shadow:0 18px 40px rgba(15,23,42,.14);margin:8px 0 18px 0;'>
+            <div style='font-size:18px;font-weight:700;color:#475569;text-align:center;'>Factura</div>
+            <div style='font-size:34px;font-weight:900;color:#0f172a;text-align:center;margin-bottom:12px;'>{factura}</div>
+            <div style='font-size:22px;font-weight:800;color:#334155;text-align:center;margin-bottom:10px;'>CAMBIO</div>
+            <div style='background:#ecfeff;border:2px solid #a5f3fc;border-radius:16px;padding:18px;text-align:center;font-size:48px;font-weight:900;color:#0f172a;margin-bottom:16px;'>
                 {_formato_moneda(data.get('cambio', 0))}
             </div>
-            <div style='display:flex;gap:12px;justify-content:center;color:#475569;font-size:15px;'>
-                <div><b>Total:</b> {_formato_moneda(data.get('total', 0))}</div>
-                <div><b>Recibido:</b> {_formato_moneda(data.get('recibido', 0))}</div>
+            <div style='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px;'>
+                <div style='background:#eff6ff;border-radius:14px;padding:12px;text-align:center;'><div style='font-size:12px;color:#64748b;'>Total</div><div style='font-size:24px;font-weight:800;color:#0f172a;'>{_formato_moneda(data.get('total', 0))}</div></div>
+                <div style='background:#f0fdf4;border-radius:14px;padding:12px;text-align:center;'><div style='font-size:12px;color:#64748b;'>Recibido</div><div style='font-size:24px;font-weight:800;color:#0f172a;'>{_formato_moneda(data.get('recibido', 0))}</div></div>
+            </div>
+            <div style='background:#fff7ed;border:1px solid #fdba74;border-radius:12px;padding:10px 12px;text-align:center;color:#9a3412;font-size:14px;font-weight:700;'>
+                Elige imprimir Ticket o Factura y luego entrega el cambio o colócalo en caja.
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    c1, c2, c3 = st.columns([1, 1, 1])
+
+    c1, c2, c3 = st.columns([1, 1, 0.8])
     with c1:
         st.download_button(
-            "🖨️ Ticket",
+            "🖨️ Imprimir Ticket",
             data=construir_texto_impresion(data, "ticket"),
-            file_name=f"ticket_{data.get('factura') or data.get('venta_id')}.txt",
+            file_name=f"ticket_{factura}.txt",
             mime="text/plain",
             use_container_width=True,
             key=f"dl_ticket_{data.get('venta_id')}"
         )
     with c2:
         st.download_button(
-            "🧾 Factura",
+            "🧾 Imprimir Factura",
             data=construir_texto_impresion(data, "factura"),
-            file_name=f"factura_{data.get('factura') or data.get('venta_id')}.txt",
+            file_name=f"factura_{factura}.txt",
             mime="text/plain",
             use_container_width=True,
             key=f"dl_factura_{data.get('venta_id')}"
         )
     with c3:
-        if st.button("✅ Cerrar", use_container_width=True, key=f"cerrar_popup_{data.get('venta_id')}"):
+        if st.button("✅ Terminar", use_container_width=True, key=f"cerrar_popup_{data.get('venta_id')}"):
             st.session_state.pop("pos_venta_finalizada", None)
             st.rerun()
 
@@ -1107,14 +1088,8 @@ menu_base = [
 
 if es_admin() or tiene_permiso("puede_configurar"):
     menu_opciones = menu_base
-elif normalizar_texto(usuario_sesion().get("rol", "")) == "gerente" and tiene_permiso("puede_ver_reportes"):
-    menu_opciones = [
-        "Dashboard", "POS", "Productos", "Clientes", "Proveedores", "Inventario Actual",
-        "Ventas", "Compras", "Gastos", "Empleados", "Pérdidas", "Cierre de Caja",
-        "Estado de Resultados", "Reportes", "Créditos"
-    ]
 else:
-    menu_opciones = []
+    menu_opciones = ["Dashboard"]
     if tiene_permiso("puede_vender"):
         menu_opciones += ["POS", "Ventas", "Cierre de Caja"]
     if tiene_permiso("puede_registrar_compras"):
@@ -2523,7 +2498,7 @@ elif menu == "POS":
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
             csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
             ncf = st.text_input("NCF (opcional)", key="pos_ncf")
-            if st.button("💳 Cobrar", key="btn_pos_cobrar"):
+            if st.button("💾 Guardar e imprimir", key="btn_pos_cobrar"):
                 if faltante > 0.001:
                     st.error("Los pagos no cubren el total final.")
                 elif pago_credito > 0 and cliente_nombre == "Venta general":
