@@ -6,7 +6,6 @@ from typing import Any, Iterable
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 from supabase import Client, create_client
 
 # =========================================================
@@ -655,6 +654,125 @@ def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
         st.error(f"Error al anular en {nombre_tabla}: {exc}")
         return False
 
+
+
+
+def puede_editar_modulos() -> bool:
+    user = usuario_sesion()
+    if not user:
+        return False
+    rol = normalizar_texto(user.get("rol", ""))
+    if rol == "admin":
+        return True
+    return rol == "gerente" and bool(user.get("puede_editar_todo", False) or user.get("puede_configurar", False))
+
+
+def _valor_formulario_generico(valor: Any):
+    try:
+        if pd.isna(valor):
+            return ""
+    except Exception:
+        pass
+    if isinstance(valor, pd.Timestamp):
+        return valor.to_pydatetime()
+    return valor
+
+
+def _convertir_desde_formulario(valor_original: Any, valor_nuevo: Any):
+    if isinstance(valor_original, bool):
+        return bool(valor_nuevo)
+    if isinstance(valor_original, (int, float)) and not isinstance(valor_original, bool):
+        return limpiar_numero(valor_nuevo) or 0
+    if isinstance(valor_original, pd.Timestamp):
+        if isinstance(valor_nuevo, (datetime, date)):
+            return str(valor_nuevo)
+        return str(valor_nuevo)
+    if isinstance(valor_original, date):
+        return str(valor_nuevo)
+    txt = limpiar_texto(valor_nuevo)
+    return txt
+
+
+def panel_modulo_crud(nombre_tabla: str, df: pd.DataFrame, solo_anular: bool = False):
+    if not puede_editar_modulos():
+        return
+    if df.empty or "id" not in df.columns:
+        return
+
+    with st.expander(f"🛠️ Editar / {'anular' if solo_anular else 'eliminar'} en {nombre_tabla}", expanded=False):
+        tmp = df.copy()
+        if "fecha" in tmp.columns:
+            try:
+                tmp = tmp.sort_values("fecha", ascending=False)
+            except Exception:
+                pass
+
+        etiquetas = []
+        mapa = {}
+        for _, row in tmp.iterrows():
+            partes = [str(row.get('id'))]
+            for col in ["nombre", "producto", "cliente_nombre", "proveedor", "numero", "fecha", "total", "monto"]:
+                if col in row.index and limpiar_texto(row.get(col)):
+                    partes.append(str(row.get(col)))
+                    if len(partes) >= 3:
+                        break
+            etiqueta = " | ".join(partes[:3])
+            etiquetas.append(etiqueta)
+            mapa[etiqueta] = row
+
+        seleccion = st.selectbox("Selecciona registro", etiquetas, key=f"crud_sel_{nombre_tabla}")
+        fila = mapa[seleccion]
+
+        editable_cols = [c for c in df.columns if c != "id"]
+        valores = {}
+        for col in editable_cols:
+            original = _valor_formulario_generico(fila[col])
+            key = f"crud_{nombre_tabla}_{fila['id']}_{col}"
+            if isinstance(original, bool):
+                valores[col] = st.checkbox(col, value=bool(original), key=key)
+            elif isinstance(original, (int, float)) and not isinstance(original, bool):
+                valores[col] = st.text_input(col, value=str(original), key=key)
+            elif isinstance(original, (datetime, date)):
+                valores[col] = st.text_input(col, value=str(original), key=key)
+            else:
+                txt = "" if original is None else str(original)
+                if len(txt) > 80 or col in ["observacion", "detalle", "descripcion", "motivo_anulacion"]:
+                    valores[col] = st.text_area(col, value=txt, key=key, height=80)
+                else:
+                    valores[col] = st.text_input(col, value=txt, key=key)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("💾 Guardar cambios", key=f"crud_save_{nombre_tabla}_{fila['id']}"):
+                payload = {}
+                for col in editable_cols:
+                    payload[col] = _convertir_desde_formulario(fila[col], valores[col])
+                ok = actualizar(nombre_tabla, fila["id"], payload)
+                if ok:
+                    st.success("Registro actualizado.")
+                    st.rerun()
+        with c2:
+            if solo_anular and "anulado" in df.columns:
+                motivo = st.text_input("Motivo anulación", key=f"crud_motivo_{nombre_tabla}_{fila['id']}")
+                if st.button("🚫 Anular", key=f"crud_anular_{nombre_tabla}_{fila['id']}"):
+                    ok = anular(nombre_tabla, fila["id"], motivo)
+                    if ok:
+                        st.success("Registro anulado.")
+                        st.rerun()
+            else:
+                if st.button("🗑️ Eliminar", key=f"crud_delete_{nombre_tabla}_{fila['id']}"):
+                    ok = eliminar(nombre_tabla, fila["id"])
+                    if ok:
+                        st.success("Registro eliminado.")
+                        st.rerun()
+        with c3:
+            if (not solo_anular) and "anulado" in df.columns:
+                motivo = st.text_input("Motivo anulación opcional", key=f"crud_motivo_opt_{nombre_tabla}_{fila['id']}")
+                if st.button("🚫 Anular", key=f"crud_anular_opt_{nombre_tabla}_{fila['id']}"):
+                    ok = anular(nombre_tabla, fila["id"], motivo)
+                    if ok:
+                        st.success("Registro anulado.")
+                        st.rerun()
 # =========================================================
 # CARGA GLOBAL
 # =========================================================
@@ -1051,99 +1169,6 @@ def panel_admin_crud(nombre_tabla: str, solo_anular: bool = False):
                 if eliminar(nombre_tabla, elegido):
                     st.success("Registro eliminado.")
                     st.rerun()
-
-
-def generar_html_factura(venta_id: str, items: list[dict], pagos: dict, subtotal: float, descuento: float, recargo: float, total_final: float, cambio: float, cliente_nombre: str, ncf: str = "") -> str:
-    cfg = obtener_configuracion()
-    negocio = str(cfg.get("negocio_nombre") or "Sistema de Negocio PRO")
-    telefono = str(cfg.get("telefono") or "")
-    direccion = str(cfg.get("direccion") or "")
-    filas = ""
-    for item in items:
-        filas += f"<tr><td>{item.get('producto','')}</td><td style='text-align:center'>{float(item.get('cantidad',0)):.0f}</td><td style='text-align:right'>RD$ {float(item.get('precio_unitario',0)):,.2f}</td><td style='text-align:right'>RD$ {float(item.get('total_linea',0)):,.2f}</td></tr>"
-    pagos_html = "".join([
-        f"<tr><td>{met.title()}</td><td style='text-align:right'>RD$ {float(monto):,.2f}</td></tr>"
-        for met, monto in pagos.items() if float(monto or 0) > 0
-    ])
-    fecha_txt = datetime.now().strftime('%d/%m/%Y %I:%M %p')
-    usuario_txt = nombre_usuario_actual()
-    html = f"""
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; padding: 16px; color:#111; }}
-            .ticket {{ max-width: 820px; margin: auto; border:1px solid #ddd; padding:20px; border-radius:12px; }}
-            h1,h2,h3,p {{ margin: 4px 0; }}
-            table {{ width:100%; border-collapse: collapse; margin-top:12px; }}
-            th, td {{ border-bottom:1px solid #eee; padding:8px; font-size:14px; }}
-            .totales td {{ border:none; padding:4px 0; }}
-            .printbar {{ margin: 12px 0 20px 0; display:flex; gap:10px; }}
-            .btn {{ background:#0d6efd; color:#fff; border:none; padding:10px 14px; border-radius:8px; cursor:pointer; }}
-            @media print {{ .printbar {{ display:none; }} .ticket {{ border:none; }} body {{ padding:0; }} }}
-        </style>
-    </head>
-    <body>
-        <div class='ticket'>
-            <div class='printbar'>
-                <button class='btn' onclick='window.print()'>🖨️ Imprimir factura</button>
-            </div>
-            <h2>{negocio}</h2>
-            <p>{direccion}</p>
-            <p>{telefono}</p>
-            <hr>
-            <p><b>Factura:</b> {venta_id}</p>
-            <p><b>Fecha:</b> {fecha_txt}</p>
-            <p><b>Cliente:</b> {cliente_nombre}</p>
-            <p><b>NCF:</b> {ncf or '-'}</p>
-            <p><b>Atendido por:</b> {usuario_txt}</p>
-            <table>
-                <thead>
-                    <tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Total</th></tr>
-                </thead>
-                <tbody>{filas}</tbody>
-            </table>
-            <table class='totales'>
-                <tr><td><b>Subtotal</b></td><td style='text-align:right'>RD$ {subtotal:,.2f}</td></tr>
-                <tr><td><b>Descuento</b></td><td style='text-align:right'>RD$ {descuento:,.2f}</td></tr>
-                <tr><td><b>Recargo</b></td><td style='text-align:right'>RD$ {recargo:,.2f}</td></tr>
-                <tr><td><b>Total</b></td><td style='text-align:right'><b>RD$ {total_final:,.2f}</b></td></tr>
-                <tr><td><b>Cambio</b></td><td style='text-align:right'>RD$ {cambio:,.2f}</td></tr>
-            </table>
-            <h4>Pagos</h4>
-            <table><tbody>{pagos_html}</tbody></table>
-            <p style='margin-top:18px'>Gracias por su compra.</p>
-        </div>
-    </body>
-    </html>
-    """
-    return html
-
-def render_panel_impresion_factura():
-    html = st.session_state.get("ultima_factura_html", "")
-    if not html:
-        return
-
-    st.subheader("🖨️ Última factura")
-    c1, c2 = st.columns([1,1])
-    with c1:
-        st.download_button(
-            "⬇️ Descargar factura HTML",
-            data=html.encode("utf-8"),
-            file_name="factura_ultima.html",
-            mime="text/html",
-            key="dl_factura_html_visible",
-            use_container_width=True,
-        )
-    with c2:
-        if st.button("🗑️ Limpiar factura", key="limpiar_ultima_factura", use_container_width=True):
-            st.session_state["ultima_factura_html"] = ""
-            st.rerun()
-
-    html_print = html.replace("</body>", "<script>function imprimirFactura(){window.print();}</script></body>")
-    components.html(html_print, height=700, scrolling=True)
-
-
-
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1185,7 +1210,6 @@ menu_base = [
     "Usuarios",
     "Configuración",
     "Auditoría",
-    "Admin CRUD",
 ]
 
 if es_admin() or tiene_permiso("puede_configurar"):
@@ -1203,8 +1227,6 @@ else:
     menu_opciones = list(dict.fromkeys(menu_opciones))
 
 menu = st.sidebar.selectbox("Menú", menu_opciones)
-if es_admin():
-    st.sidebar.caption("🛠️ Como administradora, usa Admin CRUD para editar, eliminar o anular registros.")
 
 if st.sidebar.button("🔄 Recargar nube"):
     st.rerun()
@@ -1440,6 +1462,7 @@ elif menu == "Productos":
             df = df[mask]
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "productos")
+        panel_modulo_crud("productos", df)
     else:
         st.info("No hay productos registrados.")
 
@@ -1510,6 +1533,7 @@ elif menu == "Inventario Actual":
         invent = buscar_df(invent, txt)
         st.dataframe(invent, use_container_width=True)
         descargar_archivos(invent, "inventario_actual")
+        panel_modulo_crud("inventario_actual", invent)
     else:
         st.info("No hay inventario actual registrado.")
 
@@ -1576,6 +1600,7 @@ elif menu == "Conteo Inventario":
 
         st.dataframe(conteo_f, use_container_width=True)
         descargar_archivos(conteo_f, "conteo_inventario")
+        panel_modulo_crud("conteo_inventario", conteo_f)
 
         st.subheader("⚙️ Procesar faltantes y sobrantes")
         pendientes = conteo_f[conteo_f["estado"].astype(str).str.lower().isin(["faltante", "sobrante"])] if not conteo_f.empty else pd.DataFrame()
@@ -1730,6 +1755,7 @@ elif menu == "Ajustes Inventario":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ajustes_inventario")
+        panel_modulo_crud("ajustes_inventario", df)
     else:
         st.info("No hay ajustes registrados.")
 
@@ -1784,6 +1810,7 @@ elif menu == "Ventas":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ventas")
+        panel_modulo_crud("ventas", df, solo_anular=True)
     else:
         st.info("No hay ventas registradas.")
 
@@ -1928,6 +1955,7 @@ elif menu == "Compras":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "compras")
+        panel_modulo_crud("compras", df)
     else:
         st.info("No hay compras registradas.")
 
@@ -1971,6 +1999,7 @@ elif menu == "Catálogo de Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "catalogo_gastos")
+        panel_modulo_crud("catalogo_gastos", df)
     else:
         st.info("No hay catálogo de gastos.")
 
@@ -2064,6 +2093,7 @@ elif menu == "Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos")
+        panel_modulo_crud("gastos", df)
     else:
         st.info("No hay gastos registrados.")
 
@@ -2138,6 +2168,7 @@ elif menu == "Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "empleados")
+        panel_modulo_crud("empleados", df)
     else:
         st.info("No hay empleados registrados.")
 
@@ -2175,6 +2206,7 @@ elif menu == "Adelantos Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "adelantos_empleados")
+        panel_modulo_crud("adelantos_empleados", df)
     else:
         st.info("No hay adelantos registrados.")
 
@@ -2211,6 +2243,7 @@ elif menu == "Pérdidas":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "perdidas")
+        panel_modulo_crud("perdidas", df)
     else:
         st.info("No hay pérdidas registradas.")
 
@@ -2246,6 +2279,7 @@ elif menu == "Gastos Dueño":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos_dueno")
+        panel_modulo_crud("gastos_dueno", df)
     else:
         st.info("No hay gastos del dueño registrados.")
 
@@ -2303,6 +2337,7 @@ elif menu == "Cierre de Caja":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "cierre_caja")
+        panel_modulo_crud("cierre_caja", df, solo_anular=True)
     else:
         st.info("No hay cierres de caja registrados.")
 
@@ -2490,7 +2525,6 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
-    render_panel_impresion_factura()
     cfg = obtener_configuracion()
     productos_df = DATA["productos"].copy()
     if not productos_df.empty and "activo" in productos_df.columns:
@@ -2500,8 +2534,6 @@ elif menu == "POS":
     else:
         if "pos_carrito" not in st.session_state:
             st.session_state["pos_carrito"] = []
-        if "ultima_factura_html" not in st.session_state:
-            st.session_state["ultima_factura_html"] = ""
         carrito = st.session_state["pos_carrito"]
 
         def agregar_item_carrito(prod_row, cantidad=1.0, precio_usar=None):
@@ -2689,28 +2721,7 @@ elif menu == "POS":
                                 "usuario": nombre_usuario_actual(),
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
-                        factura_items = []
-                        for item in carrito:
-                            factura_items.append({
-                                "producto": item["producto"],
-                                "cantidad": float(item["cantidad"]),
-                                "precio_unitario": float(item["precio_unitario"]),
-                                "total_linea": float(item["cantidad"]) * float(item["precio_unitario"]),
-                            })
-                        st.session_state["ultima_factura_html"] = generar_html_factura(
-                            str(venta_id),
-                            factura_items,
-                            pagos,
-                            float(subtotal),
-                            float(descuento_global),
-                            float(recargo),
-                            float(total_final),
-                            float(cambio),
-                            cliente_nombre,
-                            ncf,
-                        )
                         st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
-                        st.info("Debajo del título del POS te aparecerá el panel de Última factura para imprimir o descargar.")
                         st.session_state["pos_carrito"] = []
                         st.rerun()
                     except Exception as exc:
@@ -2741,6 +2752,7 @@ elif menu == "Clientes":
     if not df.empty:
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "clientes")
+        panel_modulo_crud("clientes", df)
     else:
         st.info("No hay clientes.")
 
@@ -2767,6 +2779,7 @@ elif menu == "Proveedores":
     if not df.empty:
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "proveedores")
+        panel_modulo_crud("proveedores", df)
     else:
         st.info("No hay proveedores.")
 
@@ -2817,6 +2830,7 @@ elif menu == "Usuarios":
                 usuario = st.text_input("Usuario", key="usr_usuario")
                 clave = st.text_input("Clave", key="usr_clave")
                 rol = st.selectbox("Rol", ["admin", "gerente", "cajera"], key="usr_rol")
+                puede_editar_todo = st.checkbox("Gerente con acceso a editar todo", key="usr_peditodo")
             with c2:
                 activo = st.checkbox("Activo", value=True, key="usr_activo")
                 puede_vender = st.checkbox("Puede vender", value=True, key="usr_pv")
@@ -2836,15 +2850,16 @@ elif menu == "Usuarios":
                 else:
                     if not existentes.empty and "usuario" in existentes.columns and normalizar_texto(usuario) in existentes["usuario"].astype(str).apply(normalizar_texto).tolist():
                         fila = existentes[existentes["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario)].iloc[0]
-                        actualizar("usuarios", fila["id"], {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar})
+                        actualizar("usuarios", fila["id"], {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar, "puede_editar_todo": puede_editar_todo})
                         st.success("Usuario actualizado.")
                     else:
-                        insertar("usuarios", {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar})
+                        insertar("usuarios", {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar, "puede_editar_todo": puede_editar_todo})
                         st.success("Usuario creado.")
                     st.rerun()
         df = DATA.get("usuarios", pd.DataFrame()).copy()
         if not df.empty:
             st.dataframe(df, use_container_width=True)
+            panel_modulo_crud("usuarios", df)
 
 # =========================================================
 # CONFIGURACION
@@ -2886,35 +2901,3 @@ elif menu == "Configuración":
 # =========================================================
 # ADMIN CRUD
 # =========================================================
-elif menu == "Admin CRUD":
-    st.title("🛠️ Admin CRUD")
-    st.info("Desde aquí solo la administradora puede editar, eliminar o anular. Selecciona la tabla, el registro y guarda los cambios.")
-    if not es_admin():
-        st.error("Solo la administradora puede entrar aquí.")
-    else:
-        tabla = st.selectbox(
-            "Tabla a administrar",
-            [
-                "productos",
-                "clientes",
-                "proveedores",
-                "inventario_actual",
-                "conteo_inventario",
-                "ajustes_inventario",
-                "ventas",
-                "compras",
-                "catalogo_gastos",
-                "gastos",
-                "empleados",
-                "adelantos_empleados",
-                "perdidas",
-                "gastos_dueno",
-                "cierre_caja",
-                "usuarios",
-                "configuracion_sistema",
-            ],
-            key="admin_crud_tabla",
-        )
-        solo_anular = tabla in ["ventas", "cierre_caja"]
-        st.caption("Aquí solo la administradora puede editar, eliminar o anular registros.")
-        panel_admin_crud(tabla, solo_anular=solo_anular)
