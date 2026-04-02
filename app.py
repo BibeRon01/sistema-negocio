@@ -14,6 +14,30 @@ from supabase import Client, create_client
 st.set_page_config(page_title="Sistema de Negocio PRO", layout="wide")
 
 
+st.markdown("""
+<style>
+:root {
+  --brand:#0ea5e9;
+  --brand2:#7c3aed;
+}
+.block-container {padding-top: 1rem; padding-bottom: 2rem;}
+div[data-testid="stMetric"]{
+  background:linear-gradient(135deg, rgba(14,165,233,.12), rgba(124,58,237,.08));
+  border:1px solid rgba(14,165,233,.2);
+  border-radius:14px;
+  padding:.7rem .9rem;
+}
+.stButton>button, .stDownloadButton>button{
+  border-radius:10px;
+}
+[data-testid="stSidebar"]{
+  background:linear-gradient(180deg, rgba(2,6,23,.96), rgba(15,23,42,.98));
+}
+[data-testid="stSidebar"] * { color:#e5eefc; }
+</style>
+""", unsafe_allow_html=True)
+
+
 # =========================================================
 # SECRETS / CONEXIÓN
 # =========================================================
@@ -182,23 +206,11 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def limpiar_numero(valor: Any) -> float | None:
-    if valor is None:
+    if pd.isna(valor) or valor == "":
         return None
-    try:
-        if isinstance(valor, pd.Series):
-            return None
-    except Exception:
-        pass
-    try:
-        if pd.isna(valor):
-            return None
-    except Exception:
-        pass
     if isinstance(valor, (int, float)):
         return float(valor)
     txt = str(valor).strip()
-    if txt == "":
-        return None
     txt = txt.replace("RD$", "").replace("rd$", "").replace("$", "")
     txt = txt.replace(",", "")
     txt = txt.replace(" ", "")
@@ -672,7 +684,6 @@ def cargar_datos() -> dict[str, pd.DataFrame]:
         "inventario_lotes",
         "movimientos",
         "movimientos_caja",
-        "caja",
         "configuracion_sistema",
     ]
 
@@ -970,111 +981,75 @@ def serie_periodica(df: pd.DataFrame, columna: str, frecuencia: str = "M") -> pd
     return out
 
 
-def usuario_id_actual() -> str:
-    user = usuario_sesion()
-    return str(user.get("id") or user.get("usuario") or user.get("nombre") or "")
 
 
-def leer_caja_abierta_usuario() -> dict | None:
+# =========================================================
+# HELPERS ADMIN CRUD
+# =========================================================
+def _editor_campo(nombre_campo: str, valor, key_prefijo: str):
+    key = f"{key_prefijo}_{nombre_campo}"
+    if isinstance(valor, bool):
+        return st.checkbox(nombre_campo, value=bool(valor), key=key)
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        return st.number_input(nombre_campo, value=float(valor), key=key)
     try:
-        usuario_id = usuario_id_actual()
-        if not usuario_id:
-            return None
-        resp = (
-            supabase.table("caja")
-            .select("*")
-            .eq("usuario_id", usuario_id)
-            .eq("estado", "abierta")
-            .order("fecha_apertura", desc=True)
-            .limit(1)
-            .execute()
-        )
-        filas = resp.data or []
-        return filas[0] if filas else None
+        if pd.isna(valor):
+            valor = ""
     except Exception:
-        return None
+        pass
+    if isinstance(valor, (pd.Timestamp, datetime, date)):
+        try:
+            return st.date_input(nombre_campo, value=pd.to_datetime(valor).date(), key=key)
+        except Exception:
+            pass
+    txt = "" if valor is None else str(valor)
+    if len(txt) > 120:
+        return st.text_area(nombre_campo, value=txt, key=key)
+    return st.text_input(nombre_campo, value=txt, key=key)
 
-
-def caja_abierta_usuario() -> bool:
-    return leer_caja_abierta_usuario() is not None
-
-
-def abrir_caja_usuario(monto_inicial: float) -> tuple[bool, str]:
-    try:
-        if caja_abierta_usuario():
-            return False, "Ya hay una caja abierta para este usuario."
-        payload = {
-            "usuario_id": usuario_id_actual(),
-            "estado": "abierta",
-            "fecha_apertura": datetime.now().isoformat(),
-            "monto_inicial": float(monto_inicial),
-        }
-        supabase.table("caja").insert(payload).execute()
-        registrar_auditoria("abrir_caja", "caja", f"monto_inicial={monto_inicial}")
-        return True, "Caja abierta correctamente."
-    except Exception as exc:
-        return False, f"No se pudo abrir caja: {exc}"
-
-
-def cerrar_caja_usuario(efectivo_fisico: float, detalle: str = "") -> tuple[bool, str]:
-    caja = leer_caja_abierta_usuario()
-    if not caja:
-        return False, "No hay caja abierta para cerrar."
-    usuario_id = usuario_id_actual()
-    hoy = date.today()
-    ventas_pagos = filtrar_por_fechas(DATA.get("ventas_pagos", pd.DataFrame()), hoy, hoy).copy()
-    ventas_df = filtrar_por_fechas(DATA.get("ventas", pd.DataFrame()), hoy, hoy).copy()
+def panel_admin_crud(nombre_tabla: str, solo_anular: bool = False):
     if not es_admin():
-        if not ventas_pagos.empty and "usuario" in ventas_pagos.columns:
-            ventas_pagos = ventas_pagos[ventas_pagos["usuario"].astype(str) == nombre_usuario_actual()]
-        if not ventas_df.empty and "usuario_id" in ventas_df.columns:
-            ventas_df = ventas_df[ventas_df["usuario_id"].astype(str) == usuario_id]
-        elif not ventas_df.empty and "usuario" in ventas_df.columns:
-            ventas_df = ventas_df[ventas_df["usuario"].astype(str) == nombre_usuario_actual()]
-
-    def total_metodo(met: str) -> float:
-        if not ventas_pagos.empty and "metodo" in ventas_pagos.columns:
-            return suma_col(ventas_pagos[ventas_pagos["metodo"].astype(str).str.lower() == met], "monto")
-        if not ventas_df.empty and "metodo_pago" in ventas_df.columns:
-            return suma_col(ventas_df[ventas_df["metodo_pago"].astype(str).str.lower() == met], "total")
-        return 0.0
-
-    efectivo = total_metodo("efectivo")
-    transferencia = total_metodo("transferencia")
-    tarjeta = total_metodo("tarjeta")
-    credito = total_metodo("credito")
-    mixto = total_metodo("mixto")
-    efectivo_sistema = float(caja.get("monto_inicial") or 0) + efectivo
-    diferencia = float(efectivo_fisico) - efectivo_sistema
-    try:
-        supabase.table("caja").update({
-            "estado": "cerrada",
-            "fecha_cierre": datetime.now().isoformat(),
-        }).eq("id", caja["id"]).execute()
-    except Exception:
-        pass
-    try:
-        supabase.table("cierre_caja").insert({
-            "fecha": datetime.now().isoformat(),
-            "apertura": float(caja.get("monto_inicial") or 0),
-            "efectivo_sistema": float(efectivo_sistema),
-            "efectivo_fisico": float(efectivo_fisico),
-            "diferencia": float(diferencia),
-            "detalle": detalle,
-            "usuario_id": usuario_id,
-            "usuario": nombre_usuario_actual(),
-            "ventas_efectivo": float(efectivo),
-            "ventas_transferencia": float(transferencia),
-            "ventas_tarjeta": float(tarjeta),
-            "ventas_credito": float(credito),
-            "ventas_mixto": float(mixto),
-        }).execute()
-    except Exception:
-        pass
-    registrar_auditoria("cerrar_caja", "caja", f"efectivo_sistema={efectivo_sistema} efectivo_fisico={efectivo_fisico}")
-    return True, "Caja cerrada correctamente."
-
-
+        st.error("Solo la administradora puede editar.")
+        return
+    df = leer_tabla(nombre_tabla)
+    if df.empty:
+        st.info("No hay datos en esta tabla.")
+        return
+    st.dataframe(df, use_container_width=True)
+    if "id" not in df.columns:
+        st.warning("Esta tabla no tiene columna id; no se puede editar desde este panel.")
+        return
+    opciones = [str(x) for x in df["id"].tolist()]
+    elegido = st.selectbox("Selecciona el registro (ID)", opciones, key=f"crud_sel_{nombre_tabla}")
+    fila = df[df["id"].astype(str) == str(elegido)].iloc[0].to_dict()
+    with st.form(f"crud_form_{nombre_tabla}_{elegido}"):
+        nuevos = {}
+        for col, val in fila.items():
+            if col == "id":
+                st.text_input("id", value=str(val), disabled=True)
+                continue
+            nuevos[col] = _editor_campo(col, val, f"{nombre_tabla}_{elegido}")
+        guardar = st.form_submit_button("💾 Guardar cambios")
+    c1, c2 = st.columns(2)
+    with c1:
+        if guardar:
+            payload = {}
+            for col, val in nuevos.items():
+                payload[col] = str(val) if isinstance(val, date) and not isinstance(val, datetime) else val
+            if actualizar(nombre_tabla, elegido, payload):
+                st.success("Registro actualizado.")
+                st.rerun()
+    with c2:
+        if solo_anular:
+            if st.button("⛔ Anular registro", key=f"crud_anular_{nombre_tabla}_{elegido}"):
+                if anular(nombre_tabla, elegido, "Anulado por administradora"):
+                    st.success("Registro anulado.")
+                    st.rerun()
+        else:
+            if st.button("🗑️ Eliminar registro", key=f"crud_eliminar_{nombre_tabla}_{elegido}"):
+                if eliminar(nombre_tabla, elegido):
+                    st.success("Registro eliminado.")
+                    st.rerun()
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1109,13 +1084,14 @@ menu_base = [
     "Adelantos Empleados",
     "Pérdidas",
     "Gastos Dueño",
-    "Caja",
+    "Cierre de Caja",
     "Estado de Resultados",
     "Reportes",
     "Créditos",
     "Usuarios",
     "Configuración",
     "Auditoría",
+    "Admin CRUD",
 ]
 
 if es_admin() or tiene_permiso("puede_configurar"):
@@ -1123,7 +1099,7 @@ if es_admin() or tiene_permiso("puede_configurar"):
 else:
     menu_opciones = []
     if tiene_permiso("puede_vender"):
-        menu_opciones += ["Caja", "POS", "Ventas"]
+        menu_opciones += ["POS", "Ventas", "Cierre de Caja"]
     if tiene_permiso("puede_registrar_compras"):
         menu_opciones += ["Compras", "Proveedores", "Productos", "Inventario Actual"]
     if tiene_permiso("puede_registrar_gastos"):
@@ -1667,36 +1643,53 @@ elif menu == "Ajustes Inventario":
 # =========================================================
 elif menu == "Ventas":
     st.title("💰 Ventas")
-    df = DATA["ventas"].copy()
-    if df.empty:
-        st.info("No hay ventas registradas.")
-    else:
-        if not es_admin():
-            if "usuario_id" in df.columns:
-                df = df[df["usuario_id"].astype(str) == usuario_id_actual()]
-            elif "usuario" in df.columns:
-                df = df[df["usuario"].astype(str) == nombre_usuario_actual()]
 
+    with st.expander("📥 Subir Excel / CSV de ventas"):
+        st.write("Columnas esperadas: fecha, total, metodo. Observación opcional.")
+        archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_ventas")
+        if archivo is not None and st.button("Cargar ventas"):
+            df = leer_archivo_subido(archivo)
+            faltan = [c for c in ["fecha", "total", "metodo"] if c not in df.columns]
+            if faltan:
+                st.error(f"Faltan columnas: {faltan}")
+            else:
+                count = 0
+                for _, row in df.iterrows():
+                    fecha = parsear_fecha(row["fecha"])
+                    total = limpiar_numero(row["total"]) or 0
+                    metodo = limpiar_texto(row["metodo"])
+                    observacion = limpiar_texto(row["observacion"]) if "observacion" in df.columns else ""
+                    if fecha:
+                        insertar("ventas", {"fecha": fecha, "total": float(total), "metodo": metodo, "observacion": observacion})
+                        count += 1
+                st.success(f"Se cargaron {count} ventas.")
+                st.rerun()
+
+    with st.expander("➕ Agregar venta manual", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            fecha = st.date_input("Fecha", value=date.today(), key="venta_fecha")
+        with c2:
+            total = st.number_input("Total", min_value=0.0, step=1.0, key="venta_total")
+        with c3:
+            metodo = st.selectbox("Método", ["efectivo", "transferencia", "tarjeta"], key="venta_metodo")
+        observacion = st.text_input("Observación", key="venta_obs")
+
+        if st.button("Guardar venta"):
+            if insertar("ventas", {"fecha": str(fecha), "total": float(total), "metodo": metodo, "observacion": observacion}):
+                st.success("Venta guardada.")
+                st.rerun()
+
+    df = DATA["ventas"].copy()
+    if not df.empty:
         d1, d2 = rango_fechas_ui("ventas")
         df = filtrar_por_fechas(df, d1, d2)
-        if "metodo_pago" in df.columns:
-            metodos = ["Todos"] + sorted([m for m in df["metodo_pago"].dropna().astype(str).unique().tolist() if m])
-            met_sel = st.selectbox("Filtrar por tipo de pago", metodos, key="ventas_metodo_filtro")
-            if met_sel != "Todos":
-                df = df[df["metodo_pago"].astype(str) == met_sel]
-        factura_col = "ncf" if "ncf" in df.columns else ("id" if "id" in df.columns else None)
-        if factura_col:
-            buscar_fact = st.text_input("Buscar por no. de factura", key="buscar_factura_ventas")
-            if buscar_fact:
-                df = df[df[factura_col].astype(str).str.contains(buscar_fact, case=False, na=False)]
         txt = st.text_input("Buscar venta", key="buscar_ventas")
         df = buscar_df(df, txt)
-        cols = [c for c in [factura_col, "fecha", "cliente_nombre", "usuario", "metodo_pago", "estado", "total"] if c and c in df.columns]
-        if cols:
-            st.dataframe(df[cols].sort_values("fecha", ascending=False), use_container_width=True)
-        else:
-            st.dataframe(df.sort_values("fecha", ascending=False), use_container_width=True)
+        st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ventas")
+    else:
+        st.info("No hay ventas registradas.")
 
 
 # =========================================================
@@ -2164,76 +2157,58 @@ elif menu == "Gastos Dueño":
 # =========================================================
 # CIERRE DE CAJA
 # =========================================================
-elif menu == "Caja":
-    st.title("💰 Caja")
-    caja_abierta = leer_caja_abierta_usuario()
+elif menu == "Cierre de Caja":
+    st.title("🧾 Cierre de Caja")
 
-    if caja_abierta is None:
-        st.subheader("Abrir caja")
-        monto_inicial = st.number_input("Monto inicial", min_value=0.0, step=1.0, key="caja_monto_inicial")
-        if st.button("Abrir caja", key="btn_abrir_caja"):
-            ok, msg = abrir_caja_usuario(monto_inicial)
-            if ok:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-    else:
-        st.success(f"Caja abierta desde {caja_abierta.get('fecha_apertura')}")
-        hoy = date.today()
-        ventas_pagos = filtrar_por_fechas(DATA.get("ventas_pagos", pd.DataFrame()), hoy, hoy).copy()
-        ventas_df = filtrar_por_fechas(DATA.get("ventas", pd.DataFrame()), hoy, hoy).copy()
-        if not es_admin():
-            if not ventas_pagos.empty and "usuario" in ventas_pagos.columns:
-                ventas_pagos = ventas_pagos[ventas_pagos["usuario"].astype(str) == nombre_usuario_actual()]
-            if not ventas_df.empty and "usuario_id" in ventas_df.columns:
-                ventas_df = ventas_df[ventas_df["usuario_id"].astype(str) == usuario_id_actual()]
-            elif not ventas_df.empty and "usuario" in ventas_df.columns:
-                ventas_df = ventas_df[ventas_df["usuario"].astype(str) == nombre_usuario_actual()]
+    with st.expander("➕ Registrar cierre de caja", expanded=True):
+        fecha = st.date_input("Fecha de cierre", value=date.today(), key="caja_fecha")
+        apertura = st.number_input("Fondo / apertura", min_value=0.0, step=1.0, key="caja_apertura")
 
-        def tot_met(met):
-            if not ventas_pagos.empty and "metodo" in ventas_pagos.columns:
-                return suma_col(ventas_pagos[ventas_pagos["metodo"].astype(str).str.lower() == met], "monto")
-            if not ventas_df.empty and "metodo_pago" in ventas_df.columns:
-                return suma_col(ventas_df[ventas_df["metodo_pago"].astype(str).str.lower() == met], "total")
-            return 0.0
+        ventas_hoy = filtrar_por_fechas(DATA["ventas"], fecha, fecha)
+        compras_hoy = filtrar_por_fechas(DATA["compras"], fecha, fecha)
+        gastos_hoy = filtrar_por_fechas(DATA["gastos"], fecha, fecha)
+        adelantos_hoy = filtrar_por_fechas(DATA["adelantos_empleados"], fecha, fecha)
+        dueno_hoy = filtrar_por_fechas(DATA["gastos_dueno"], fecha, fecha)
 
-        ventas_efectivo = tot_met("efectivo")
-        ventas_transferencia = tot_met("transferencia")
-        ventas_tarjeta = tot_met("tarjeta")
-        ventas_credito = tot_met("credito")
-        ventas_mixto = tot_met("mixto")
-        efectivo_sistema = float(caja_abierta.get("monto_inicial") or 0) + ventas_efectivo
+        ventas_efectivo = suma_col(ventas_hoy[ventas_hoy["metodo"].astype(str).str.lower() == "efectivo"], "total") if not ventas_hoy.empty and "metodo" in ventas_hoy.columns else 0.0
+        compras_efectivo = suma_col(compras_hoy[compras_hoy["metodo"].astype(str).str.lower() == "efectivo"], "monto") if not compras_hoy.empty and "metodo" in compras_hoy.columns else 0.0
+        gastos_efectivo = suma_col(gastos_hoy[gastos_hoy["metodo_pago"].astype(str).str.lower() == "efectivo"], "monto") if not gastos_hoy.empty and "metodo_pago" in gastos_hoy.columns else 0.0
+        adelantos_total = suma_col(adelantos_hoy, "monto")
+        dueno_total = suma_col(dueno_hoy, "monto")
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Fondo inicial", f"RD$ {float(caja_abierta.get('monto_inicial') or 0):,.2f}")
-        c2.metric("Efectivo vendido", f"RD$ {ventas_efectivo:,.2f}")
-        c3.metric("Transferencia", f"RD$ {ventas_transferencia:,.2f}")
-        c4.metric("Tarjeta", f"RD$ {ventas_tarjeta:,.2f}")
-        c5, c6 = st.columns(2)
-        c5.metric("Crédito", f"RD$ {ventas_credito:,.2f}")
-        c6.metric("Efectivo esperado", f"RD$ {efectivo_sistema:,.2f}")
+        efectivo_sistema = apertura + ventas_efectivo - compras_efectivo - gastos_efectivo - adelantos_total - dueno_total
+        st.info(f"Efectivo esperado en sistema: RD$ {efectivo_sistema:,.2f}")
 
-        efectivo_fisico = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_efectivo_fisico")
-        detalle = st.text_area("Detalle / observación", key="caja_detalle_cierre")
-        diferencia = float(efectivo_fisico) - efectivo_sistema
+        efectivo_fisico = st.number_input("Efectivo físico contado", min_value=0.0, step=1.0, key="caja_fisico")
+        detalle = st.text_area("Detalle / observación", key="caja_detalle")
+        diferencia = float(efectivo_fisico) - float(efectivo_sistema)
         st.write(f"Diferencia: RD$ {diferencia:,.2f}")
 
-        if st.button("Cerrar caja", key="btn_cerrar_caja"):
-            ok, msg = cerrar_caja_usuario(efectivo_fisico, detalle)
-            if ok:
-                st.success(msg)
+        if st.button("Guardar cierre de caja"):
+            if insertar(
+                "cierre_caja",
+                {
+                    "fecha": str(fecha),
+                    "apertura": float(apertura),
+                    "efectivo_sistema": float(efectivo_sistema),
+                    "efectivo_fisico": float(efectivo_fisico),
+                    "diferencia": float(diferencia),
+                    "detalle": detalle,
+                },
+            ):
+                st.success("Cierre de caja guardado.")
                 st.rerun()
-            else:
-                st.error(msg)
 
-    cierres = DATA.get("cierre_caja", pd.DataFrame()).copy()
-    if not cierres.empty:
-        if not es_admin() and "usuario" in cierres.columns:
-            cierres = cierres[cierres["usuario"].astype(str) == nombre_usuario_actual()]
-        st.subheader("Historial de cierres")
-        st.dataframe(cierres.sort_values("fecha", ascending=False), use_container_width=True)
-        descargar_archivos(cierres, "cierre_caja")
+    df = DATA["cierre_caja"].copy()
+    if not df.empty:
+        d1, d2 = rango_fechas_ui("caja")
+        df = filtrar_por_fechas(df, d1, d2)
+        txt = st.text_input("Buscar cierre de caja", key="buscar_caja")
+        df = buscar_df(df, txt)
+        st.dataframe(df, use_container_width=True)
+        descargar_archivos(df, "cierre_caja")
+    else:
+        st.info("No hay cierres de caja registrados.")
 
 
 # =========================================================
@@ -2419,10 +2394,6 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
-    if not caja_abierta_usuario():
-        st.error("Primero debes abrir caja para poder vender.")
-        st.stop()
-
     cfg = obtener_configuracion()
     productos_df = DATA["productos"].copy()
     if not productos_df.empty and "activo" in productos_df.columns:
@@ -2499,20 +2470,9 @@ elif menu == "POS":
 
         st.subheader("🧾 Carrito")
         if carrito:
-            subtotal = sum(float(i["total_linea"]) for i in carrito)
-            for idx, item in enumerate(carrito):
-                c1, c2, c3, c4, c5 = st.columns([4, 1, 2, 2, 1])
-                c1.write(item["producto"])
-                nueva_cant = c2.number_input("Cant", min_value=1.0, step=1.0, value=float(item["cantidad"]), key=f"cant_car_{idx}")
-                item["cantidad"] = nueva_cant
-                item["total_linea"] = float(item["cantidad"]) * float(item["precio_unitario"])
-                c3.write(f"RD$ {float(item['precio_unitario']):,.2f}")
-                c4.write(f"RD$ {float(item['total_linea']):,.2f}")
-                if c5.button("❌", key=f"del_car_{idx}"):
-                    carrito.pop(idx)
-                    st.rerun()
-
-            subtotal = sum(float(i["total_linea"]) for i in carrito)
+            df_carrito = pd.DataFrame(carrito)
+            st.data_editor(df_carrito, use_container_width=True, disabled=["producto_id", "codigo", "producto"], key="editor_carrito")
+            subtotal = float(df_carrito["total_linea"].sum())
             descuento_global = st.number_input("Descuento global", min_value=0.0, step=1.0, key="pos_desc_global")
             cliente_df = DATA.get("clientes", pd.DataFrame()).copy()
             cliente_nombre = "Venta general"
@@ -2524,7 +2484,6 @@ elif menu == "POS":
                 if cliente_nombre != "Venta general":
                     cli_row = cliente_df[cliente_df["nombre"].astype(str) == cliente_nombre].iloc[0]
                     cliente_id = cli_row["id"]
-
             cpa1, cpa2, cpa3, cpa4 = st.columns(4)
             with cpa1:
                 pago_efectivo = st.number_input("Efectivo", min_value=0.0, step=1.0, key="pos_pag_ef")
@@ -2534,12 +2493,11 @@ elif menu == "POS":
                 pago_tarjeta = st.number_input("Tarjeta", min_value=0.0, step=1.0, key="pos_pag_tj")
             with cpa4:
                 pago_credito = st.number_input("Crédito / fiado", min_value=0.0, step=1.0, key="pos_pag_cr")
-
             recargo_pct = limpiar_numero(cfg.get("recargo_tarjeta_pct")) or 0.0
             recargo = float(pago_tarjeta) * (recargo_pct / 100.0)
             total_final = max(subtotal - descuento_global + recargo, 0.0)
             pagos_total = pago_efectivo + pago_transferencia + pago_tarjeta + pago_credito
-            cambio = max((pago_efectivo + pago_transferencia + pago_tarjeta) - total_final, 0.0)
+            cambio = max(pagos_total - total_final, 0.0)
             faltante = max(total_final - pagos_total, 0.0)
             csum1, csum2, csum3, csum4 = st.columns(4)
             csum1.metric("Subtotal", f"RD$ {subtotal:,.2f}")
@@ -2554,29 +2512,26 @@ elif menu == "POS":
                     st.error("Para vender a crédito debes asignar un cliente.")
                 else:
                     try:
-                        metodo_pago = "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito")
                         venta_resp = supabase.table("ventas").insert({
                             "fecha": datetime.now().isoformat(),
                             "subtotal": float(subtotal),
                             "descuento": float(descuento_global),
                             "recargo": float(recargo),
                             "total": float(total_final),
-                            "metodo_pago": metodo_pago,
+                            "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
                             "cliente_id": cliente_id,
                             "cliente_nombre": cliente_nombre,
                             "usuario": nombre_usuario_actual(),
-                            "usuario_id": usuario_id_actual(),
                             "dia_operativo": ahora_str(),
                             "ncf": ncf,
                             "tipo_venta": "POS",
                             "estado": "completada",
                             "anulado": False,
-                            "editable": False,
                         }).execute()
                         venta = (venta_resp.data or [{}])[0]
                         venta_id = venta.get("id")
                         for item in carrito:
-                            prod = productos_df[productos_df["id"].astype(str) == str(item["producto_id"])] .iloc[0]
+                            prod = productos_df[productos_df["id"].astype(str) == str(item["producto_id"])].iloc[0]
                             costo_unit, movimientos_fifo = obtener_costo_fifo(prod, float(item["cantidad"]))
                             total_linea = float(item["cantidad"]) * float(item["precio_unitario"])
                             supabase.table("detalle_venta").insert({
@@ -2587,9 +2542,6 @@ elif menu == "POS":
                                 "cantidad": float(item["cantidad"]),
                                 "precio_unitario": float(item["precio_unitario"]),
                                 "costo_unitario": float(costo_unit),
-                                "modo_utilidad": "automatica",
-                                "ganancia_manual": 0,
-                                "ganancia": total_linea - (float(item["cantidad"]) * float(costo_unit)),
                                 "descuento": 0,
                                 "recargo": 0,
                                 "total_linea": total_linea,
@@ -2597,7 +2549,11 @@ elif menu == "POS":
                                 "usuario": nombre_usuario_actual(),
                                 "anulado": False,
                             }).execute()
-                            aplicar_consumo_fifo(movimientos_fifo)
+                            if producto_tiene_inventario(prod):
+                                nueva_cant = max(obtener_existencia_producto(prod) - float(item["cantidad"]), 0.0)
+                                actualizar_existencia_producto(prod, nueva_cant)
+                                aplicar_consumo_fifo(movimientos_fifo)
+                                registrar_movimiento_inventario(prod["id"], obtener_nombre_producto(prod), "salida_venta", "ventas", venta_id, -float(item["cantidad"]), costo_unit, "Salida por venta POS")
                         pagos = {"efectivo": pago_efectivo, "transferencia": pago_transferencia, "tarjeta": pago_tarjeta, "credito": pago_credito}
                         for metodo, monto in pagos.items():
                             if monto > 0:
@@ -2606,8 +2562,33 @@ elif menu == "POS":
                                     "metodo": metodo,
                                     "monto": float(monto),
                                     "usuario": nombre_usuario_actual(),
-                                    "fecha": datetime.now().isoformat(),
                                 }).execute()
+                                if metodo != "credito":
+                                    try:
+                                        supabase.table("movimientos_caja").insert({
+                                            "fecha": datetime.now().isoformat(),
+                                            "dia_operativo": ahora_str(),
+                                            "tipo_movimiento": "entrada",
+                                            "origen": "venta",
+                                            "referencia_id": str(venta_id),
+                                            "metodo_pago": metodo,
+                                            "monto": float(monto) if metodo != "tarjeta" else float(monto + recargo),
+                                            "descripcion": f"Venta POS {venta_id}",
+                                            "usuario": nombre_usuario_actual(),
+                                        }).execute()
+                                    except Exception:
+                                        pass
+                        if pago_credito > 0:
+                            supabase.table("cuentas_por_cobrar").insert({
+                                "cliente_id": cliente_id,
+                                "cliente_nombre": cliente_nombre,
+                                "venta_id": str(venta_id),
+                                "monto_original": float(pago_credito),
+                                "monto_abonado": 0,
+                                "saldo_pendiente": float(pago_credito),
+                                "estado": "pendiente",
+                                "usuario": nombre_usuario_actual(),
+                            }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
                         st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
                         st.session_state["pos_carrito"] = []
@@ -2616,7 +2597,6 @@ elif menu == "POS":
                         st.error(f"No se pudo registrar la venta: {exc}")
         else:
             st.info("Carrito vacío.")
-
 
 # =========================================================
 # CLIENTES
@@ -2781,3 +2761,39 @@ elif menu == "Configuración":
                     st.rerun()
             if cfg.get("logo_url"):
                 st.image(cfg.get("logo_url"), width=220)
+
+
+# =========================================================
+# ADMIN CRUD
+# =========================================================
+elif menu == "Admin CRUD":
+    st.title("🛠️ Admin CRUD")
+    if not es_admin():
+        st.error("Solo la administradora puede entrar aquí.")
+    else:
+        tabla = st.selectbox(
+            "Tabla a administrar",
+            [
+                "productos",
+                "clientes",
+                "proveedores",
+                "inventario_actual",
+                "conteo_inventario",
+                "ajustes_inventario",
+                "ventas",
+                "compras",
+                "catalogo_gastos",
+                "gastos",
+                "empleados",
+                "adelantos_empleados",
+                "perdidas",
+                "gastos_dueno",
+                "cierre_caja",
+                "usuarios",
+                "configuracion_sistema",
+            ],
+            key="admin_crud_tabla",
+        )
+        solo_anular = tabla in ["ventas", "cierre_caja"]
+        st.caption("Aquí solo la administradora puede editar, eliminar o anular registros.")
+        panel_admin_crud(tabla, solo_anular=solo_anular)
