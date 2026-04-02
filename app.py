@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import Client, create_client
 
 # =========================================================
@@ -311,11 +312,6 @@ def obtener_configuracion() -> dict:
 
 def logo_actual() -> str:
     cfg = obtener_configuracion()
-    if st.session_state.get("ultima_factura_html"):
-        with st.expander("🖨️ Última factura / imprimir", expanded=False):
-            components.html(st.session_state["ultima_factura_html"], height=900, scrolling=True)
-            st.download_button("⬇️ Descargar factura HTML", data=st.session_state["ultima_factura_html"].encode("utf-8"), file_name="factura_ultima.html", mime="text/html", key="dl_factura_html")
-
     return str(cfg.get("logo_url") or "")
 
 
@@ -1121,6 +1117,32 @@ def generar_html_factura(venta_id: str, items: list[dict], pagos: dict, subtotal
     </html>
     """
     return html
+
+def render_panel_impresion_factura():
+    html = st.session_state.get("ultima_factura_html", "")
+    if not html:
+        return
+
+    st.subheader("🖨️ Última factura")
+    c1, c2 = st.columns([1,1])
+    with c1:
+        st.download_button(
+            "⬇️ Descargar factura HTML",
+            data=html.encode("utf-8"),
+            file_name="factura_ultima.html",
+            mime="text/html",
+            key="dl_factura_html_visible",
+            use_container_width=True,
+        )
+    with c2:
+        if st.button("🗑️ Limpiar factura", key="limpiar_ultima_factura", use_container_width=True):
+            st.session_state["ultima_factura_html"] = ""
+            st.rerun()
+
+    html_print = html.replace("</body>", "<script>function imprimirFactura(){window.print();}</script></body>")
+    components.html(html_print, height=700, scrolling=True)
+
+
 
 # =========================================================
 # SIDEBAR
@@ -2466,6 +2488,7 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
+    render_panel_impresion_factura()
     cfg = obtener_configuracion()
     productos_df = DATA["productos"].copy()
     if not productos_df.empty and "activo" in productos_df.columns:
@@ -2685,7 +2708,7 @@ elif menu == "POS":
                             ncf,
                         )
                         st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
-                        st.info("Abre el panel de Última factura / imprimir para imprimir o descargar la factura.")
+                        st.info("Debajo del título del POS te aparecerá el panel de Última factura para imprimir o descargar.")
                         st.session_state["pos_carrito"] = []
                         st.rerun()
                     except Exception as exc:
