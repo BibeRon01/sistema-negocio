@@ -711,8 +711,6 @@ DATA = cargar_datos()
 if "pos_post_venta" not in st.session_state:
     st.session_state["pos_post_venta"] = None
 
-
-
 # =========================================================
 # HELPERS DE NEGOCIO
 # =========================================================
@@ -2638,7 +2636,7 @@ elif menu == "POS":
 
         post_venta = st.session_state.get("pos_post_venta")
         if post_venta:
-            st.success(f"Venta registrada correctamente. Factura/ID: {post_venta.get('venta_id','')}")
+            st.success(f"Venta registrada correctamente. Factura/ID: {post_venta.get('venta_id', '')}")
             p1, p2, p3 = st.columns(3)
             p1.metric("Total", f"RD$ {float(post_venta.get('total', 0)):,.2f}")
             p2.metric("Cambio", f"RD$ {float(post_venta.get('cambio', 0)):,.2f}")
