@@ -311,6 +311,11 @@ def obtener_configuracion() -> dict:
 
 def logo_actual() -> str:
     cfg = obtener_configuracion()
+    if st.session_state.get("ultima_factura_html"):
+        with st.expander("🖨️ Última factura / imprimir", expanded=False):
+            components.html(st.session_state["ultima_factura_html"], height=900, scrolling=True)
+            st.download_button("⬇️ Descargar factura HTML", data=st.session_state["ultima_factura_html"].encode("utf-8"), file_name="factura_ultima.html", mime="text/html", key="dl_factura_html")
+
     return str(cfg.get("logo_url") or "")
 
 
@@ -1050,6 +1055,73 @@ def panel_admin_crud(nombre_tabla: str, solo_anular: bool = False):
                 if eliminar(nombre_tabla, elegido):
                     st.success("Registro eliminado.")
                     st.rerun()
+
+
+def generar_html_factura(venta_id: str, items: list[dict], pagos: dict, subtotal: float, descuento: float, recargo: float, total_final: float, cambio: float, cliente_nombre: str, ncf: str = "") -> str:
+    cfg = obtener_configuracion()
+    negocio = str(cfg.get("negocio_nombre") or "Sistema de Negocio PRO")
+    telefono = str(cfg.get("telefono") or "")
+    direccion = str(cfg.get("direccion") or "")
+    filas = ""
+    for item in items:
+        filas += f"<tr><td>{item.get('producto','')}</td><td style='text-align:center'>{float(item.get('cantidad',0)):.0f}</td><td style='text-align:right'>RD$ {float(item.get('precio_unitario',0)):,.2f}</td><td style='text-align:right'>RD$ {float(item.get('total_linea',0)):,.2f}</td></tr>"
+    pagos_html = "".join([
+        f"<tr><td>{met.title()}</td><td style='text-align:right'>RD$ {float(monto):,.2f}</td></tr>"
+        for met, monto in pagos.items() if float(monto or 0) > 0
+    ])
+    fecha_txt = datetime.now().strftime('%d/%m/%Y %I:%M %p')
+    usuario_txt = nombre_usuario_actual()
+    html = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; padding: 16px; color:#111; }}
+            .ticket {{ max-width: 820px; margin: auto; border:1px solid #ddd; padding:20px; border-radius:12px; }}
+            h1,h2,h3,p {{ margin: 4px 0; }}
+            table {{ width:100%; border-collapse: collapse; margin-top:12px; }}
+            th, td {{ border-bottom:1px solid #eee; padding:8px; font-size:14px; }}
+            .totales td {{ border:none; padding:4px 0; }}
+            .printbar {{ margin: 12px 0 20px 0; display:flex; gap:10px; }}
+            .btn {{ background:#0d6efd; color:#fff; border:none; padding:10px 14px; border-radius:8px; cursor:pointer; }}
+            @media print {{ .printbar {{ display:none; }} .ticket {{ border:none; }} body {{ padding:0; }} }}
+        </style>
+    </head>
+    <body>
+        <div class='ticket'>
+            <div class='printbar'>
+                <button class='btn' onclick='window.print()'>🖨️ Imprimir factura</button>
+            </div>
+            <h2>{negocio}</h2>
+            <p>{direccion}</p>
+            <p>{telefono}</p>
+            <hr>
+            <p><b>Factura:</b> {venta_id}</p>
+            <p><b>Fecha:</b> {fecha_txt}</p>
+            <p><b>Cliente:</b> {cliente_nombre}</p>
+            <p><b>NCF:</b> {ncf or '-'}</p>
+            <p><b>Atendido por:</b> {usuario_txt}</p>
+            <table>
+                <thead>
+                    <tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Total</th></tr>
+                </thead>
+                <tbody>{filas}</tbody>
+            </table>
+            <table class='totales'>
+                <tr><td><b>Subtotal</b></td><td style='text-align:right'>RD$ {subtotal:,.2f}</td></tr>
+                <tr><td><b>Descuento</b></td><td style='text-align:right'>RD$ {descuento:,.2f}</td></tr>
+                <tr><td><b>Recargo</b></td><td style='text-align:right'>RD$ {recargo:,.2f}</td></tr>
+                <tr><td><b>Total</b></td><td style='text-align:right'><b>RD$ {total_final:,.2f}</b></td></tr>
+                <tr><td><b>Cambio</b></td><td style='text-align:right'>RD$ {cambio:,.2f}</td></tr>
+            </table>
+            <h4>Pagos</h4>
+            <table><tbody>{pagos_html}</tbody></table>
+            <p style='margin-top:18px'>Gracias por su compra.</p>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -2403,6 +2475,8 @@ elif menu == "POS":
     else:
         if "pos_carrito" not in st.session_state:
             st.session_state["pos_carrito"] = []
+        if "ultima_factura_html" not in st.session_state:
+            st.session_state["ultima_factura_html"] = ""
         carrito = st.session_state["pos_carrito"]
 
         def agregar_item_carrito(prod_row, cantidad=1.0, precio_usar=None):
@@ -2590,7 +2664,28 @@ elif menu == "POS":
                                 "usuario": nombre_usuario_actual(),
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
+                        factura_items = []
+                        for item in carrito:
+                            factura_items.append({
+                                "producto": item["producto"],
+                                "cantidad": float(item["cantidad"]),
+                                "precio_unitario": float(item["precio_unitario"]),
+                                "total_linea": float(item["cantidad"]) * float(item["precio_unitario"]),
+                            })
+                        st.session_state["ultima_factura_html"] = generar_html_factura(
+                            str(venta_id),
+                            factura_items,
+                            pagos,
+                            float(subtotal),
+                            float(descuento_global),
+                            float(recargo),
+                            float(total_final),
+                            float(cambio),
+                            cliente_nombre,
+                            ncf,
+                        )
                         st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
+                        st.info("Abre el panel de Última factura / imprimir para imprimir o descargar la factura.")
                         st.session_state["pos_carrito"] = []
                         st.rerun()
                     except Exception as exc:
