@@ -734,6 +734,8 @@ def actualizar_stock_producto(nombre: str, nueva_cantidad: float, fecha_mov=None
     if fila is None:
         return False
     payload = {"cantidad": float(nueva_cantidad)}
+    if "stock" in fila.index:
+        payload["stock"] = float(nueva_cantidad)
     if fecha_mov is not None:
         payload["fecha"] = str(fecha_mov)
     return actualizar("productos", fila["id"], payload)
@@ -864,7 +866,9 @@ def revertir_inventario_de_venta(venta_id: Any, marcar_detalle_anulado: bool = F
             continue
         nueva_cant = float(obtener_existencia_producto(prod)) + cantidad
         actualizar_existencia_producto(prod, nueva_cant)
-        prod2 = refrescar_producto_por_id(producto_id) or prod
+        prod2 = refrescar_producto_por_id(producto_id)
+        if prod2 is None:
+            prod2 = prod
         sincronizar_producto_inventario(prod2, ahora_str(), f"Reintegro por venta {venta_id}")
         registrar_movimiento_inventario(producto_id, obtener_nombre_producto(prod2), "reversa_venta", "ventas", venta_id, cantidad, float(limpiar_numero(det.get("costo_unitario")) or 0), "Reversa por anulación/eliminación de venta")
         if marcar_detalle_anulado and det.get("id"):
@@ -1538,7 +1542,9 @@ elif menu == "Productos":
                             if "stock" in existente.index:
                                 payload["stock"] = float(nueva_cant)
                         actualizar("productos", existente["id"], payload)
-                        prod_sync = refrescar_producto_por_id(existente["id"]) or existente
+                        prod_sync = refrescar_producto_por_id(existente["id"])
+                        if prod_sync is None:
+                            prod_sync = existente
                         sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
                     else:
                         payload = {
@@ -1607,7 +1613,9 @@ elif menu == "Productos":
                 if existente is not None:
                     ok = actualizar("productos", existente["id"], payload)
                     if ok:
-                        prod_sync = refrescar_producto_por_id(existente["id"]) or existente
+                        prod_sync = refrescar_producto_por_id(existente["id"])
+                        if prod_sync is None:
+                            prod_sync = existente
                         sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto actualizado sin duplicarse.")
                         st.rerun()
@@ -3034,7 +3042,9 @@ elif menu == "POS":
                             if producto_tiene_inventario(prod):
                                 nueva_cant = max(obtener_existencia_producto(prod) - float(item["cantidad"]), 0.0)
                                 actualizar_existencia_producto(prod, nueva_cant)
-                                prod_sync = refrescar_producto_por_id(prod["id"]) or prod
+                                prod_sync = refrescar_producto_por_id(prod["id"])
+                                if prod_sync is None:
+                                    prod_sync = prod
                                 sincronizar_producto_inventario(prod_sync, ahora_str(), f"Salida por venta {venta_id}")
                                 aplicar_consumo_fifo(movimientos_fifo)
                                 registrar_movimiento_inventario(prod["id"], obtener_nombre_producto(prod), "salida_venta", "ventas", venta_id, -float(item["cantidad"]), costo_unit, "Salida por venta POS")
