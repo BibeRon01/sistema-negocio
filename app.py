@@ -9,32 +9,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 from supabase import Client, create_client
 
-
-def _valor_simple(valor: Any):
-    """Convierte Series/list/tuplas en un valor escalar seguro."""
-    try:
-        if isinstance(valor, pd.Series):
-            for v in valor.tolist():
-                try:
-                    if pd.notna(v) and str(v).strip() != "":
-                        return v
-                except Exception:
-                    if v not in [None, ""]:
-                        return v
-            return None
-        if isinstance(valor, (list, tuple)):
-            for v in valor:
-                try:
-                    if pd.notna(v) and str(v).strip() != "":
-                        return v
-                except Exception:
-                    if v not in [None, ""]:
-                        return v
-            return None
-    except Exception:
-        pass
-    return valor
-
 # =========================================================
 # CONFIGURACIÓN GENERAL
 # =========================================================
@@ -72,7 +46,6 @@ except Exception as exc:
 # UTILIDADES BÁSICAS TEMPRANAS (PARA LOGIN)
 # =========================================================
 def limpiar_texto(valor: Any) -> str:
-    valor = _valor_simple(valor)
     try:
         if pd.isna(valor):
             return ""
@@ -127,6 +100,98 @@ def tiene_permiso(flag: str) -> bool:
 def cerrar_sesion():
     st.session_state.pop("usuario_data", None)
     st.rerun()
+
+
+def puede_editar_global() -> bool:
+    return es_admin() or tiene_permiso("puede_editar_todo")
+
+
+def puede_ver_utilidad_global() -> bool:
+    return es_admin() or tiene_permiso("puede_ver_utilidad")
+
+
+def valor_simple(valor: Any):
+    if isinstance(valor, pd.Series):
+        if valor.empty:
+            return None
+        return valor.iloc[0]
+    if isinstance(valor, (list, tuple)):
+        return valor[0] if valor else None
+    return valor
+
+
+def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None = None, excluir: list[str] | None = None):
+    if not puede_editar_global():
+        return
+    if df is None or df.empty:
+        return
+    excluir = set((excluir or []) + ["id"])
+    if "identificación" in df.columns:
+        excluir.add("identificación")
+    titulo = titulo or f"🛠️ Editar / eliminar en {nombre_tabla}"
+    with st.expander(titulo, expanded=False):
+        df_local = df.copy()
+        if "fecha" in df_local.columns:
+            try:
+                df_local = df_local.sort_values("fecha", ascending=False)
+            except Exception:
+                pass
+        opciones = []
+        mapa = {}
+        for _, row in df_local.iterrows():
+            row_id = valor_simple(row.get("id") or row.get("identificación"))
+            etiqueta_partes = [str(row_id)]
+            for campo in ["nombre", "producto", "cliente_nombre", "proveedor", "concepto", "usuario", "metodo_pago", "metodo", "fecha", "total", "monto"]:
+                if campo in row.index and limpiar_texto(row.get(campo)):
+                    etiqueta_partes.append(limpiar_texto(row.get(campo)))
+                    if len(etiqueta_partes) >= 4:
+                        break
+            etiqueta = " | ".join(etiqueta_partes)
+            opciones.append(etiqueta)
+            mapa[etiqueta] = row
+        if not opciones:
+            st.info("No hay filas para gestionar.")
+            return
+        elegido = st.selectbox("Selecciona un registro", opciones, key=f"crud_sel_{nombre_tabla}")
+        fila = mapa[elegido]
+        fila_id = valor_simple(fila.get("id") or fila.get("identificación"))
+
+        editable_cols = [c for c in df_local.columns if c not in excluir]
+        nuevos_datos = {}
+        cols = st.columns(2)
+        for i, col in enumerate(editable_cols):
+            valor = valor_simple(fila.get(col))
+            cont = cols[i % 2]
+            with cont:
+                if isinstance(valor, (bool,)) or str(valor).lower() in ["true", "false"]:
+                    nuevos_datos[col] = st.checkbox(col, value=bool(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+                else:
+                    num = limpiar_numero(valor)
+                    if num is not None and col not in ["telefono", "rnc", "cedula_rnc", "codigo", "ncf"]:
+                        nuevos_datos[col] = st.number_input(col, value=float(num), step=1.0, key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+                    else:
+                        if "fecha" in col.lower():
+                            fecha_val = pd.to_datetime(valor, errors="coerce")
+                            if pd.isna(fecha_val):
+                                nuevos_datos[col] = st.text_input(col, value=limpiar_texto(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+                            else:
+                                nuevos_datos[col] = str(st.date_input(col, value=fecha_val.date(), key=f"crud_{nombre_tabla}_{col}_{fila_id}"))
+                        elif len(limpiar_texto(valor)) > 60:
+                            nuevos_datos[col] = st.text_area(col, value=limpiar_texto(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+                        else:
+                            nuevos_datos[col] = st.text_input(col, value=limpiar_texto(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("💾 Guardar cambios", key=f"crud_save_{nombre_tabla}_{fila_id}"):
+                if actualizar(nombre_tabla, fila_id, nuevos_datos):
+                    st.success("Registro actualizado.")
+                    st.rerun()
+        with c2:
+            if st.button("🗑️ Eliminar registro", key=f"crud_delete_{nombre_tabla}_{fila_id}"):
+                if eliminar(nombre_tabla, fila_id):
+                    st.success("Registro eliminado.")
+                    st.rerun()
 
 
 
@@ -210,12 +275,8 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def limpiar_numero(valor: Any) -> float | None:
-    valor = _valor_simple(valor)
-    try:
-        if pd.isna(valor) or valor == "":
-            return None
-    except Exception:
-        pass
+    if pd.isna(valor) or valor == "":
+        return None
     if isinstance(valor, (int, float)):
         return float(valor)
     txt = str(valor).strip()
@@ -344,28 +405,18 @@ def guardar_logo_en_configuracion(file_bytes: bytes, mime: str) -> bool:
 
 
 
-def obtener_nombre_producto(row: pd.Series | dict) -> str:
-    nombre = _valor_simple(row.get("nombre")) if hasattr(row, "get") else None
-    producto = _valor_simple(row.get("producto")) if hasattr(row, "get") else None
-    return limpiar_texto(nombre if limpiar_texto(nombre) else producto)
+def obtener_nombre_producto(row: pd.Series) -> str:
+    return limpiar_texto(row.get("nombre") or row.get("producto"))
 
 
 
-def producto_tiene_inventario(row: pd.Series | dict) -> bool:
-    valor = _valor_simple(row.get("usa_inventario", True)) if hasattr(row, "get") else True
-    txt = normalizar_texto(valor)
-    if txt in ["", "true", "1", "si", "sí", "yes"]:
-        return True
-    if txt in ["false", "0", "no"]:
-        return False
-    return bool(valor)
+def producto_tiene_inventario(row: pd.Series) -> bool:
+    return bool(row.get("usa_inventario", True))
 
 
 
-def obtener_existencia_producto(row: pd.Series | dict) -> float:
-    cantidad = limpiar_numero(row.get("cantidad")) if hasattr(row, "get") else None
-    stock = limpiar_numero(row.get("stock")) if hasattr(row, "get") else None
-    return float(cantidad if cantidad is not None else stock if stock is not None else 0.0)
+def obtener_existencia_producto(row: pd.Series) -> float:
+    return limpiar_numero(row.get("cantidad")) or limpiar_numero(row.get("stock")) or 0.0
 
 
 
@@ -1681,6 +1732,7 @@ elif menu == "Productos":
             df = df[mask]
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "productos")
+        render_crud_generico("productos", df, "🛠️ Editar / eliminar productos")
     else:
         st.info("No hay productos registrados.")
 
@@ -1751,6 +1803,7 @@ elif menu == "Inventario Actual":
         invent = buscar_df(invent, txt)
         st.dataframe(invent, use_container_width=True)
         descargar_archivos(invent, "inventario_actual")
+        render_crud_generico("inventario_actual", invent, "🛠️ Editar / eliminar inventario actual")
     else:
         st.info("No hay inventario actual registrado.")
 
@@ -1817,6 +1870,7 @@ elif menu == "Conteo Inventario":
 
         st.dataframe(conteo_f, use_container_width=True)
         descargar_archivos(conteo_f, "conteo_inventario")
+        render_crud_generico("conteo_inventario", conteo_f, "🛠️ Editar / eliminar conteo de inventario")
 
         st.subheader("⚙️ Procesar faltantes y sobrantes")
         pendientes = conteo_f[conteo_f["estado"].astype(str).str.lower().isin(["faltante", "sobrante"])] if not conteo_f.empty else pd.DataFrame()
@@ -1971,6 +2025,7 @@ elif menu == "Ajustes Inventario":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ajustes_inventario")
+        render_crud_generico("ajustes_inventario", df, "🛠️ Editar / eliminar ajustes de inventario")
     else:
         st.info("No hay ajustes registrados.")
 
@@ -1981,8 +2036,8 @@ elif menu == "Ajustes Inventario":
 elif menu == "Ventas":
     st.title("💰 Ventas")
 
-    puede_gestionar_ventas = es_admin() or tiene_permiso("puede_editar_ventas") or tiene_permiso("puede_eliminar") or tiene_permiso("puede_anular")
-    puede_ver_utilidad = es_admin() or normalizar_texto(usuario_sesion().get("rol", "")) == "gerente" or tiene_permiso("puede_ver_reportes") or tiene_permiso("puede_configurar")
+    puede_gestionar_ventas = es_admin() or tiene_permiso("puede_editar_todo") or tiene_permiso("puede_editar_ventas") or tiene_permiso("puede_eliminar") or tiene_permiso("puede_anular")
+    puede_ver_utilidad = puede_ver_utilidad_global()
 
     with st.expander("📥 Subir Excel / CSV de ventas"):
         st.write("Columnas esperadas: fecha, total, metodo. Observación opcional.")
@@ -2318,6 +2373,7 @@ elif menu == "Compras":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "compras")
+        render_crud_generico("compras", df, "🛠️ Editar / eliminar compras")
     else:
         st.info("No hay compras registradas.")
 
@@ -2361,6 +2417,7 @@ elif menu == "Catálogo de Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "catalogo_gastos")
+        render_crud_generico("catalogo_gastos", df, "🛠️ Editar / eliminar catálogo de gastos")
     else:
         st.info("No hay catálogo de gastos.")
 
@@ -2454,6 +2511,7 @@ elif menu == "Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos")
+        render_crud_generico("gastos", df, "🛠️ Editar / eliminar gastos")
     else:
         st.info("No hay gastos registrados.")
 
@@ -2528,6 +2586,7 @@ elif menu == "Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "empleados")
+        render_crud_generico("empleados", df, "🛠️ Editar / eliminar empleados")
     else:
         st.info("No hay empleados registrados.")
 
@@ -2565,6 +2624,7 @@ elif menu == "Adelantos Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "adelantos_empleados")
+        render_crud_generico("adelantos_empleados", df, "🛠️ Editar / eliminar adelantos")
     else:
         st.info("No hay adelantos registrados.")
 
@@ -2601,6 +2661,7 @@ elif menu == "Pérdidas":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "perdidas")
+        render_crud_generico("perdidas", df, "🛠️ Editar / eliminar pérdidas")
     else:
         st.info("No hay pérdidas registradas.")
 
@@ -2636,6 +2697,7 @@ elif menu == "Gastos Dueño":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos_dueno")
+        render_crud_generico("gastos_dueno", df, "🛠️ Editar / eliminar gastos del dueño")
     else:
         st.info("No hay gastos del dueño registrados.")
 
@@ -2692,6 +2754,7 @@ elif menu == "Caja":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "cierre_caja")
+        render_crud_generico("cierre_caja", df, "🛠️ Editar / eliminar cierres de caja")
     else:
         st.info("No hay cierres de caja registrados.")
 
@@ -3165,6 +3228,7 @@ elif menu == "Clientes":
     if not df.empty:
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "clientes")
+        render_crud_generico("clientes", df, "🛠️ Editar / eliminar clientes")
     else:
         st.info("No hay clientes.")
 
@@ -3191,6 +3255,7 @@ elif menu == "Proveedores":
     if not df.empty:
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "proveedores")
+        render_crud_generico("proveedores", df, "🛠️ Editar / eliminar proveedores")
     else:
         st.info("No hay proveedores.")
 
@@ -3251,6 +3316,8 @@ elif menu == "Usuarios":
                 puede_registrar_compras = st.checkbox("Puede registrar compras", key="usr_prc")
                 puede_registrar_gastos = st.checkbox("Puede registrar gastos", key="usr_prg")
                 puede_configurar = st.checkbox("Puede configurar", key="usr_pcf")
+                puede_editar_todo = st.checkbox("Puede editar todo", key="usr_pet")
+                puede_ver_utilidad = st.checkbox("Puede ver utilidad", key="usr_pvu")
             if st.button("Guardar usuario", key="btn_guardar_usuario"):
                 existentes = DATA.get("usuarios", pd.DataFrame()).copy()
                 if not limpiar_texto(usuario):
@@ -3260,15 +3327,16 @@ elif menu == "Usuarios":
                 else:
                     if not existentes.empty and "usuario" in existentes.columns and normalizar_texto(usuario) in existentes["usuario"].astype(str).apply(normalizar_texto).tolist():
                         fila = existentes[existentes["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario)].iloc[0]
-                        actualizar("usuarios", fila["id"], {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar})
+                        actualizar("usuarios", fila["id"], {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar, "puede_editar_todo": puede_editar_todo, "puede_ver_utilidad": puede_ver_utilidad})
                         st.success("Usuario actualizado.")
                     else:
-                        insertar("usuarios", {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar})
+                        insertar("usuarios", {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar, "puede_editar_todo": puede_editar_todo, "puede_ver_utilidad": puede_ver_utilidad})
                         st.success("Usuario creado.")
                     st.rerun()
         df = DATA.get("usuarios", pd.DataFrame()).copy()
         if not df.empty:
             st.dataframe(df, use_container_width=True)
+            render_crud_generico("usuarios", df, "🛠️ Editar / eliminar usuarios", excluir=["clave"])
 
 # =========================================================
 # CONFIGURACION
