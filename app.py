@@ -9,6 +9,32 @@ import streamlit as st
 import streamlit.components.v1 as components
 from supabase import Client, create_client
 
+
+def _valor_simple(valor: Any):
+    """Convierte Series/list/tuplas en un valor escalar seguro."""
+    try:
+        if isinstance(valor, pd.Series):
+            for v in valor.tolist():
+                try:
+                    if pd.notna(v) and str(v).strip() != "":
+                        return v
+                except Exception:
+                    if v not in [None, ""]:
+                        return v
+            return None
+        if isinstance(valor, (list, tuple)):
+            for v in valor:
+                try:
+                    if pd.notna(v) and str(v).strip() != "":
+                        return v
+                except Exception:
+                    if v not in [None, ""]:
+                        return v
+            return None
+    except Exception:
+        pass
+    return valor
+
 # =========================================================
 # CONFIGURACIÓN GENERAL
 # =========================================================
@@ -46,6 +72,7 @@ except Exception as exc:
 # UTILIDADES BÁSICAS TEMPRANAS (PARA LOGIN)
 # =========================================================
 def limpiar_texto(valor: Any) -> str:
+    valor = _valor_simple(valor)
     try:
         if pd.isna(valor):
             return ""
@@ -183,8 +210,12 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def limpiar_numero(valor: Any) -> float | None:
-    if pd.isna(valor) or valor == "":
-        return None
+    valor = _valor_simple(valor)
+    try:
+        if pd.isna(valor) or valor == "":
+            return None
+    except Exception:
+        pass
     if isinstance(valor, (int, float)):
         return float(valor)
     txt = str(valor).strip()
@@ -313,18 +344,28 @@ def guardar_logo_en_configuracion(file_bytes: bytes, mime: str) -> bool:
 
 
 
-def obtener_nombre_producto(row: pd.Series) -> str:
-    return limpiar_texto(row.get("nombre") or row.get("producto"))
+def obtener_nombre_producto(row: pd.Series | dict) -> str:
+    nombre = _valor_simple(row.get("nombre")) if hasattr(row, "get") else None
+    producto = _valor_simple(row.get("producto")) if hasattr(row, "get") else None
+    return limpiar_texto(nombre if limpiar_texto(nombre) else producto)
 
 
 
-def producto_tiene_inventario(row: pd.Series) -> bool:
-    return bool(row.get("usa_inventario", True))
+def producto_tiene_inventario(row: pd.Series | dict) -> bool:
+    valor = _valor_simple(row.get("usa_inventario", True)) if hasattr(row, "get") else True
+    txt = normalizar_texto(valor)
+    if txt in ["", "true", "1", "si", "sí", "yes"]:
+        return True
+    if txt in ["false", "0", "no"]:
+        return False
+    return bool(valor)
 
 
 
-def obtener_existencia_producto(row: pd.Series) -> float:
-    return limpiar_numero(row.get("cantidad")) or limpiar_numero(row.get("stock")) or 0.0
+def obtener_existencia_producto(row: pd.Series | dict) -> float:
+    cantidad = limpiar_numero(row.get("cantidad")) if hasattr(row, "get") else None
+    stock = limpiar_numero(row.get("stock")) if hasattr(row, "get") else None
+    return float(cantidad if cantidad is not None else stock if stock is not None else 0.0)
 
 
 
