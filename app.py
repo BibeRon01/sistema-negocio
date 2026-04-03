@@ -416,7 +416,12 @@ def producto_tiene_inventario(row: pd.Series) -> bool:
 
 
 def obtener_existencia_producto(row: pd.Series) -> float:
-    return limpiar_numero(row.get("cantidad")) or limpiar_numero(row.get("stock")) or 0.0
+    return (
+        limpiar_numero(row.get("cantidad"))
+        or limpiar_numero(row.get("stock"))
+        or limpiar_numero(row.get("existencias"))
+        or 0.0
+    )
 
 
 
@@ -1814,7 +1819,76 @@ elif menu == "Inventario Actual":
 elif menu == "Conteo Inventario":
     st.title("🧮 Conteo de Inventario")
 
-    with st.expander("📥 Subir conteo físico por Excel / CSV", expanded=True):
+    productos_df = DATA["productos"].copy()
+    productos_lista = productos_df["nombre"].astype(str).tolist() if not productos_df.empty and "nombre" in productos_df.columns else []
+
+    # =====================================================
+    # CONTEO MANUAL
+    # =====================================================
+    with st.expander("✍️ Conteo manual", expanded=True):
+        if not productos_lista:
+            st.info("No hay productos para contar.")
+        else:
+            c1, c2, c3 = st.columns(3)
+
+            with c1:
+                fecha_manual = st.date_input("Fecha", value=date.today(), key="conteo_manual_fecha")
+                producto_manual = st.selectbox("Producto", productos_lista, key="conteo_manual_producto")
+
+            fila_prod_manual = get_producto_por_nombre(producto_manual) if producto_manual else None
+            existencia_sistema_manual = obtener_existencia_producto(fila_prod_manual) if fila_prod_manual is not None else 0.0
+
+            with c2:
+                st.number_input(
+                    "Existencia sistema",
+                    min_value=0.0,
+                    step=1.0,
+                    value=float(existencia_sistema_manual),
+                    disabled=True,
+                    key="conteo_manual_existencia_sistema",
+                )
+                existencia_fisica_manual = st.number_input(
+                    "Existencia física real",
+                    min_value=0.0,
+                    step=1.0,
+                    value=float(existencia_sistema_manual),
+                    key="conteo_manual_existencia_fisica",
+                )
+
+            diferencia_manual = float(existencia_fisica_manual) - float(existencia_sistema_manual)
+            if diferencia_manual == 0:
+                estado_manual = "cuadrado"
+            elif diferencia_manual < 0:
+                estado_manual = "faltante"
+            else:
+                estado_manual = "sobrante"
+
+            with c3:
+                st.metric("Diferencia", f"{diferencia_manual:,.2f}")
+                st.text_input("Estado", value=estado_manual, disabled=True, key="conteo_manual_estado")
+                observacion_manual = st.text_area("Observación", key="conteo_manual_obs")
+
+            if st.button("Guardar conteo manual", key="btn_guardar_conteo_manual"):
+                ok = insertar(
+                    "conteo_inventario",
+                    {
+                        "fecha": str(fecha_manual),
+                        "producto": producto_manual,
+                        "existencia_sistema": float(existencia_sistema_manual),
+                        "existencia_fisica": float(existencia_fisica_manual),
+                        "diferencia": float(diferencia_manual),
+                        "estado": estado_manual,
+                        "observacion": observacion_manual,
+                    },
+                )
+                if ok:
+                    st.success("Conteo manual guardado.")
+                    st.rerun()
+
+    # =====================================================
+    # CARGA MASIVA POR EXCEL / CSV
+    # =====================================================
+    with st.expander("📥 Subir conteo físico por Excel / CSV", expanded=False):
         st.write("Columnas esperadas: producto o nombre, existencia_fisica o cantidad.")
         archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_conteo")
         fecha_conteo = st.date_input("Fecha del conteo", value=date.today(), key="fecha_conteo")
@@ -1832,7 +1906,7 @@ elif menu == "Conteo Inventario":
                     if not producto:
                         continue
                     fila_prod = get_producto_por_nombre(producto)
-                    existencia_sistema = float(limpiar_numero(fila_prod.get("cantidad")) or 0) if fila_prod is not None else 0.0
+                    existencia_sistema = obtener_existencia_producto(fila_prod) if fila_prod is not None else 0.0
                     existencia_fisica = float(limpiar_numero(row["existencia_fisica"]) or 0)
                     diferencia = existencia_fisica - existencia_sistema
 
@@ -1848,9 +1922,9 @@ elif menu == "Conteo Inventario":
                         {
                             "fecha": str(fecha_conteo),
                             "producto": producto,
-                            "existencia_sistema": existencia_sistema,
-                            "existencia_fisica": existencia_fisica,
-                            "diferencia": diferencia,
+                            "existencia_sistema": float(existencia_sistema),
+                            "existencia_fisica": float(existencia_fisica),
+                            "diferencia": float(diferencia),
                             "estado": estado,
                             "observacion": "",
                         },
@@ -1859,21 +1933,31 @@ elif menu == "Conteo Inventario":
                 st.success(f"Se procesaron {procesados} filas de conteo.")
                 st.rerun()
 
+    # =====================================================
+    # LISTADO + ACCIONES
+    # =====================================================
     conteo = DATA["conteo_inventario"].copy()
     if not conteo.empty:
         st.subheader("📋 Conteos guardados")
         d1, d2 = rango_fechas_ui("conteo_inv")
         conteo_f = filtrar_por_fechas(conteo, d1, d2)
-        estado_filtro = st.selectbox("Filtrar por estado", ["Todos", "cuadrado", "faltante", "sobrante"], key="filtro_estado_conteo")
+        estado_filtro = st.selectbox(
+            "Filtrar por estado",
+            ["Todos", "cuadrado", "faltante", "sobrante"],
+            key="filtro_estado_conteo",
+        )
         if estado_filtro != "Todos" and "estado" in conteo_f.columns:
             conteo_f = conteo_f[conteo_f["estado"].astype(str).str.lower() == estado_filtro]
 
         st.dataframe(conteo_f, use_container_width=True)
         descargar_archivos(conteo_f, "conteo_inventario")
-        render_crud_generico("conteo_inventario", conteo_f, "🛠️ Editar / eliminar conteo de inventario")
 
         st.subheader("⚙️ Procesar faltantes y sobrantes")
-        pendientes = conteo_f[conteo_f["estado"].astype(str).str.lower().isin(["faltante", "sobrante"])] if not conteo_f.empty else pd.DataFrame()
+        pendientes = (
+            conteo_f[conteo_f["estado"].astype(str).str.lower().isin(["faltante", "sobrante"])]
+            if not conteo_f.empty else pd.DataFrame()
+        )
+
         if not pendientes.empty:
             opciones = pendientes.apply(
                 lambda r: f"{r['producto']} | sistema: {r['existencia_sistema']} | físico: {r['existencia_fisica']} | estado: {r['estado']}",
@@ -1893,8 +1977,9 @@ elif menu == "Conteo Inventario":
             precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
 
             col1, col2, col3 = st.columns(3)
+
             with col1:
-                if diferencia < 0 and st.button("Enviar este faltante a pérdidas"):
+                if diferencia < 0 and st.button("Enviar este faltante a pérdidas", key="btn_faltante_individual"):
                     cant_perdida = abs(diferencia)
                     ok1 = registrar_perdida(
                         fecha_mov,
@@ -1911,7 +1996,7 @@ elif menu == "Conteo Inventario":
                         st.rerun()
 
             with col2:
-                if diferencia > 0 and st.button("Aplicar ajuste positivo"):
+                if diferencia > 0 and st.button("Aplicar ajuste positivo", key="btn_ajuste_positivo_individual"):
                     ok2 = actualizar_stock_producto(producto, existencia_fisica, fecha_mov)
                     ok3 = upsert_inventario_actual(producto, costo, precio, existencia_fisica, fecha_mov, "Ajuste positivo por conteo")
                     if ok2 and ok3:
@@ -1919,11 +2004,11 @@ elif menu == "Conteo Inventario":
                         st.rerun()
 
             with col3:
-                if st.button("Marcar pendiente / dejar como está"):
+                if st.button("Marcar pendiente / dejar como está", key="btn_pendiente_individual"):
                     st.info("No se hizo cambio en inventario. Queda el registro para revisión.")
 
             faltantes_df = pendientes[pendientes["estado"].astype(str).str.lower() == "faltante"]
-            if not faltantes_df.empty and st.button("Enviar TODOS los faltantes del filtro a pérdidas"):
+            if not faltantes_df.empty and st.button("Enviar TODOS los faltantes del filtro a pérdidas", key="btn_faltantes_masivo"):
                 count = 0
                 for _, r in faltantes_df.iterrows():
                     prod = r["producto"]
