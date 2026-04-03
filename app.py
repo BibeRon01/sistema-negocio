@@ -432,6 +432,30 @@ def actualizar_existencia_producto(producto_row: pd.Series, nueva_cantidad: floa
     return actualizar("productos", producto_row["id"], payload)
 
 
+def obtener_detalle_venta(venta_id):
+    return supabase.table("detalle_venta").select("*").eq("venta_id", venta_id).execute().data
+
+
+def eliminar_linea_detalle(id_linea):
+    supabase.table("detalle_venta").delete().eq("id", id_linea).execute()
+
+
+def actualizar_linea_detalle(id_linea, cantidad):
+    supabase.table("detalle_venta").update({"cantidad": cantidad}).eq("id", id_linea).execute()
+
+
+def insertar_linea_detalle(venta_id, producto, cantidad, precio, costo):
+    supabase.table("detalle_venta").insert({
+        "venta_id": venta_id,
+        "producto": producto,
+        "cantidad": cantidad,
+        "precio_unitario": precio,
+        "costo_unitario": costo,
+        "total_linea": cantidad * precio,
+        "ganancia_linea": (precio - costo) * cantidad
+    }).execute()
+
+
 
 def registrar_movimiento_inventario(producto_id, producto, tipo_movimiento, referencia_tabla, referencia_id, cantidad, costo_unitario, observacion=""):
     datos = {
@@ -2266,6 +2290,85 @@ elif menu == "Ventas":
             columnas_preferidas = [c for c in columnas_preferidas if c not in ["ganancia_bruta", "ganancia_bruta_manual"]]
         st.dataframe(df_show[columnas_preferidas] if columnas_preferidas else df_show, use_container_width=True)
         descargar_archivos(df_show[columnas_preferidas] if columnas_preferidas else df_show, "ventas")
+
+        st.subheader("✏️ Editar venta completa")
+
+        ventas_df = DATA["ventas"].copy()
+
+        if not ventas_df.empty:
+            if "identificación" in ventas_df.columns:
+                opciones_ventas = ventas_df["identificación"]
+            elif "id" in ventas_df.columns:
+                opciones_ventas = ventas_df["id"]
+            else:
+                opciones_ventas = pd.Series([], dtype="object")
+
+            if len(opciones_ventas) > 0:
+                venta_sel = st.selectbox(
+                    "Selecciona una venta",
+                    opciones_ventas,
+                    key="venta_editar"
+                )
+
+                if venta_sel:
+                    detalle = obtener_detalle_venta(venta_sel)
+
+                    st.markdown("### 🧾 Detalle de la venta")
+
+                    for fila in detalle:
+                        col1, col2, col3 = st.columns([4, 2, 1])
+
+                        with col1:
+                            st.write(fila["producto"])
+
+                        with col2:
+                            nueva_cantidad = st.number_input(
+                                "Cantidad",
+                                value=float(fila["cantidad"]),
+                                key=f"cant_{fila['id']}"
+                            )
+
+                        with col3:
+                            if st.button("❌", key=f"del_{fila['id']}"):
+                                eliminar_linea_detalle(fila["id"])
+                                st.rerun()
+
+                        if float(nueva_cantidad) != float(fila["cantidad"]):
+                            actualizar_linea_detalle(fila["id"], float(nueva_cantidad))
+
+                    st.markdown("---")
+                    st.markdown("### ➕ Agregar producto")
+
+                    productos_df = DATA["productos"]
+
+                    if not productos_df.empty and "nombre" in productos_df.columns:
+                        producto_nuevo = st.selectbox(
+                            "Producto",
+                            productos_df["nombre"],
+                            key="nuevo_producto"
+                        )
+
+                        cantidad_nueva = st.number_input(
+                            "Cantidad",
+                            min_value=1.0,
+                            value=1.0,
+                            key="cantidad_nueva"
+                        )
+
+                        if st.button("Agregar producto"):
+                            prod = productos_df[productos_df["nombre"] == producto_nuevo].iloc[0]
+
+                            insertar_linea_detalle(
+                                venta_sel,
+                                producto_nuevo,
+                                cantidad_nueva,
+                                float(prod["precio"]),
+                                float(prod["costo"])
+                            )
+
+                            st.success("Producto agregado")
+                            st.rerun()
+
 
         if puede_gestionar_ventas:
             with st.expander("🛠️ Editar / eliminar ventas", expanded=False):
