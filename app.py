@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import Client, create_client
 
 # =========================================================
@@ -99,6 +100,98 @@ def tiene_permiso(flag: str) -> bool:
 def cerrar_sesion():
     st.session_state.pop("usuario_data", None)
     st.rerun()
+
+
+def puede_editar_global() -> bool:
+    return es_admin() or tiene_permiso("puede_editar_todo")
+
+
+def puede_ver_utilidad_global() -> bool:
+    return es_admin() or tiene_permiso("puede_ver_utilidad")
+
+
+def valor_simple(valor: Any):
+    if isinstance(valor, pd.Series):
+        if valor.empty:
+            return None
+        return valor.iloc[0]
+    if isinstance(valor, (list, tuple)):
+        return valor[0] if valor else None
+    return valor
+
+
+def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None = None, excluir: list[str] | None = None):
+    if not puede_editar_global():
+        return
+    if df is None or df.empty:
+        return
+    excluir = set((excluir or []) + ["id"])
+    if "identificación" in df.columns:
+        excluir.add("identificación")
+    titulo = titulo or f"🛠️ Editar / eliminar en {nombre_tabla}"
+    with st.expander(titulo, expanded=False):
+        df_local = df.copy()
+        if "fecha" in df_local.columns:
+            try:
+                df_local = df_local.sort_values("fecha", ascending=False)
+            except Exception:
+                pass
+        opciones = []
+        mapa = {}
+        for _, row in df_local.iterrows():
+            row_id = valor_simple(row.get("id") or row.get("identificación"))
+            etiqueta_partes = [str(row_id)]
+            for campo in ["nombre", "producto", "cliente_nombre", "proveedor", "concepto", "usuario", "metodo_pago", "metodo", "fecha", "total", "monto"]:
+                if campo in row.index and limpiar_texto(row.get(campo)):
+                    etiqueta_partes.append(limpiar_texto(row.get(campo)))
+                    if len(etiqueta_partes) >= 4:
+                        break
+            etiqueta = " | ".join(etiqueta_partes)
+            opciones.append(etiqueta)
+            mapa[etiqueta] = row
+        if not opciones:
+            st.info("No hay filas para gestionar.")
+            return
+        elegido = st.selectbox("Selecciona un registro", opciones, key=f"crud_sel_{nombre_tabla}")
+        fila = mapa[elegido]
+        fila_id = valor_simple(fila.get("id") or fila.get("identificación"))
+
+        editable_cols = [c for c in df_local.columns if c not in excluir]
+        nuevos_datos = {}
+        cols = st.columns(2)
+        for i, col in enumerate(editable_cols):
+            valor = valor_simple(fila.get(col))
+            cont = cols[i % 2]
+            with cont:
+                if isinstance(valor, (bool,)) or str(valor).lower() in ["true", "false"]:
+                    nuevos_datos[col] = st.checkbox(col, value=bool(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+                else:
+                    num = limpiar_numero(valor)
+                    if num is not None and col not in ["telefono", "rnc", "cedula_rnc", "codigo", "ncf"]:
+                        nuevos_datos[col] = st.number_input(col, value=float(num), step=1.0, key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+                    else:
+                        if "fecha" in col.lower():
+                            fecha_val = pd.to_datetime(valor, errors="coerce")
+                            if pd.isna(fecha_val):
+                                nuevos_datos[col] = st.text_input(col, value=limpiar_texto(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+                            else:
+                                nuevos_datos[col] = str(st.date_input(col, value=fecha_val.date(), key=f"crud_{nombre_tabla}_{col}_{fila_id}"))
+                        elif len(limpiar_texto(valor)) > 60:
+                            nuevos_datos[col] = st.text_area(col, value=limpiar_texto(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+                        else:
+                            nuevos_datos[col] = st.text_input(col, value=limpiar_texto(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("💾 Guardar cambios", key=f"crud_save_{nombre_tabla}_{fila_id}"):
+                if actualizar(nombre_tabla, fila_id, nuevos_datos):
+                    st.success("Registro actualizado.")
+                    st.rerun()
+        with c2:
+            if st.button("🗑️ Eliminar registro", key=f"crud_delete_{nombre_tabla}_{fila_id}"):
+                if eliminar(nombre_tabla, fila_id):
+                    st.success("Registro eliminado.")
+                    st.rerun()
 
 
 
@@ -323,12 +416,7 @@ def producto_tiene_inventario(row: pd.Series) -> bool:
 
 
 def obtener_existencia_producto(row: pd.Series) -> float:
-    return (
-        limpiar_numero(row.get("cantidad"))
-        or limpiar_numero(row.get("stock"))
-        or limpiar_numero(row.get("existencias"))
-        or 0.0
-    )
+    return limpiar_numero(row.get("cantidad")) or limpiar_numero(row.get("stock")) or 0.0
 
 
 
@@ -713,6 +801,8 @@ def cargar_datos() -> dict[str, pd.DataFrame]:
 
 DATA = cargar_datos()
 
+if "pos_post_venta" not in st.session_state:
+    st.session_state["pos_post_venta"] = None
 
 # =========================================================
 # HELPERS DE NEGOCIO
@@ -736,6 +826,8 @@ def actualizar_stock_producto(nombre: str, nueva_cantidad: float, fecha_mov=None
     if fila is None:
         return False
     payload = {"cantidad": float(nueva_cantidad)}
+    if "stock" in fila.index:
+        payload["stock"] = float(nueva_cantidad)
     if fecha_mov is not None:
         payload["fecha"] = str(fecha_mov)
     return actualizar("productos", fila["id"], payload)
@@ -777,6 +869,158 @@ def upsert_inventario_actual(producto: str, costo: float, precio: float, existen
     )
 
 
+
+
+
+def upsert_conteo_base(producto: str, existencia: float, fecha_mov, observacion: str = "") -> bool:
+    conteo = DATA.get("conteo_inventario", pd.DataFrame()).copy()
+    producto_n = normalizar_texto(producto)
+    fecha_txt = str(fecha_mov)
+    if not conteo.empty and "producto" in conteo.columns:
+        tmp = conteo.copy()
+        tmp["_n"] = tmp["producto"].astype(str).apply(normalizar_texto)
+        if "fecha" in tmp.columns:
+            tmp["_f"] = pd.to_datetime(tmp["fecha"], errors="coerce").dt.date.astype(str)
+            match = tmp[(tmp["_n"] == producto_n) & (tmp["_f"] == fecha_txt)]
+        else:
+            match = tmp[tmp["_n"] == producto_n]
+        if not match.empty:
+            fila = match.iloc[0]
+            existencia_fisica = limpiar_numero(fila.get("existencia_fisica"))
+            if existencia_fisica is None:
+                existencia_fisica = float(existencia)
+            diferencia = float(existencia_fisica) - float(existencia)
+            estado = "cuadrado" if abs(diferencia) < 0.0001 else ("faltante" if diferencia < 0 else "sobrante")
+            return actualizar(
+                "conteo_inventario",
+                fila["id"],
+                {
+                    "fecha": fecha_txt,
+                    "producto": limpiar_texto(producto),
+                    "existencia_sistema": float(existencia),
+                    "existencia_fisica": float(existencia_fisica),
+                    "diferencia": float(diferencia),
+                    "estado": estado,
+                    "observacion": observacion or fila.get("observacion") or "Sincronizado desde productos",
+                },
+            )
+    return insertar(
+        "conteo_inventario",
+        {
+            "fecha": fecha_txt,
+            "producto": limpiar_texto(producto),
+            "existencia_sistema": float(existencia),
+            "existencia_fisica": float(existencia),
+            "diferencia": 0.0,
+            "estado": "cuadrado",
+            "observacion": observacion or "Sincronizado desde productos",
+        },
+    )
+
+
+def sincronizar_producto_inventario(producto_row: pd.Series | dict, fecha_mov=None, observacion: str = "") -> bool:
+    if fecha_mov is None:
+        fecha_mov = ahora_str()
+    nombre = obtener_nombre_producto(producto_row)
+    costo = float(limpiar_numero(producto_row.get("costo")) or 0)
+    precio = float(limpiar_numero(producto_row.get("precio")) or 0)
+    existencia = float(obtener_existencia_producto(producto_row))
+    ok1 = upsert_inventario_actual(nombre, costo, precio, existencia, fecha_mov, observacion or "Sincronizado desde productos")
+    ok2 = upsert_conteo_base(nombre, existencia, fecha_mov, observacion or "Sincronizado desde productos")
+    return bool(ok1 and ok2)
+
+
+def refrescar_producto_por_id(producto_id: Any):
+    try:
+        resp = supabase.table("productos").select("*").eq("id", producto_id).limit(1).execute()
+        filas = resp.data or []
+        if filas:
+            return pd.Series(filas[0])
+    except Exception:
+        pass
+    return None
+
+
+def revertir_inventario_de_venta(venta_id: Any, marcar_detalle_anulado: bool = False) -> bool:
+    try:
+        resp = supabase.table("detalle_venta").select("*").eq("venta_id", str(venta_id)).execute()
+        detalles = resp.data or []
+    except Exception as exc:
+        st.error(f"No se pudo leer el detalle de venta: {exc}")
+        return False
+    for det in detalles:
+        producto_id = det.get("producto_id")
+        cantidad = float(limpiar_numero(det.get("cantidad")) or 0)
+        if not producto_id or cantidad <= 0:
+            continue
+        prod = refrescar_producto_por_id(producto_id)
+        if prod is None:
+            continue
+        nueva_cant = float(obtener_existencia_producto(prod)) + cantidad
+        actualizar_existencia_producto(prod, nueva_cant)
+        prod2 = refrescar_producto_por_id(producto_id)
+        if prod2 is None:
+            prod2 = prod
+        sincronizar_producto_inventario(prod2, ahora_str(), f"Reintegro por venta {venta_id}")
+        registrar_movimiento_inventario(producto_id, obtener_nombre_producto(prod2), "reversa_venta", "ventas", venta_id, cantidad, float(limpiar_numero(det.get("costo_unitario")) or 0), "Reversa por anulación/eliminación de venta")
+        if marcar_detalle_anulado and det.get("id"):
+            try:
+                supabase.table("detalle_venta").update({"anulado": True}).eq("id", det.get("id")).execute()
+            except Exception:
+                pass
+    return True
+
+
+def eliminar_venta_completa_app(venta_id: Any) -> bool:
+    if not revertir_inventario_de_venta(venta_id, marcar_detalle_anulado=False):
+        return False
+    try:
+        try:
+            cxc = supabase.table("cuentas_por_cobrar").select("id").eq("venta_id", str(venta_id)).execute().data or []
+            for row in cxc:
+                supabase.table("abonos_credito").delete().eq("cuenta_id", str(row.get("id"))).execute()
+            supabase.table("cuentas_por_cobrar").delete().eq("venta_id", str(venta_id)).execute()
+        except Exception:
+            pass
+        for tabla in ["ventas_pagos", "detalle_venta"]:
+            try:
+                supabase.table(tabla).delete().eq("venta_id", str(venta_id)).execute()
+            except Exception:
+                pass
+        ok = eliminar("ventas", venta_id)
+        if ok:
+            registrar_auditoria("eliminar_venta_completa", "ventas", f"venta_id={venta_id}")
+        return ok
+    except Exception as exc:
+        st.error(f"No se pudo eliminar la venta completa: {exc}")
+        return False
+
+
+def anular_venta_completa_app(venta_id: Any, motivo: str = "") -> bool:
+    if not revertir_inventario_de_venta(venta_id, marcar_detalle_anulado=True):
+        return False
+    try:
+        try:
+            supabase.table("ventas_pagos").update({"anulado": True}).eq("venta_id", str(venta_id)).execute()
+        except Exception:
+            pass
+        ok = actualizar("ventas", venta_id, {
+            "anulado": True,
+            "motivo_anulacion": motivo or "Anulada manualmente",
+            "estado": "anulada",
+            "total": 0.0,
+            "subtotal": 0.0,
+            "descuento": 0.0,
+            "recargo": 0.0,
+            "ganancia_bruta": 0.0,
+            "ganancia_bruta_manual": 0.0,
+        })
+        if ok:
+            registrar_auditoria("anular_venta_completa", "ventas", f"venta_id={venta_id}")
+        return ok
+    except Exception as exc:
+        st.error(f"No se pudo anular la venta completa: {exc}")
+        return False
 
 def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdida, observacion="") -> bool:
     cantidad = float(cantidad)
@@ -1069,6 +1313,122 @@ def cerrar_caja(caja_row: dict, monto_cierre: float, observacion: str = "") -> t
     except Exception as exc:
         return False, f"No se pudo cerrar caja: {exc}"
 
+
+
+def html_escape(valor: Any) -> str:
+    txt = limpiar_texto(valor)
+    return (
+        txt.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def construir_html_impresion(post_venta: dict, tipo: str = "factura") -> str:
+    negocio = obtener_configuracion().get("negocio_nombre") or "Sistema de Negocio PRO"
+    titulo = "TICKET" if tipo == "ticket" else "FACTURA"
+    items = post_venta.get("items") or []
+    filas = ""
+    for item in items:
+        filas += f"""
+        <tr>
+            <td>{html_escape(item.get('producto'))}</td>
+            <td style='text-align:center'>{float(item.get('cantidad', 0)):.0f}</td>
+            <td style='text-align:right'>RD$ {float(item.get('precio_unitario', 0)):,.2f}</td>
+            <td style='text-align:right'>RD$ {float(item.get('total_linea', 0)):,.2f}</td>
+        </tr>
+        """
+    if not filas:
+        filas = "<tr><td colspan='4' style='text-align:center'>Sin detalle</td></tr>"
+
+    ncf = html_escape(post_venta.get("ncf") or post_venta.get("venta_id") or "")
+    cliente = html_escape(post_venta.get("cliente_nombre") or "Venta general")
+    metodo = html_escape(post_venta.get("metodo_pago") or "")
+    fecha_txt = html_escape(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    total = float(post_venta.get("total", 0) or 0)
+    cambio = float(post_venta.get("cambio", 0) or 0)
+
+    return f"""
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>{titulo} - {html_escape(negocio)}</title>
+      <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; color: #111; }}
+        .wrap {{ max-width: 800px; margin: 0 auto; }}
+        h1,h2,h3,p {{ margin: 0 0 8px 0; }}
+        .top {{ text-align: center; margin-bottom: 16px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
+        th, td {{ border-bottom: 1px solid #ddd; padding: 8px; font-size: 14px; }}
+        th {{ background: #f7f7f7; text-align: left; }}
+        .totales {{ margin-top: 18px; width: 100%; }}
+        .totales td {{ border: none; padding: 6px 0; }}
+        .right {{ text-align: right; }}
+        .strong {{ font-weight: bold; }}
+        @media print {{
+          body {{ padding: 0; }}
+          .no-print {{ display: none; }}
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="top">
+          <h2>{html_escape(negocio)}</h2>
+          <h1>{titulo}</h1>
+          <p><strong>No./NCF:</strong> {ncf}</p>
+          <p><strong>Fecha:</strong> {fecha_txt}</p>
+          <p><strong>Cliente:</strong> {cliente}</p>
+          <p><strong>Método:</strong> {metodo}</p>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Cant.</th>
+              <th>Precio</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filas}
+          </tbody>
+        </table>
+
+        <table class="totales">
+          <tr><td class="strong">Total</td><td class="right strong">RD$ {total:,.2f}</td></tr>
+          <tr><td class="strong">Cambio</td><td class="right">RD$ {cambio:,.2f}</td></tr>
+        </table>
+      </div>
+    </body>
+    </html>
+    """
+
+
+def lanzar_impresion_navegador(html_doc: str):
+    html_js = f"""
+    <html>
+    <body>
+    <script>
+      const contenido = {html_doc!r};
+      const w = window.open('', '_blank');
+      if (w) {{
+        w.document.open();
+        w.document.write(contenido);
+        w.document.close();
+        w.focus();
+        setTimeout(() => {{
+          w.print();
+        }}, 300);
+      }}
+    </script>
+    </body>
+    </html>
+    """
+    components.html(html_js, height=0, width=0)
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1274,6 +1634,10 @@ elif menu == "Productos":
                             if "stock" in existente.index:
                                 payload["stock"] = float(nueva_cant)
                         actualizar("productos", existente["id"], payload)
+                        prod_sync = refrescar_producto_por_id(existente["id"])
+                        if prod_sync is None:
+                            prod_sync = existente
+                        sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
                     else:
                         payload = {
                             "fecha": fecha_row,
@@ -1290,6 +1654,9 @@ elif menu == "Productos":
                         if "stock" in DATA["productos"].columns:
                             payload["stock"] = float(cantidad)
                         insertar("productos", payload)
+                        prod_sync = get_producto_por_codigo(codigo) if codigo else get_producto_por_nombre(nombre)
+                        if prod_sync is not None:
+                            sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
                     procesados += 1
                 st.success(f"Se procesaron {procesados} productos.")
                 st.rerun()
@@ -1338,11 +1705,18 @@ elif menu == "Productos":
                 if existente is not None:
                     ok = actualizar("productos", existente["id"], payload)
                     if ok:
+                        prod_sync = refrescar_producto_por_id(existente["id"])
+                        if prod_sync is None:
+                            prod_sync = existente
+                        sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto actualizado sin duplicarse.")
                         st.rerun()
                 else:
                     ok = insertar("productos", payload)
                     if ok:
+                        prod_sync = get_producto_por_codigo(limpiar_texto(codigo)) if limpiar_texto(codigo) else get_producto_por_nombre(limpiar_texto(nombre))
+                        if prod_sync is not None:
+                            sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto creado.")
                         st.rerun()
 
@@ -1358,6 +1732,7 @@ elif menu == "Productos":
             df = df[mask]
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "productos")
+        render_crud_generico("productos", df, "🛠️ Editar / eliminar productos")
     else:
         st.info("No hay productos registrados.")
 
@@ -1428,6 +1803,7 @@ elif menu == "Inventario Actual":
         invent = buscar_df(invent, txt)
         st.dataframe(invent, use_container_width=True)
         descargar_archivos(invent, "inventario_actual")
+        render_crud_generico("inventario_actual", invent, "🛠️ Editar / eliminar inventario actual")
     else:
         st.info("No hay inventario actual registrado.")
 
@@ -1438,56 +1814,7 @@ elif menu == "Inventario Actual":
 elif menu == "Conteo Inventario":
     st.title("🧮 Conteo de Inventario")
 
-    with st.expander("✍️ Conteo manual", expanded=True):
-        productos_conteo = DATA["productos"].copy()
-        productos_conteo = productos_conteo.sort_values("nombre") if not productos_conteo.empty and "nombre" in productos_conteo.columns else productos_conteo
-        if productos_conteo.empty:
-            st.warning("No hay productos disponibles para hacer conteo manual.")
-        else:
-            opciones = []
-            mapa_prod = {}
-            for _, row in productos_conteo.iterrows():
-                nombre_prod = obtener_nombre_producto(row)
-                existencia_actual = obtener_existencia_producto(row)
-                etiqueta = f"{nombre_prod} | sistema: {existencia_actual:,.0f}"
-                opciones.append(etiqueta)
-                mapa_prod[etiqueta] = row
-
-            fecha_conteo_manual = st.date_input("Fecha del conteo", value=date.today(), key="fecha_conteo_manual")
-            prod_label = st.selectbox("Producto", opciones, key="conteo_manual_producto")
-            fila_prod = mapa_prod[prod_label]
-            producto = obtener_nombre_producto(fila_prod)
-            existencia_sistema = float(obtener_existencia_producto(fila_prod))
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("Existencia en sistema", f"{existencia_sistema:,.0f}")
-            with c2:
-                existencia_fisica = st.number_input("Existencia física real", min_value=0.0, step=1.0, key="conteo_manual_fisica")
-            with c3:
-                diferencia_preview = float(existencia_fisica) - float(existencia_sistema)
-                estado_preview = "cuadrado" if diferencia_preview == 0 else "faltante" if diferencia_preview < 0 else "sobrante"
-                st.metric("Diferencia", f"{diferencia_preview:,.0f}")
-                st.caption(f"Estado: {estado_preview}")
-            observacion_manual = st.text_area("Observación", key="conteo_manual_obs")
-
-            if st.button("Guardar conteo manual", key="btn_guardar_conteo_manual"):
-                ok = insertar(
-                    "conteo_inventario",
-                    {
-                        "fecha": str(fecha_conteo_manual),
-                        "producto": producto,
-                        "existencia_sistema": existencia_sistema,
-                        "existencia_fisica": float(existencia_fisica),
-                        "diferencia": diferencia_preview,
-                        "estado": estado_preview,
-                        "observacion": observacion_manual,
-                    },
-                )
-                if ok:
-                    st.success("Conteo manual guardado. Ahora puedes decidir si ajustas, envías a pérdida o dejas pendiente.")
-                    st.rerun()
-
-    with st.expander("📥 Subir conteo físico por Excel / CSV", expanded=False):
+    with st.expander("📥 Subir conteo físico por Excel / CSV", expanded=True):
         st.write("Columnas esperadas: producto o nombre, existencia_fisica o cantidad.")
         archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_conteo")
         fecha_conteo = st.date_input("Fecha del conteo", value=date.today(), key="fecha_conteo")
@@ -1505,7 +1832,7 @@ elif menu == "Conteo Inventario":
                     if not producto:
                         continue
                     fila_prod = get_producto_por_nombre(producto)
-                    existencia_sistema = float(obtener_existencia_producto(fila_prod)) if fila_prod is not None else 0.0
+                    existencia_sistema = float(limpiar_numero(fila_prod.get("cantidad")) or 0) if fila_prod is not None else 0.0
                     existencia_fisica = float(limpiar_numero(row["existencia_fisica"]) or 0)
                     diferencia = existencia_fisica - existencia_sistema
 
@@ -1543,6 +1870,7 @@ elif menu == "Conteo Inventario":
 
         st.dataframe(conteo_f, use_container_width=True)
         descargar_archivos(conteo_f, "conteo_inventario")
+        render_crud_generico("conteo_inventario", conteo_f, "🛠️ Editar / eliminar conteo de inventario")
 
         st.subheader("⚙️ Procesar faltantes y sobrantes")
         pendientes = conteo_f[conteo_f["estado"].astype(str).str.lower().isin(["faltante", "sobrante"])] if not conteo_f.empty else pd.DataFrame()
@@ -1588,12 +1916,6 @@ elif menu == "Conteo Inventario":
                     ok3 = upsert_inventario_actual(producto, costo, precio, existencia_fisica, fecha_mov, "Ajuste positivo por conteo")
                     if ok2 and ok3:
                         st.success("Ajuste positivo aplicado.")
-                        st.rerun()
-                elif diferencia < 0 and st.button("Aplicar ajuste al sistema"):
-                    ok2 = actualizar_stock_producto(producto, existencia_fisica, fecha_mov)
-                    ok3 = upsert_inventario_actual(producto, costo, precio, existencia_fisica, fecha_mov, "Ajuste manual por conteo")
-                    if ok2 and ok3:
-                        st.success("Inventario ajustado al conteo físico.")
                         st.rerun()
 
             with col3:
@@ -1703,6 +2025,7 @@ elif menu == "Ajustes Inventario":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "ajustes_inventario")
+        render_crud_generico("ajustes_inventario", df, "🛠️ Editar / eliminar ajustes de inventario")
     else:
         st.info("No hay ajustes registrados.")
 
@@ -1712,6 +2035,9 @@ elif menu == "Ajustes Inventario":
 # =========================================================
 elif menu == "Ventas":
     st.title("💰 Ventas")
+
+    puede_gestionar_ventas = es_admin() or tiene_permiso("puede_editar_todo") or tiene_permiso("puede_editar_ventas") or tiene_permiso("puede_eliminar") or tiene_permiso("puede_anular")
+    puede_ver_utilidad = puede_ver_utilidad_global()
 
     with st.expander("📥 Subir Excel / CSV de ventas"):
         st.write("Columnas esperadas: fecha, total, metodo. Observación opcional.")
@@ -1773,19 +2099,41 @@ elif menu == "Ventas":
                 st.success("Venta guardada.")
                 st.rerun()
 
-    df = leer_tabla("ventas")
+    # Lectura robusta: sin filtros cerrados para no ocultar ventas registradas
+    try:
+        resp_v = supabase.table("ventas").select("*").order("fecha", desc=True).execute()
+        df = pd.DataFrame(resp_v.data or [])
+    except Exception:
+        df = leer_tabla("ventas")
+
     if not df.empty:
         if "id" not in df.columns and "identificación" in df.columns:
             df["id"] = df["identificación"]
+        if "identificacion" not in df.columns and "identificación" in df.columns:
+            df["identificacion"] = df["identificación"]
+        if "identificación" not in df.columns and "identificacion" in df.columns:
+            df["identificación"] = df["identificacion"]
         if "metodo" not in df.columns and "metodo_pago" in df.columns:
             df["metodo"] = df["metodo_pago"]
+        if "metodo_pago" not in df.columns and "metodo" in df.columns:
+            df["metodo_pago"] = df["metodo"]
         if "cliente_nombre" not in df.columns:
             df["cliente_nombre"] = "Venta general"
         if "usuario" not in df.columns:
             df["usuario"] = ""
+        if "anulado" not in df.columns:
+            df["anulado"] = False
+        if "motivo_anulacion" not in df.columns:
+            df["motivo_anulacion"] = ""
+        if "ganancia_bruta" not in df.columns:
+            df["ganancia_bruta"] = 0.0
+        if "ganancia_bruta_manual" not in df.columns:
+            df["ganancia_bruta_manual"] = 0.0
 
         d1, d2 = rango_fechas_ui("ventas")
-        df = filtrar_por_fechas(df, d1, d2)
+        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+        df = df[(df["fecha"] >= pd.to_datetime(d1)) & (df["fecha"] <= pd.to_datetime(d2) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))]
+
         txt = st.text_input("Buscar venta", key="buscar_ventas")
         metodo_filtro = st.selectbox(
             "Filtrar por método",
@@ -1799,10 +2147,20 @@ elif menu == "Ventas":
         if metodo_filtro != "Todos" and col_metodo:
             df = df[df[col_metodo].astype(str).str.lower() == metodo_filtro.lower()]
 
+        total_vendido = float(pd.to_numeric(df.get("total", 0), errors="coerce").fillna(0).sum()) if not df.empty else 0.0
+        utilidad_visible = float(pd.to_numeric(df.get("ganancia_bruta", 0), errors="coerce").fillna(0).sum()) if not df.empty else 0.0
+        metric_cols = st.columns(3) if puede_ver_utilidad else st.columns(2)
+        metric_cols[0].metric("Ventas registradas", int(len(df.index)))
+        metric_cols[1].metric("Total vendido", f"RD$ {total_vendido:,.2f}")
+        if puede_ver_utilidad:
+            metric_cols[2].metric("Utilidad bruta visible", f"RD$ {utilidad_visible:,.2f}")
+
+        df_show = df.copy().sort_values("fecha", ascending=False)
         columnas_preferidas = [
             c
             for c in [
                 "id",
+                "identificación",
                 "fecha",
                 "total",
                 "subtotal",
@@ -1817,10 +2175,59 @@ elif menu == "Ventas":
                 "ganancia_bruta",
                 "ganancia_bruta_manual",
             ]
-            if c in df.columns
+            if c in df_show.columns
         ]
-        st.dataframe(df[columnas_preferidas] if columnas_preferidas else df, use_container_width=True)
-        descargar_archivos(df, "ventas")
+        if not puede_ver_utilidad:
+            columnas_preferidas = [c for c in columnas_preferidas if c not in ["ganancia_bruta", "ganancia_bruta_manual"]]
+        st.dataframe(df_show[columnas_preferidas] if columnas_preferidas else df_show, use_container_width=True)
+        descargar_archivos(df_show[columnas_preferidas] if columnas_preferidas else df_show, "ventas")
+
+        if puede_gestionar_ventas:
+            with st.expander("🛠️ Editar / eliminar ventas", expanded=False):
+                opciones = []
+                mapa_ids = {}
+                for _, row in df_show.iterrows():
+                    row_id = row.get("id") or row.get("identificación")
+                    etiqueta = f"{row_id} | {row.get('fecha')} | RD$ {float(limpiar_numero(row.get('total')) or 0):,.2f} | {row.get('metodo_pago') or row.get('metodo') or ''}"
+                    opciones.append(etiqueta)
+                    mapa_ids[etiqueta] = row
+                if opciones:
+                    venta_sel = st.selectbox("Selecciona una venta", opciones, key="ventas_sel_edit")
+                    venta_row = mapa_ids[venta_sel]
+                    venta_id = venta_row.get("id") or venta_row.get("identificación")
+                    ce1, ce2, ce3 = st.columns(3)
+                    with ce1:
+                        fecha_edit = st.date_input("Fecha edición", value=pd.to_datetime(venta_row.get("fecha")).date() if pd.notna(pd.to_datetime(venta_row.get("fecha"), errors="coerce")) else date.today(), key="venta_edit_fecha")
+                    with ce2:
+                        total_edit = st.number_input("Total edición", min_value=0.0, step=1.0, value=float(limpiar_numero(venta_row.get("total")) or 0), key="venta_edit_total")
+                    with ce3:
+                        metodo_edit = st.selectbox("Método edición", ["efectivo", "transferencia", "tarjeta", "credito", "mixto"], index=["efectivo", "transferencia", "tarjeta", "credito", "mixto"].index(str((venta_row.get("metodo_pago") or venta_row.get("metodo") or "efectivo")).lower()) if str((venta_row.get("metodo_pago") or venta_row.get("metodo") or "efectivo")).lower() in ["efectivo", "transferencia", "tarjeta", "credito", "mixto"] else 0, key="venta_edit_metodo")
+                    obs_edit = st.text_input("Observación edición", value=limpiar_texto(venta_row.get("observacion")), key="venta_edit_obs")
+                    cl1, cl2, cl3 = st.columns(3)
+                    with cl1:
+                        if (es_admin() or tiene_permiso("puede_editar_ventas")) and st.button("💾 Guardar cambios", key="btn_guardar_cambios_venta"):
+                            ok = actualizar("ventas", venta_id, {
+                                "fecha": str(fecha_edit),
+                                "total": float(total_edit),
+                                "metodo": metodo_edit,
+                                "metodo_pago": metodo_edit,
+                                "observacion": obs_edit,
+                            })
+                            if ok:
+                                st.success("Venta actualizada.")
+                                st.rerun()
+                    with cl2:
+                        if (es_admin() or tiene_permiso("puede_anular")) and st.button("🚫 Anular venta", key="btn_anular_venta_admin"):
+                            ok = anular_venta_completa_app(venta_id, "Anulada manualmente desde módulo Ventas")
+                            if ok:
+                                st.success("Venta anulada.")
+                                st.rerun()
+                    with cl3:
+                        if (es_admin() or tiene_permiso("puede_eliminar")) and st.button("🗑️ Eliminar venta", key="btn_eliminar_venta_admin"):
+                            ok = eliminar_venta_completa_app(venta_id)
+                            if ok:
+                                st.success("Venta eliminada.")
+                                st.rerun()
     else:
         st.info("No hay ventas registradas.")
 
@@ -1966,6 +2373,7 @@ elif menu == "Compras":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "compras")
+        render_crud_generico("compras", df, "🛠️ Editar / eliminar compras")
     else:
         st.info("No hay compras registradas.")
 
@@ -2009,6 +2417,7 @@ elif menu == "Catálogo de Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "catalogo_gastos")
+        render_crud_generico("catalogo_gastos", df, "🛠️ Editar / eliminar catálogo de gastos")
     else:
         st.info("No hay catálogo de gastos.")
 
@@ -2102,6 +2511,7 @@ elif menu == "Gastos":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos")
+        render_crud_generico("gastos", df, "🛠️ Editar / eliminar gastos")
     else:
         st.info("No hay gastos registrados.")
 
@@ -2176,6 +2586,7 @@ elif menu == "Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "empleados")
+        render_crud_generico("empleados", df, "🛠️ Editar / eliminar empleados")
     else:
         st.info("No hay empleados registrados.")
 
@@ -2213,6 +2624,7 @@ elif menu == "Adelantos Empleados":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "adelantos_empleados")
+        render_crud_generico("adelantos_empleados", df, "🛠️ Editar / eliminar adelantos")
     else:
         st.info("No hay adelantos registrados.")
 
@@ -2249,6 +2661,7 @@ elif menu == "Pérdidas":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "perdidas")
+        render_crud_generico("perdidas", df, "🛠️ Editar / eliminar pérdidas")
     else:
         st.info("No hay pérdidas registradas.")
 
@@ -2284,6 +2697,7 @@ elif menu == "Gastos Dueño":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "gastos_dueno")
+        render_crud_generico("gastos_dueno", df, "🛠️ Editar / eliminar gastos del dueño")
     else:
         st.info("No hay gastos del dueño registrados.")
 
@@ -2340,6 +2754,7 @@ elif menu == "Caja":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "cierre_caja")
+        render_crud_generico("cierre_caja", df, "🛠️ Editar / eliminar cierres de caja")
     else:
         st.info("No hay cierres de caja registrados.")
 
@@ -2607,6 +3022,31 @@ elif menu == "POS":
                         st.rerun()
 
         st.subheader("🧾 Carrito")
+
+        post_venta = st.session_state.get("pos_post_venta")
+        if post_venta:
+            st.success(f"Venta registrada correctamente. Factura/ID: {post_venta.get('venta_id', '')}")
+            p1, p2, p3 = st.columns(3)
+            p1.metric("Total", f"RD$ {float(post_venta.get('total', 0)):,.2f}")
+            p2.metric("Cambio", f"RD$ {float(post_venta.get('cambio', 0)):,.2f}")
+            p3.metric("Método", str(post_venta.get('metodo_pago', '')))
+            b1, b2, b3 = st.columns(3)
+            with b1:
+                if st.button("🧾 Imprimir Ticket", key="btn_print_ticket"):
+                    html_ticket = construir_html_impresion(post_venta, "ticket")
+                    lanzar_impresion_navegador(html_ticket)
+                    st.success("Enviando ticket al navegador para imprimir.")
+            with b2:
+                if st.button("🧾 Imprimir Factura", key="btn_print_factura"):
+                    html_factura = construir_html_impresion(post_venta, "factura")
+                    lanzar_impresion_navegador(html_factura)
+                    st.success("Enviando factura al navegador para imprimir.")
+            with b3:
+                if st.button("✅ Terminar", key="btn_pos_post_venta_terminar"):
+                    st.session_state["pos_post_venta"] = None
+                    st.rerun()
+            st.markdown("---")
+
         if carrito:
             df_carrito = pd.DataFrame(carrito)
             st.data_editor(df_carrito, use_container_width=True, disabled=["producto_id", "codigo", "producto"], key="editor_carrito")
@@ -2706,6 +3146,10 @@ elif menu == "POS":
                             if producto_tiene_inventario(prod):
                                 nueva_cant = max(obtener_existencia_producto(prod) - float(item["cantidad"]), 0.0)
                                 actualizar_existencia_producto(prod, nueva_cant)
+                                prod_sync = refrescar_producto_por_id(prod["id"])
+                                if prod_sync is None:
+                                    prod_sync = prod
+                                sincronizar_producto_inventario(prod_sync, ahora_str(), f"Salida por venta {venta_id}")
                                 aplicar_consumo_fifo(movimientos_fifo)
                                 registrar_movimiento_inventario(prod["id"], obtener_nombre_producto(prod), "salida_venta", "ventas", venta_id, -float(item["cantidad"]), costo_unit, "Salida por venta POS")
                         pagos = {"efectivo": pago_efectivo, "transferencia": pago_transferencia, "tarjeta": pago_tarjeta, "credito": pago_credito}
@@ -2745,7 +3189,15 @@ elif menu == "POS":
                             }).execute()
                         registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={total_final}")
                         DATA.update(cargar_datos())
-                        st.success(f"Venta registrada. Total RD$ {total_final:,.2f}. Cambio RD$ {cambio:,.2f}")
+                        st.session_state["pos_post_venta"] = {
+                            "venta_id": str(venta_id),
+                            "total": float(total_final),
+                            "cambio": float(cambio),
+                            "cliente_nombre": cliente_nombre,
+                            "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
+                            "ncf": ncf,
+                            "items": [dict(x) for x in carrito],
+                        }
                         st.session_state["pos_carrito"] = []
                         st.rerun()
                     except Exception as exc:
@@ -2776,6 +3228,7 @@ elif menu == "Clientes":
     if not df.empty:
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "clientes")
+        render_crud_generico("clientes", df, "🛠️ Editar / eliminar clientes")
     else:
         st.info("No hay clientes.")
 
@@ -2802,6 +3255,7 @@ elif menu == "Proveedores":
     if not df.empty:
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "proveedores")
+        render_crud_generico("proveedores", df, "🛠️ Editar / eliminar proveedores")
     else:
         st.info("No hay proveedores.")
 
@@ -2862,6 +3316,8 @@ elif menu == "Usuarios":
                 puede_registrar_compras = st.checkbox("Puede registrar compras", key="usr_prc")
                 puede_registrar_gastos = st.checkbox("Puede registrar gastos", key="usr_prg")
                 puede_configurar = st.checkbox("Puede configurar", key="usr_pcf")
+                puede_editar_todo = st.checkbox("Puede editar todo", key="usr_pet")
+                puede_ver_utilidad = st.checkbox("Puede ver utilidad", key="usr_pvu")
             if st.button("Guardar usuario", key="btn_guardar_usuario"):
                 existentes = DATA.get("usuarios", pd.DataFrame()).copy()
                 if not limpiar_texto(usuario):
@@ -2871,15 +3327,16 @@ elif menu == "Usuarios":
                 else:
                     if not existentes.empty and "usuario" in existentes.columns and normalizar_texto(usuario) in existentes["usuario"].astype(str).apply(normalizar_texto).tolist():
                         fila = existentes[existentes["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario)].iloc[0]
-                        actualizar("usuarios", fila["id"], {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar})
+                        actualizar("usuarios", fila["id"], {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar, "puede_editar_todo": puede_editar_todo, "puede_ver_utilidad": puede_ver_utilidad})
                         st.success("Usuario actualizado.")
                     else:
-                        insertar("usuarios", {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar})
+                        insertar("usuarios", {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar, "puede_editar_todo": puede_editar_todo, "puede_ver_utilidad": puede_ver_utilidad})
                         st.success("Usuario creado.")
                     st.rerun()
         df = DATA.get("usuarios", pd.DataFrame()).copy()
         if not df.empty:
             st.dataframe(df, use_container_width=True)
+            render_crud_generico("usuarios", df, "🛠️ Editar / eliminar usuarios", excluir=["clave"])
 
 # =========================================================
 # CONFIGURACION
