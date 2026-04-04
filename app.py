@@ -599,7 +599,7 @@ def filtrar_por_fechas(df: pd.DataFrame, desde, hasta) -> pd.DataFrame:
     out = df.copy()
     out["fecha"] = pd.to_datetime(out["fecha"], errors="coerce")
     desde_dt = pd.to_datetime(desde)
-    hasta_dt = pd.to_datetime(hasta)
+    hasta_dt = pd.to_datetime(hasta) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
     return out[(out["fecha"] >= desde_dt) & (out["fecha"] <= hasta_dt)]
 
 
