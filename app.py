@@ -1696,10 +1696,6 @@ elif menu == "Productos":
                             if "stock" in existente.index:
                                 payload["stock"] = float(nueva_cant)
                         actualizar("productos", existente["id"], payload)
-                        prod_sync = refrescar_producto_por_id(existente["id"])
-                        if prod_sync is None:
-                            prod_sync = existente
-                        sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
                     else:
                         payload = {
                             "fecha": fecha_row,
@@ -1715,25 +1711,7 @@ elif menu == "Productos":
                         }
                         if "stock" in DATA["productos"].columns:
                             payload["stock"] = float(cantidad)
-                        # Código inteligente seguro
-codigo_input = limpiar_texto(codigo) if 'codigo' in locals() else ""
-if codigo_input:
-    codigo_final = codigo_input
-else:
-    import uuid
-    codigo_final = str(uuid.uuid4())[:8]
-
-existe_df = DATA["productos"]
-if "codigo" in existe_df.columns:
-    existe_df = existe_df[existe_df["codigo"] == codigo_final]
-
-if not existe_df.empty:
-    st.error("⚠️ Ya existe un producto con ese código")
-else:
-    payload["codigo"] = codigo_final
-    insertar("productos", payload)
-                        if prod_sync is not None:
-                            sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
+                        insertar("productos", payload)
                     procesados += 1
                 st.success(f"Se procesaron {procesados} productos.")
                 st.rerun()
@@ -1782,33 +1760,11 @@ else:
                 if existente is not None:
                     ok = actualizar("productos", existente["id"], payload)
                     if ok:
-                        prod_sync = refrescar_producto_por_id(existente["id"])
-                        if prod_sync is None:
-                            prod_sync = existente
-                        sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto actualizado sin duplicarse.")
                         st.rerun()
                 else:
-                    ok = # Código inteligente seguro
-codigo_input = limpiar_texto(codigo) if 'codigo' in locals() else ""
-if codigo_input:
-    codigo_final = codigo_input
-else:
-    import uuid
-    codigo_final = str(uuid.uuid4())[:8]
-
-existe_df = DATA["productos"]
-if "codigo" in existe_df.columns:
-    existe_df = existe_df[existe_df["codigo"] == codigo_final]
-
-if not existe_df.empty:
-    st.error("⚠️ Ya existe un producto con ese código")
-else:
-    payload["codigo"] = codigo_final
-    insertar("productos", payload)
+                    ok = insertar("productos", payload)
                     if ok:
-                        if prod_sync is not None:
-                            sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto creado.")
                         st.rerun()
 
@@ -3534,10 +3490,6 @@ elif menu == "POS":
                             if producto_tiene_inventario(prod):
                                 nueva_cant = max(obtener_existencia_producto(prod) - float(item["cantidad"]), 0.0)
                                 actualizar_existencia_producto(prod, nueva_cant)
-                                prod_sync = refrescar_producto_por_id(prod["id"])
-                                if prod_sync is None:
-                                    prod_sync = prod
-                                sincronizar_producto_inventario(prod_sync, ahora_str(), f"Salida por venta {venta_id}")
                                 aplicar_consumo_fifo(movimientos_fifo)
                                 registrar_movimiento_inventario(prod["id"], obtener_nombre_producto(prod), "salida_venta", "ventas", venta_id, -float(item["cantidad"]), costo_unit, "Salida por venta POS")
                         pagos = {"efectivo": pago_efectivo, "transferencia": pago_transferencia, "tarjeta": pago_tarjeta, "credito": pago_credito}
