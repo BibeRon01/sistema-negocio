@@ -1715,7 +1715,28 @@ elif menu == "Productos":
                         }
                         if "stock" in DATA["productos"].columns:
                             payload["stock"] = float(cantidad)
-                        insertar("productos", payload)
+                        
+# ================================
+# CÓDIGO DE PRODUCTO (AUTO / MANUAL / BARRA)
+# ================================
+codigo_input = limpiar_texto(st.text_input("Código (opcional - barra o manual)", key="prod_codigo"))
+
+if codigo_input:
+    codigo_final = codigo_input
+else:
+    import uuid
+    codigo_final = str(uuid.uuid4())[:8]
+
+# VALIDAR QUE NO EXISTA
+existe_df = DATA["productos"]
+
+if "codigo" in existe_df.columns:
+    existe_df = existe_df[existe_df["codigo"] == codigo_final]
+
+if not existe_df.empty:
+    st.error("⚠️ Ya existe un producto con ese código")
+else:
+insertar("productos", payload)
                         prod_sync = get_producto_por_codigo(codigo) if codigo else get_producto_por_nombre(nombre)
                         if prod_sync is not None:
                             sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
