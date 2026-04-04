@@ -1715,7 +1715,7 @@ elif menu == "Productos":
                         }
                         if "stock" in DATA["productos"].columns:
                             payload["stock"] = float(cantidad)
-                        # Código inteligente
+                        # Código inteligente seguro
 codigo_input = limpiar_texto(codigo) if 'codigo' in locals() else ""
 if codigo_input:
     codigo_final = codigo_input
@@ -1732,7 +1732,6 @@ if not existe_df.empty:
 else:
     payload["codigo"] = codigo_final
     insertar("productos", payload)
-                        prod_sync = get_producto_por_codigo(codigo) if codigo else get_producto_por_nombre(nombre)
                         if prod_sync is not None:
                             sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
                     procesados += 1
@@ -1790,7 +1789,7 @@ else:
                         st.success("Producto actualizado sin duplicarse.")
                         st.rerun()
                 else:
-                    ok = # Código inteligente
+                    ok = # Código inteligente seguro
 codigo_input = limpiar_texto(codigo) if 'codigo' in locals() else ""
 if codigo_input:
     codigo_final = codigo_input
@@ -1808,7 +1807,6 @@ else:
     payload["codigo"] = codigo_final
     insertar("productos", payload)
                     if ok:
-                        prod_sync = get_producto_por_codigo(limpiar_texto(codigo)) if limpiar_texto(codigo) else get_producto_por_nombre(limpiar_texto(nombre))
                         if prod_sync is not None:
                             sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto creado.")
