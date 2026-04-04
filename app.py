@@ -1077,23 +1077,6 @@ def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdid
     cantidad = float(cantidad)
     costo_unitario = float(costo_unitario)
     valor = cantidad * costo_unitario
-    fila_prod = get_producto_por_nombre(producto)
-    if fila_prod is not None and producto_tiene_inventario(fila_prod):
-        existencia_actual = float(obtener_existencia_producto(fila_prod))
-        nueva_existencia = max(existencia_actual - cantidad, 0.0)
-        actualizar_existencia_producto(fila_prod, nueva_existencia)
-        fila_prod_actualizada = refrescar_producto_por_id(fila_prod["id"])
-        if fila_prod_actualizada is None:
-            fila_prod_actualizada = fila_prod
-        precio_actual = float(limpiar_numero(fila_prod_actualizada.get("precio")) or 0)
-        upsert_inventario_actual(
-            limpiar_texto(producto),
-            float(costo_unitario),
-            precio_actual,
-            nueva_existencia,
-            fecha_mov,
-            f"Pérdida registrada: {tipo_perdida}",
-        )
     return insertar(
         "perdidas",
         {
@@ -3015,20 +2998,12 @@ elif menu == "Pérdidas":
             producto = st.selectbox("Producto", productos_lista, key="perd_prod") if productos_lista else st.text_input("Producto", key="perd_prod_txt")
             cantidad = st.number_input("Cantidad", min_value=0.0, step=1.0, key="perd_cant")
         with c2:
-            fila_prod_perd = get_producto_por_nombre(producto) if producto else None
-            costo_auto_perd = float(limpiar_numero(fila_prod_perd.get("costo")) or 0) if fila_prod_perd is not None else 0.0
-            costo_unitario = st.number_input("Costo unitario", min_value=0.0, step=1.0, value=costo_auto_perd, key="perd_costo")
+            costo_unitario = st.number_input("Costo unitario", min_value=0.0, step=1.0, key="perd_costo")
             tipo_perdida = st.selectbox("Tipo de pérdida", ["mercancia", "vencimiento", "rotura", "ajuste_mercancia", "otro"], key="perd_tipo")
             observacion = st.text_area("Observación", key="perd_obs")
 
         if st.button("Guardar pérdida"):
-            if not producto:
-                st.error("Debes seleccionar un producto.")
-            elif cantidad <= 0:
-                st.error("La cantidad debe ser mayor que cero.")
-            elif costo_unitario <= 0:
-                st.error("El costo unitario debe ser mayor que cero.")
-            elif registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, observacion):
+            if registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, observacion):
                 st.success("Pérdida guardada.")
                 st.rerun()
 
