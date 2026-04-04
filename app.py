@@ -618,6 +618,17 @@ def suma_col(df: pd.DataFrame, columna: str) -> float:
     return float(pd.to_numeric(df[columna], errors="coerce").fillna(0).sum())
 
 
+def obtener_utilidad_bruta_periodo(ventas_df: pd.DataFrame) -> float:
+    if ventas_df.empty:
+        return 0.0
+    utilidad = 0.0
+    if "ganancia_bruta" in ventas_df.columns:
+        utilidad += float(pd.to_numeric(ventas_df["ganancia_bruta"], errors="coerce").fillna(0).sum())
+    if utilidad == 0.0 and "ganancia_bruta_manual" in ventas_df.columns:
+        utilidad += float(pd.to_numeric(ventas_df["ganancia_bruta_manual"], errors="coerce").fillna(0).sum())
+    return float(utilidad)
+
+
 
 def agrupar_mensual(df: pd.DataFrame, columna_valor: str) -> pd.DataFrame:
     if df.empty or "fecha" not in df.columns or columna_valor not in df.columns:
@@ -1229,9 +1240,12 @@ def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0)
     perdidas_tot = suma_col(perdidas_df, "valor")
     retiros_tot = suma_col(dueno_df, "monto")
     adelantos_tot = suma_col(adelantos_df, "monto")
+    utilidad_bruta = obtener_utilidad_bruta_periodo(ventas_df)
+    if utilidad_bruta == 0 and utilidad_bruta_manual:
+        utilidad_bruta = float(utilidad_bruta_manual)
 
     utilidad_neta = (
-        float(utilidad_bruta_manual)
+        float(utilidad_bruta)
         - gastos_fijos
         - gastos_variables
         - empleados_fijos
@@ -1248,7 +1262,7 @@ def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0)
         "adelantos": adelantos_tot,
         "perdidas": perdidas_tot,
         "retiros_dueno": retiros_tot,
-        "utilidad_bruta": float(utilidad_bruta_manual),
+        "utilidad_bruta": float(utilidad_bruta),
         "utilidad_neta": utilidad_neta,
         "dueno_65": utilidad_neta * 0.65,
         "gerente_35": utilidad_neta * 0.35,
@@ -1538,7 +1552,7 @@ if menu == "Dashboard":
     perdidas_tot = suma_col(perdidas_df, "valor")
     retiros_tot = suma_col(dueno_df, "monto")
 
-    utilidad_bruta = st.number_input("Utilidad bruta manual", min_value=0.0, step=1.0, key="dash_utilidad_bruta")
+    utilidad_bruta = obtener_utilidad_bruta_periodo(ventas_df)
     utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
 
     dueno_65 = utilidad_neta * 0.65
@@ -3097,7 +3111,7 @@ elif menu == "Estado de Resultados":
 
     ventas_tot = suma_col(ventas_df, "total")
     compras_tot = suma_col(compras_df, "monto")
-    utilidad_bruta = st.number_input("Utilidad bruta manual", min_value=0.0, step=1.0, key="er_utilidad_bruta")
+    utilidad_bruta = obtener_utilidad_bruta_periodo(ventas_df)
     costo_ventas = 0.0
     gastos_fijos, gastos_variables = obtener_gastos_fijos_variables(DATA["gastos"], desde, hasta)
     empleados_fijos = obtener_empleados_fijos_periodo(DATA["empleados"], desde, hasta)
@@ -3173,7 +3187,7 @@ elif menu == "Reportes":
         desde, hasta = rango_periodo(tipo_reporte)
         st.caption(f"Período seleccionado: {desde} a {hasta}")
 
-    utilidad_bruta_manual = st.number_input("Utilidad bruta manual del período", min_value=0.0, step=1.0, key="rep_utilidad_bruta")
+    utilidad_bruta_manual = st.number_input("Utilidad bruta manual del período (solo respaldo)", min_value=0.0, step=1.0, key="rep_utilidad_bruta")
     resumen = resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual)
 
     tabla_resumen = pd.DataFrame(
