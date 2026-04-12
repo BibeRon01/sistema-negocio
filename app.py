@@ -159,6 +159,12 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
         editable_cols = [c for c in df_local.columns if c not in excluir]
         nuevos_datos = {}
         cols = st.columns(2)
+        campos_numericos_forzados = {
+            "sueldo", "dia_pago_1", "dia_pago_2", "monto", "cantidad", "costo", "precio",
+            "total", "subtotal", "descuento", "recargo", "limite_credito", "balance_pendiente",
+            "impuesto", "costo_unitario", "precio_unitario", "valor", "existencia_sistema",
+            "existencia_fisica", "diferencia"
+        }
         for i, col in enumerate(editable_cols):
             valor = valor_simple(fila.get(col))
             cont = cols[i % 2]
@@ -167,8 +173,18 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
                     nuevos_datos[col] = st.checkbox(col, value=bool(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
                 else:
                     num = limpiar_numero(valor)
-                    if num is not None and col not in ["telefono", "rnc", "cedula_rnc", "codigo", "ncf"]:
-                        nuevos_datos[col] = st.number_input(col, value=float(num), step=1.0, key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+                    es_numerico = (
+                        (num is not None and col not in ["telefono", "rnc", "cedula_rnc", "codigo", "ncf"])
+                        or col in campos_numericos_forzados
+                    )
+                    if es_numerico:
+                        valor_num = float(num) if num is not None else 0.0
+                        nuevos_datos[col] = st.number_input(
+                            col,
+                            value=valor_num,
+                            step=1.0,
+                            key=f"crud_{nombre_tabla}_{col}_{fila_id}"
+                        )
                     else:
                         if "fecha" in col.lower():
                             fecha_val = pd.to_datetime(valor, errors="coerce")
@@ -1696,6 +1712,10 @@ elif menu == "Productos":
                             if "stock" in existente.index:
                                 payload["stock"] = float(nueva_cant)
                         actualizar("productos", existente["id"], payload)
+                        prod_sync = refrescar_producto_por_id(existente["id"])
+                        if prod_sync is None:
+                            prod_sync = existente
+                        sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
                     else:
                         payload = {
                             "fecha": fecha_row,
@@ -1712,6 +1732,9 @@ elif menu == "Productos":
                         if "stock" in DATA["productos"].columns:
                             payload["stock"] = float(cantidad)
                         insertar("productos", payload)
+                        prod_sync = get_producto_por_codigo(codigo) if codigo else get_producto_por_nombre(nombre)
+                        if prod_sync is not None:
+                            sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
                     procesados += 1
                 st.success(f"Se procesaron {procesados} productos.")
                 st.rerun()
@@ -1760,11 +1783,18 @@ elif menu == "Productos":
                 if existente is not None:
                     ok = actualizar("productos", existente["id"], payload)
                     if ok:
+                        prod_sync = refrescar_producto_por_id(existente["id"])
+                        if prod_sync is None:
+                            prod_sync = existente
+                        sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto actualizado sin duplicarse.")
                         st.rerun()
                 else:
                     ok = insertar("productos", payload)
                     if ok:
+                        prod_sync = get_producto_por_codigo(limpiar_texto(codigo)) if limpiar_texto(codigo) else get_producto_por_nombre(limpiar_texto(nombre))
+                        if prod_sync is not None:
+                            sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
                         st.success("Producto creado.")
                         st.rerun()
 
@@ -2897,26 +2927,30 @@ elif menu == "Empleados":
             nombre = st.text_input("Nombre", key="emp_nombre")
             puesto = st.text_input("Puesto", key="emp_puesto")
             sueldo = st.number_input("Sueldo", min_value=0.0, step=1.0, key="emp_sueldo")
+            metodo_pago = st.selectbox("Método de pago", ["", "efectivo", "transferencia", "tarjeta"], key="emp_metodo_pago")
         with c2:
             tipo_salario = st.selectbox("Tipo salario", ["fijo", "variable"], key="emp_tipo_salario")
             frecuencia_pago = st.selectbox("Frecuencia pago", ["mensual", "quincenal", "semanal"], key="emp_frec")
+            dia_pago_1 = st.number_input("Día pago 1", min_value=0.0, step=1.0, value=0.0, key="emp_dia_pago_1")
+            dia_pago_2 = st.number_input("Día pago 2", min_value=0.0, step=1.0, value=0.0, key="emp_dia_pago_2")
             activo = st.checkbox("Activo", value=True, key="emp_activo")
             observacion = st.text_area("Observación", key="emp_obs")
 
         if st.button("Guardar empleado"):
-            if insertar(
-                "empleados",
-                {
-                    "fecha": str(fecha),
-                    "nombre": nombre,
-                    "puesto": puesto,
-                    "sueldo": float(sueldo),
-                    "tipo_salario": tipo_salario,
-                    "frecuencia_pago": frecuencia_pago,
-                    "activo": activo,
-                    "observacion": observacion,
-                },
-            ):
+            payload_empleado = {
+                "fecha": str(fecha),
+                "nombre": nombre,
+                "puesto": puesto,
+                "sueldo": float(sueldo),
+                "tipo_salario": tipo_salario,
+                "frecuencia_pago": frecuencia_pago,
+                "metodo_pago": metodo_pago or None,
+                "dia_pago_1": None if float(dia_pago_1) == 0 else float(dia_pago_1),
+                "dia_pago_2": None if float(dia_pago_2) == 0 else float(dia_pago_2),
+                "activo": activo,
+                "observacion": observacion,
+            }
+            if insertar("empleados", payload_empleado):
                 st.success("Empleado guardado.")
                 st.rerun()
 
@@ -3490,6 +3524,10 @@ elif menu == "POS":
                             if producto_tiene_inventario(prod):
                                 nueva_cant = max(obtener_existencia_producto(prod) - float(item["cantidad"]), 0.0)
                                 actualizar_existencia_producto(prod, nueva_cant)
+                                prod_sync = refrescar_producto_por_id(prod["id"])
+                                if prod_sync is None:
+                                    prod_sync = prod
+                                sincronizar_producto_inventario(prod_sync, ahora_str(), f"Salida por venta {venta_id}")
                                 aplicar_consumo_fifo(movimientos_fifo)
                                 registrar_movimiento_inventario(prod["id"], obtener_nombre_producto(prod), "salida_venta", "ventas", venta_id, -float(item["cantidad"]), costo_unit, "Salida por venta POS")
                         pagos = {"efectivo": pago_efectivo, "transferencia": pago_transferencia, "tarjeta": pago_tarjeta, "credito": pago_credito}
