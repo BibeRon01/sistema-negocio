@@ -1109,48 +1109,66 @@ def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdid
 
 
 def obtener_empleados_fijos_periodo(empleados_df: pd.DataFrame, desde, hasta) -> float:
-    if empleados_df.empty:
+    """
+    Empleados es solo catálogo/registro. El sueldo mensual NO se resta automáticamente.
+    Solo se toma como gasto cuando se registra un pago real en adelantos_empleados
+    con tipo_pago/concepto fijo, quincena, nómina, salario o sueldo.
+    """
+    pagos = DATA.get("adelantos_empleados", pd.DataFrame()).copy()
+    if pagos.empty:
         return 0.0
 
-    total = 0.0
-    meses = pd.period_range(pd.to_datetime(desde), pd.to_datetime(hasta), freq="M")
+    pagos_f = filtrar_por_fechas(pagos, desde, hasta).copy()
+    if pagos_f.empty:
+        return 0.0
 
-    for _, row in empleados_df.iterrows():
-        activo = str(row.get("activo", True)).lower() not in ["false", "0", "no"]
-        if not activo:
-            continue
+    if "tipo_pago" in pagos_f.columns:
+        tipo = pagos_f["tipo_pago"].astype(str).apply(normalizar_texto)
+    elif "concepto" in pagos_f.columns:
+        tipo = pagos_f["concepto"].astype(str).apply(normalizar_texto)
+    else:
+        tipo = pd.Series(["salario"] * len(pagos_f), index=pagos_f.index)
 
-        tipo_salario = normalizar_texto(row.get("tipo_salario", "fijo"))
-        if tipo_salario != "fijo":
-            continue
+    pagos_f = pagos_f[
+        tipo.isin(["fijo", "nomina", "nómina", "salario", "sueldo", "quincena", "mensual"])
+    ]
 
-        sueldo = limpiar_numero(row.get("sueldo")) or 0
-        frecuencia = normalizar_texto(row.get("frecuencia_pago", "mensual"))
-
-        for _ in meses:
-            if frecuencia == "quincenal":
-                total += sueldo * 2
-            elif frecuencia == "semanal":
-                total += sueldo * 4
-            else:
-                total += sueldo
-
-    adelantos = DATA["adelantos_empleados"]
-    adel_f = filtrar_por_fechas(adelantos, desde, hasta)
-    total_adelantos = suma_col(adel_f, "monto")
-    return float(max(total - total_adelantos, 0))
+    return suma_col(pagos_f, "monto")
 
 
 
 def obtener_empleados_variables_periodo(gastos_df: pd.DataFrame, desde, hasta) -> float:
-    if gastos_df.empty or "categoria" not in gastos_df.columns:
-        return 0.0
-    temp = filtrar_por_fechas(gastos_df, desde, hasta).copy()
-    if temp.empty:
-        return 0.0
-    temp["categoria"] = temp["categoria"].astype(str).apply(normalizar_texto)
-    temp = temp[temp["categoria"] == "nomina variable"]
-    return suma_col(temp, "monto")
+    """
+    Comisiones y pagos variables solo se descuentan cuando se registran como pago real.
+    Toma pagos desde adelantos_empleados con tipo_pago/concepto variable, comisión o bono.
+    También conserva compatibilidad con gastos categoría 'nomina variable'.
+    """
+    total = 0.0
+
+    pagos = DATA.get("adelantos_empleados", pd.DataFrame()).copy()
+    if not pagos.empty:
+        pagos_f = filtrar_por_fechas(pagos, desde, hasta).copy()
+        if not pagos_f.empty:
+            if "tipo_pago" in pagos_f.columns:
+                tipo = pagos_f["tipo_pago"].astype(str).apply(normalizar_texto)
+            elif "concepto" in pagos_f.columns:
+                tipo = pagos_f["concepto"].astype(str).apply(normalizar_texto)
+            else:
+                tipo = pd.Series([""] * len(pagos_f), index=pagos_f.index)
+
+            pagos_var = pagos_f[
+                tipo.isin(["variable", "comision", "comisión", "bono", "incentivo"])
+            ]
+            total += suma_col(pagos_var, "monto")
+
+    if not gastos_df.empty and "categoria" in gastos_df.columns:
+        temp = filtrar_por_fechas(gastos_df, desde, hasta).copy()
+        if not temp.empty:
+            temp["categoria"] = temp["categoria"].astype(str).apply(normalizar_texto)
+            temp = temp[temp["categoria"] == "nomina variable"]
+            total += suma_col(temp, "monto")
+
+    return float(total)
 
 
 
@@ -2969,38 +2987,52 @@ elif menu == "Empleados":
 # ADELANTOS EMPLEADOS
 # =========================================================
 elif menu == "Adelantos Empleados":
-    st.title("💵 Adelantos a Empleados")
+    st.title("💵 Pagos / Adelantos a Empleados")
+    st.caption("El sueldo registrado en Empleados es solo informativo. Solo afecta la utilidad cuando registras un pago real aquí.")
 
     nombres_empleados = DATA["empleados"]["nombre"].astype(str).tolist() if not DATA["empleados"].empty and "nombre" in DATA["empleados"].columns else []
 
-    with st.expander("➕ Registrar adelanto", expanded=True):
-        c1, c2 = st.columns(2)
+    with st.expander("➕ Registrar pago real", expanded=True):
+        c1, c2, c3 = st.columns(3)
         with c1:
-            fecha = st.date_input("Fecha", value=date.today(), key="adel_fecha")
+            fecha = st.date_input("Fecha de pago", value=date.today(), key="adel_fecha")
             empleado = st.selectbox("Empleado", nombres_empleados, key="adel_emp") if nombres_empleados else st.text_input("Empleado", key="adel_emp_txt")
         with c2:
-            monto = st.number_input("Monto", min_value=0.0, step=1.0, key="adel_monto")
-            detalle = st.text_area("Detalle", key="adel_detalle")
+            tipo_pago = st.selectbox(
+                "Tipo de pago",
+                ["salario", "quincena", "comisión", "bono", "adelanto", "otro"],
+                key="adel_tipo_pago"
+            )
+            monto = st.number_input("Monto pagado", min_value=0.0, step=1.0, key="adel_monto")
+        with c3:
+            metodo_pago = st.selectbox("Método de pago", ["efectivo", "transferencia", "tarjeta"], key="adel_metodo_pago")
+            detalle = st.text_area("Detalle / observación", key="adel_detalle")
 
-        if st.button("Guardar adelanto"):
-            if insertar(
-                "adelantos_empleados",
-                {"fecha": str(fecha), "empleado": empleado, "monto": float(monto), "detalle": detalle},
-            ):
-                st.success("Adelanto guardado.")
+        if st.button("Guardar pago"):
+            payload_pago = {
+                "fecha": str(fecha),
+                "empleado": empleado,
+                "monto": float(monto),
+                "tipo_pago": tipo_pago,
+                "metodo_pago": metodo_pago,
+                "detalle": detalle,
+            }
+            if insertar("adelantos_empleados", payload_pago):
+                st.success("Pago guardado. Ahora sí afecta el Dashboard según el tipo de pago.")
                 st.rerun()
 
     df = DATA["adelantos_empleados"].copy()
     if not df.empty:
         d1, d2 = rango_fechas_ui("adelantos")
         df = filtrar_por_fechas(df, d1, d2)
-        txt = st.text_input("Buscar adelanto", key="buscar_adel")
+        txt = st.text_input("Buscar pago", key="buscar_adel")
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
-        descargar_archivos(df, "adelantos_empleados")
-        render_crud_generico("adelantos_empleados", df, "🛠️ Editar / eliminar adelantos")
+        descargar_archivos(df, "pagos_empleados")
+        render_crud_generico("adelantos_empleados", df, "🛠️ Editar / eliminar pagos de empleados")
     else:
-        st.info("No hay adelantos registrados.")
+        st.info("No hay pagos registrados.")
+
 
 
 # =========================================================
