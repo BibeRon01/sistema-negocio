@@ -1108,68 +1108,70 @@ def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdid
 
 
 
+
+def leer_pagos_empleados_actualizados() -> pd.DataFrame:
+    """Lee los pagos de empleados directamente desde Supabase para que el Dashboard se actualice en vivo."""
+    try:
+        resp = supabase.table("adelantos_empleados").select("*").execute()
+        df = pd.DataFrame(resp.data or [])
+        if not df.empty and "fecha" in df.columns:
+            df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+        return df
+    except Exception:
+        return DATA.get("adelantos_empleados", pd.DataFrame()).copy()
+
+
+def obtener_texto_clasificacion_pago(df: pd.DataFrame) -> pd.Series:
+    texto = pd.Series([""] * len(df), index=df.index)
+    for col in ["tipo_pago", "concepto", "detalle", "observacion", "descripción", "descripcion", "tipo", "categoria"]:
+        if col in df.columns:
+            texto = texto + " " + df[col].astype(str)
+    return texto.apply(normalizar_texto)
+
+
 def obtener_empleados_fijos_periodo(empleados_df: pd.DataFrame, desde, hasta) -> float:
     """
     Empleados es solo catálogo. El sueldo mensual NO se resta automáticamente.
-    Aquí solo se suman pagos reales hechos al empleado:
-    salario, sueldo, quincena, nómina, mensual o fijo.
-    Si no existe tipo_pago/concepto, se revisa detalle.
+    El Dashboard suma únicamente pagos reales registrados en adelantos_empleados.
+    Lee directamente desde Supabase para actualizarse en vivo.
     """
-    pagos = DATA.get("adelantos_empleados", pd.DataFrame()).copy()
+    pagos = leer_pagos_empleados_actualizados()
     if pagos.empty:
         return 0.0
 
     pagos_f = filtrar_por_fechas(pagos, desde, hasta).copy()
-    if pagos_f.empty:
+    if pagos_f.empty or "monto" not in pagos_f.columns:
         return 0.0
 
-    # Normalizar monto
-    if "monto" not in pagos_f.columns:
-        return 0.0
     pagos_f["monto"] = pd.to_numeric(pagos_f["monto"], errors="coerce").fillna(0)
+    texto = obtener_texto_clasificacion_pago(pagos_f)
 
-    texto_clasificacion = pd.Series([""] * len(pagos_f), index=pagos_f.index)
+    mask_variable = texto.str.contains("variable|comision|comisión|bono|incentivo", na=False)
+    mask_fijo = texto.str.contains("salario|sueldo|quincena|nomina|nómina|mensual|fijo|primera|segunda", na=False)
 
-    for col in ["tipo_pago", "concepto", "detalle", "observacion", "descripción", "descripcion"]:
-        if col in pagos_f.columns:
-            texto_clasificacion = texto_clasificacion + " " + pagos_f[col].astype(str)
+    # Si el pago no dice comisión/bono/variable, lo tratamos como pago fijo de nómina.
+    # Esto garantiza que una quincena de RD$6,000 se refleje aunque Supabase no tenga tipo_pago.
+    mask_sin_clasificar = ~(mask_variable)
+    mask_final = mask_fijo | mask_sin_clasificar
 
-    texto_clasificacion = texto_clasificacion.apply(normalizar_texto)
-
-    # Si la fila dice salario/quincena/nómina/fijo, cuenta como empleado fijo.
-    mask_fijo = texto_clasificacion.str.contains(
-        "salario|sueldo|quincena|nomina|mensual|fijo|primera quincena|segunda quincena",
-        na=False
-    )
-
-    # Compatibilidad: si no hay ninguna clasificación, asumimos que los pagos registrados aquí son salario fijo.
-    if not mask_fijo.any() and not texto_clasificacion.str.strip().any():
-        mask_fijo = pd.Series([True] * len(pagos_f), index=pagos_f.index)
-
-    return float(pagos_f.loc[mask_fijo, "monto"].sum())
+    return float(pagos_f.loc[mask_final, "monto"].sum())
 
 
 
 def obtener_empleados_variables_periodo(gastos_df: pd.DataFrame, desde, hasta) -> float:
     """
-    Solo se suman pagos variables reales:
-    comisión, bono, incentivo o variable.
+    Suma solo pagos variables reales: comisión, bono, incentivo o variable.
+    Lee directamente desde Supabase para actualizarse en vivo.
     """
     total = 0.0
 
-    pagos = DATA.get("adelantos_empleados", pd.DataFrame()).copy()
+    pagos = leer_pagos_empleados_actualizados()
     if not pagos.empty:
         pagos_f = filtrar_por_fechas(pagos, desde, hasta).copy()
         if not pagos_f.empty and "monto" in pagos_f.columns:
             pagos_f["monto"] = pd.to_numeric(pagos_f["monto"], errors="coerce").fillna(0)
-
-            texto_clasificacion = pd.Series([""] * len(pagos_f), index=pagos_f.index)
-            for col in ["tipo_pago", "concepto", "detalle", "observacion", "descripción", "descripcion"]:
-                if col in pagos_f.columns:
-                    texto_clasificacion = texto_clasificacion + " " + pagos_f[col].astype(str)
-
-            texto_clasificacion = texto_clasificacion.apply(normalizar_texto)
-            mask_var = texto_clasificacion.str.contains("variable|comision|bono|incentivo", na=False)
+            texto = obtener_texto_clasificacion_pago(pagos_f)
+            mask_var = texto.str.contains("variable|comision|comisión|bono|incentivo", na=False)
             total += float(pagos_f.loc[mask_var, "monto"].sum())
 
     if not gastos_df.empty and "categoria" in gastos_df.columns:
@@ -1622,7 +1624,14 @@ if menu == "Dashboard":
     c2.metric("Compras", f"RD$ {compras_tot:,.2f}")
     c3.metric("Pérdidas", f"RD$ {perdidas_tot:,.2f}")
 
-    adelantos_tot = suma_col(filtrar_por_fechas(DATA["adelantos_empleados"], desde, hasta), "monto")
+    pagos_empleados_debug = filtrar_por_fechas(leer_pagos_empleados_actualizados(), desde, hasta)
+    adelantos_tot = suma_col(pagos_empleados_debug, "monto")
+
+    with st.expander("🔎 Ver pagos de empleados tomados para Dashboard", expanded=False):
+        if pagos_empleados_debug.empty:
+            st.info("No hay pagos de empleados en este rango.")
+        else:
+            st.dataframe(pagos_empleados_debug, use_container_width=True)
     c4, c5, c6 = st.columns(3)
     c4.metric("Gastos fijos", f"RD$ {gastos_fijos:,.2f}")
     c5.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
