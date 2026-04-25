@@ -1110,9 +1110,10 @@ def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdid
 
 def obtener_empleados_fijos_periodo(empleados_df: pd.DataFrame, desde, hasta) -> float:
     """
-    Empleados es solo catálogo/registro. El sueldo mensual NO se resta automáticamente.
-    Solo se toma como gasto cuando se registra un pago real en adelantos_empleados.
-    Si la tabla no tiene tipo_pago, se lee desde detalle.
+    Empleados es solo catálogo. El sueldo mensual NO se resta automáticamente.
+    Aquí solo se suman pagos reales hechos al empleado:
+    salario, sueldo, quincena, nómina, mensual o fijo.
+    Si no existe tipo_pago/concepto, se revisa detalle.
     """
     pagos = DATA.get("adelantos_empleados", pd.DataFrame()).copy()
     if pagos.empty:
@@ -1122,47 +1123,54 @@ def obtener_empleados_fijos_periodo(empleados_df: pd.DataFrame, desde, hasta) ->
     if pagos_f.empty:
         return 0.0
 
-    if "tipo_pago" in pagos_f.columns:
-        tipo = pagos_f["tipo_pago"].astype(str).apply(normalizar_texto)
-    elif "concepto" in pagos_f.columns:
-        tipo = pagos_f["concepto"].astype(str).apply(normalizar_texto)
-    elif "detalle" in pagos_f.columns:
-        tipo = pagos_f["detalle"].astype(str).apply(normalizar_texto)
-    else:
-        tipo = pd.Series(["salario"] * len(pagos_f), index=pagos_f.index)
+    # Normalizar monto
+    if "monto" not in pagos_f.columns:
+        return 0.0
+    pagos_f["monto"] = pd.to_numeric(pagos_f["monto"], errors="coerce").fillna(0)
 
-    pagos_f = pagos_f[
-        tipo.str.contains("salario|sueldo|quincena|nomina|nómina|mensual|fijo", na=False)
-    ]
+    texto_clasificacion = pd.Series([""] * len(pagos_f), index=pagos_f.index)
 
-    return suma_col(pagos_f, "monto")
+    for col in ["tipo_pago", "concepto", "detalle", "observacion", "descripción", "descripcion"]:
+        if col in pagos_f.columns:
+            texto_clasificacion = texto_clasificacion + " " + pagos_f[col].astype(str)
+
+    texto_clasificacion = texto_clasificacion.apply(normalizar_texto)
+
+    # Si la fila dice salario/quincena/nómina/fijo, cuenta como empleado fijo.
+    mask_fijo = texto_clasificacion.str.contains(
+        "salario|sueldo|quincena|nomina|mensual|fijo|primera quincena|segunda quincena",
+        na=False
+    )
+
+    # Compatibilidad: si no hay ninguna clasificación, asumimos que los pagos registrados aquí son salario fijo.
+    if not mask_fijo.any() and not texto_clasificacion.str.strip().any():
+        mask_fijo = pd.Series([True] * len(pagos_f), index=pagos_f.index)
+
+    return float(pagos_f.loc[mask_fijo, "monto"].sum())
 
 
 
 def obtener_empleados_variables_periodo(gastos_df: pd.DataFrame, desde, hasta) -> float:
     """
-    Comisiones y pagos variables solo se descuentan cuando se registran como pago real.
-    Si la tabla no tiene tipo_pago, se lee desde detalle.
+    Solo se suman pagos variables reales:
+    comisión, bono, incentivo o variable.
     """
     total = 0.0
 
     pagos = DATA.get("adelantos_empleados", pd.DataFrame()).copy()
     if not pagos.empty:
         pagos_f = filtrar_por_fechas(pagos, desde, hasta).copy()
-        if not pagos_f.empty:
-            if "tipo_pago" in pagos_f.columns:
-                tipo = pagos_f["tipo_pago"].astype(str).apply(normalizar_texto)
-            elif "concepto" in pagos_f.columns:
-                tipo = pagos_f["concepto"].astype(str).apply(normalizar_texto)
-            elif "detalle" in pagos_f.columns:
-                tipo = pagos_f["detalle"].astype(str).apply(normalizar_texto)
-            else:
-                tipo = pd.Series([""] * len(pagos_f), index=pagos_f.index)
+        if not pagos_f.empty and "monto" in pagos_f.columns:
+            pagos_f["monto"] = pd.to_numeric(pagos_f["monto"], errors="coerce").fillna(0)
 
-            pagos_var = pagos_f[
-                tipo.str.contains("variable|comision|comisión|bono|incentivo", na=False)
-            ]
-            total += suma_col(pagos_var, "monto")
+            texto_clasificacion = pd.Series([""] * len(pagos_f), index=pagos_f.index)
+            for col in ["tipo_pago", "concepto", "detalle", "observacion", "descripción", "descripcion"]:
+                if col in pagos_f.columns:
+                    texto_clasificacion = texto_clasificacion + " " + pagos_f[col].astype(str)
+
+            texto_clasificacion = texto_clasificacion.apply(normalizar_texto)
+            mask_var = texto_clasificacion.str.contains("variable|comision|bono|incentivo", na=False)
+            total += float(pagos_f.loc[mask_var, "monto"].sum())
 
     if not gastos_df.empty and "categoria" in gastos_df.columns:
         temp = filtrar_por_fechas(gastos_df, desde, hasta).copy()
@@ -1621,8 +1629,8 @@ if menu == "Dashboard":
     c6.metric("Retiros dueño", f"RD$ {retiros_tot:,.2f}")
 
     c7, c8, c9 = st.columns(3)
-    c7.metric("Empleados fijos", f"RD$ {empleados_fijos:,.2f}")
-    c8.metric("Empleados variables", f"RD$ {empleados_variables:,.2f}")
+    c7.metric("Empleados fijos pagados", f"RD$ {empleados_fijos:,.2f}")
+    c8.metric("Empleados variables pagados", f"RD$ {empleados_variables:,.2f}")
     c9.metric("Adelantos", f"RD$ {adelantos_tot:,.2f}")
 
     c10, c11, c12, c13 = st.columns(4)
