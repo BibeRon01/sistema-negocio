@@ -1617,6 +1617,48 @@ def lanzar_impresion_navegador(html_doc: str):
     </html>
     """
     components.html(html_js, height=0, width=0)
+
+def sincronizar_todos_productos_a_inventario(fecha_mov=None) -> tuple[int, int]:
+    """
+    Crea o actualiza Inventario Actual para productos viejos que solo existen en Productos.
+    No duplica: usa upsert_inventario_actual por nombre del producto.
+    """
+    if fecha_mov is None:
+        fecha_mov = date.today()
+
+    productos_df = DATA.get("productos", pd.DataFrame()).copy()
+    if productos_df.empty:
+        return 0, 0
+
+    creados_actualizados = 0
+    errores = 0
+
+    for _, row in productos_df.iterrows():
+        try:
+            nombre = obtener_nombre_producto(row)
+            if not nombre:
+                continue
+            costo = float(limpiar_numero(row.get("costo")) or limpiar_numero(row.get("costo_unitario")) or 0)
+            precio = float(limpiar_numero(row.get("precio")) or limpiar_numero(row.get("precio_unitario")) or 0)
+            existencia = float(obtener_existencia_producto(row))
+            ok = upsert_inventario_actual(
+                nombre,
+                costo,
+                precio,
+                existencia,
+                fecha_mov,
+                "Sincronizado desde productos viejos"
+            )
+            if ok:
+                creados_actualizados += 1
+            else:
+                errores += 1
+        except Exception:
+            errores += 1
+
+    return creados_actualizados, errores
+
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1944,7 +1986,18 @@ elif menu == "Productos":
 elif menu == "Inventario Actual":
     st.title("📊 Inventario Actual")
 
-    with st.expander("📥 Subir Excel / CSV de inventario actual", expanded=True):
+    with st.expander("🔄 Sincronizar productos viejos al inventario", expanded=True):
+        st.write("Usa esta opción para enviar a Inventario Actual los productos que ya estaban registrados antes y no aparecen en inventario.")
+        fecha_sync = st.date_input("Fecha de sincronización", value=date.today(), key="fecha_sync_inv_actual")
+        if st.button("Enviar todos los productos a Inventario Actual", key="btn_sync_productos_inv_actual"):
+            ok_count, err_count = sincronizar_todos_productos_a_inventario(fecha_sync)
+            if err_count == 0:
+                st.success(f"Inventario sincronizado correctamente. Productos procesados: {ok_count}.")
+            else:
+                st.warning(f"Productos procesados: {ok_count}. Con errores: {err_count}.")
+            st.rerun()
+
+    with st.expander("📥 Subir Excel / CSV de inventario actual", expanded=False):
         st.write("Columnas esperadas: nombre o producto, cantidad o existencia_sistema. Costo y precio opcionales.")
         archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_inventario")
         fecha_inv = st.date_input("Fecha del inventario", value=date.today(), key="fecha_inv_actual")
@@ -3214,6 +3267,8 @@ elif menu == "Pérdidas":
             observacion = st.text_area("Observación", key="perd_obs")
 
         nueva_existencia = max(float(existencia_actual) - float(cantidad), 0.0)
+        if existencia_actual <= 0 and producto:
+            st.warning("Este producto no aparece con existencia en Inventario Actual. Si es un producto viejo, primero sincronízalo desde Inventario Actual.")
         st.info(f"Si aplicas al inventario, la existencia bajará de {existencia_actual:,.0f} a {nueva_existencia:,.0f}.")
 
         b1, b2 = st.columns(2)
