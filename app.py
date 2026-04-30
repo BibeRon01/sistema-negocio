@@ -1089,6 +1089,100 @@ def anular_venta_completa_app(venta_id: Any, motivo: str = "") -> bool:
         st.error(f"No se pudo anular la venta completa: {exc}")
         return False
 
+
+def obtener_costo_desde_inventario(producto: str) -> float:
+    """
+    Para pérdidas, toma el costo en vivo desde Supabase.
+    Prioridad:
+    1) inventario_actual: costo / costo_unitario / costo_promedio / precio_compra
+    2) productos: costo / costo_unitario / costo_promedio / precio_compra
+    """
+    producto_n = normalizar_texto(producto)
+    if not producto_n:
+        return 0.0
+
+    # 1) Buscar en inventario_actual en vivo
+    try:
+        resp = supabase.table("inventario_actual").select("*").execute()
+        invent = pd.DataFrame(resp.data or [])
+    except Exception:
+        invent = DATA.get("inventario_actual", pd.DataFrame()).copy()
+
+    if not invent.empty and "producto" in invent.columns:
+        tmp = invent.copy()
+        tmp["_n"] = tmp["producto"].astype(str).apply(normalizar_texto)
+        match = tmp[tmp["_n"] == producto_n]
+        if not match.empty:
+            if "fecha" in match.columns:
+                match = match.copy()
+                match["fecha"] = pd.to_datetime(match["fecha"], errors="coerce")
+                match = match.sort_values("fecha", ascending=False)
+            fila_inv = match.iloc[0]
+            for campo in ["costo", "costo_unitario", "costo_promedio", "precio_compra", "ultimo_costo"]:
+                if campo in fila_inv.index:
+                    costo = limpiar_numero(fila_inv.get(campo))
+                    if costo is not None and costo > 0:
+                        return float(costo)
+
+    # 2) Buscar en productos en vivo
+    try:
+        resp = supabase.table("productos").select("*").execute()
+        productos = pd.DataFrame(resp.data or [])
+    except Exception:
+        productos = DATA.get("productos", pd.DataFrame()).copy()
+
+    if not productos.empty and "nombre" in productos.columns:
+        tmp = productos.copy()
+        tmp["_n"] = tmp["nombre"].astype(str).apply(normalizar_texto)
+        match = tmp[tmp["_n"] == producto_n]
+        if not match.empty:
+            fila_prod = match.iloc[0]
+            for campo in ["costo", "costo_unitario", "costo_promedio", "precio_compra", "ultimo_costo"]:
+                if campo in fila_prod.index:
+                    costo = limpiar_numero(fila_prod.get(campo))
+                    if costo is not None and costo > 0:
+                        return float(costo)
+
+    return 0.0
+
+
+def obtener_existencia_desde_inventario(producto: str) -> float:
+    """
+    Toma la existencia en vivo desde inventario_actual.
+    Si no aparece, usa productos como respaldo.
+    """
+    producto_n = normalizar_texto(producto)
+    if not producto_n:
+        return 0.0
+
+    try:
+        resp = supabase.table("inventario_actual").select("*").execute()
+        invent = pd.DataFrame(resp.data or [])
+    except Exception:
+        invent = DATA.get("inventario_actual", pd.DataFrame()).copy()
+
+    if not invent.empty and "producto" in invent.columns:
+        tmp = invent.copy()
+        tmp["_n"] = tmp["producto"].astype(str).apply(normalizar_texto)
+        match = tmp[tmp["_n"] == producto_n]
+        if not match.empty:
+            if "fecha" in match.columns:
+                match = match.copy()
+                match["fecha"] = pd.to_datetime(match["fecha"], errors="coerce")
+                match = match.sort_values("fecha", ascending=False)
+            fila_inv = match.iloc[0]
+            for campo in ["existencia_sistema", "cantidad", "stock", "existencias"]:
+                if campo in fila_inv.index:
+                    existencia = limpiar_numero(fila_inv.get(campo))
+                    if existencia is not None:
+                        return float(existencia)
+
+    prod = get_producto_por_nombre(producto)
+    if prod is not None:
+        return float(obtener_existencia_producto(prod))
+
+    return 0.0
+
 def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdida, observacion="") -> bool:
     cantidad = float(cantidad)
     costo_unitario = float(costo_unitario)
@@ -3082,24 +3176,68 @@ elif menu == "Pagos Empleados":
 # =========================================================
 elif menu == "Pérdidas":
     st.title("📉 Pérdidas")
+    st.caption("El costo unitario se toma automáticamente desde Inventario Actual. Si no existe, usa Productos como respaldo.")
 
     productos_lista = DATA["productos"]["nombre"].astype(str).tolist() if not DATA["productos"].empty and "nombre" in DATA["productos"].columns else []
 
     with st.expander("➕ Registrar pérdida", expanded=True):
         c1, c2 = st.columns(2)
+
         with c1:
             fecha = st.date_input("Fecha", value=date.today(), key="perd_fecha")
             producto = st.selectbox("Producto", productos_lista, key="perd_prod") if productos_lista else st.text_input("Producto", key="perd_prod_txt")
-            cantidad = st.number_input("Cantidad", min_value=0.0, step=1.0, key="perd_cant")
+            existencia_actual = obtener_existencia_desde_inventario(producto) if producto else 0.0
+            st.number_input(
+                "Existencia actual en inventario",
+                value=float(existencia_actual),
+                step=1.0,
+                disabled=True,
+                key="perd_existencia_actual"
+            )
+            cantidad = st.number_input("Cantidad perdida", min_value=0.0, step=1.0, key="perd_cant")
+
         with c2:
-            costo_unitario = st.number_input("Costo unitario", min_value=0.0, step=1.0, key="perd_costo")
+            costo_auto = obtener_costo_desde_inventario(producto) if producto else 0.0
+            costo_unitario = st.number_input(
+                "Costo unitario según inventario",
+                min_value=0.0,
+                step=1.0,
+                value=float(costo_auto),
+                key=f"perd_costo_auto_{normalizar_texto(producto)}"
+            )
             tipo_perdida = st.selectbox("Tipo de pérdida", ["mercancia", "vencimiento", "rotura", "ajuste_mercancia", "otro"], key="perd_tipo")
+            if costo_auto <= 0:
+                st.warning("No encontré costo para este producto en Inventario Actual ni en Productos. Revisa que el costo esté guardado.")
+            valor_perdida = float(cantidad) * float(costo_unitario)
+            st.metric("Valor de la pérdida", f"RD$ {valor_perdida:,.2f}")
             observacion = st.text_area("Observación", key="perd_obs")
 
         if st.button("Guardar pérdida"):
-            if registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, observacion):
-                st.success("Pérdida guardada.")
-                st.rerun()
+            if not limpiar_texto(producto):
+                st.error("Debes seleccionar un producto.")
+            elif cantidad <= 0:
+                st.error("La cantidad perdida debe ser mayor que cero.")
+            elif costo_unitario <= 0:
+                st.error("El costo unitario no puede ser cero. Revisa el costo en Inventario Actual o Productos.")
+            elif cantidad > existencia_actual:
+                st.error("La cantidad perdida no puede ser mayor que la existencia actual.")
+            else:
+                ok_perdida = registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, observacion)
+
+                fila_prod = get_producto_por_nombre(producto)
+                costo = float(costo_unitario)
+                precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
+                nueva_existencia = max(float(existencia_actual) - float(cantidad), 0.0)
+
+                ok_stock = True
+                ok_inv = True
+                if fila_prod is not None:
+                    ok_stock = actualizar_stock_producto(producto, nueva_existencia, fecha)
+                    ok_inv = upsert_inventario_actual(producto, costo, precio, nueva_existencia, fecha, "Ajustado por pérdida de mercancía")
+
+                if ok_perdida and ok_stock and ok_inv:
+                    st.success("Pérdida guardada, inventario actualizado y Dashboard listo para reflejarla.")
+                    st.rerun()
 
     df = DATA["perdidas"].copy()
     if not df.empty:
@@ -3112,6 +3250,7 @@ elif menu == "Pérdidas":
         render_crud_generico("perdidas", df, "🛠️ Editar / eliminar pérdidas")
     else:
         st.info("No hay pérdidas registradas.")
+
 
 
 # =========================================================
