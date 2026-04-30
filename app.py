@@ -3176,11 +3176,11 @@ elif menu == "Pagos Empleados":
 # =========================================================
 elif menu == "Pérdidas":
     st.title("📉 Pérdidas")
-    st.caption("El costo unitario se toma automáticamente desde Inventario Actual. Si no existe, usa Productos como respaldo.")
+    st.caption("El costo unitario se toma automáticamente desde Inventario Actual. Puedes registrar la pérdida sola o registrarla y descontarla del inventario.")
 
     productos_lista = DATA["productos"]["nombre"].astype(str).tolist() if not DATA["productos"].empty and "nombre" in DATA["productos"].columns else []
 
-    with st.expander("➕ Registrar pérdida", expanded=True):
+    with st.expander("➕ Registrar pérdida de mercancía", expanded=True):
         c1, c2 = st.columns(2)
 
         with c1:
@@ -3192,7 +3192,7 @@ elif menu == "Pérdidas":
                 value=float(existencia_actual),
                 step=1.0,
                 disabled=True,
-                key="perd_existencia_actual"
+                key=f"perd_existencia_actual_{normalizar_texto(producto)}"
             )
             cantidad = st.number_input("Cantidad perdida", min_value=0.0, step=1.0, key="perd_cant")
 
@@ -3205,39 +3205,65 @@ elif menu == "Pérdidas":
                 value=float(costo_auto),
                 key=f"perd_costo_auto_{normalizar_texto(producto)}"
             )
-            tipo_perdida = st.selectbox("Tipo de pérdida", ["mercancia", "vencimiento", "rotura", "ajuste_mercancia", "otro"], key="perd_tipo")
             if costo_auto <= 0:
                 st.warning("No encontré costo para este producto en Inventario Actual ni en Productos. Revisa que el costo esté guardado.")
+
+            tipo_perdida = st.selectbox("Tipo de pérdida", ["mercancia", "vencimiento", "rotura", "ajuste_mercancia", "otro"], key="perd_tipo")
             valor_perdida = float(cantidad) * float(costo_unitario)
             st.metric("Valor de la pérdida", f"RD$ {valor_perdida:,.2f}")
             observacion = st.text_area("Observación", key="perd_obs")
 
-        if st.button("Guardar pérdida"):
-            if not limpiar_texto(producto):
-                st.error("Debes seleccionar un producto.")
-            elif cantidad <= 0:
-                st.error("La cantidad perdida debe ser mayor que cero.")
-            elif costo_unitario <= 0:
-                st.error("El costo unitario no puede ser cero. Revisa el costo en Inventario Actual o Productos.")
-            elif cantidad > existencia_actual:
-                st.error("La cantidad perdida no puede ser mayor que la existencia actual.")
-            else:
-                ok_perdida = registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, observacion)
+        nueva_existencia = max(float(existencia_actual) - float(cantidad), 0.0)
+        st.info(f"Si aplicas al inventario, la existencia bajará de {existencia_actual:,.0f} a {nueva_existencia:,.0f}.")
 
-                fila_prod = get_producto_por_nombre(producto)
-                costo = float(costo_unitario)
-                precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
-                nueva_existencia = max(float(existencia_actual) - float(cantidad), 0.0)
+        b1, b2 = st.columns(2)
 
-                ok_stock = True
-                ok_inv = True
-                if fila_prod is not None:
-                    ok_stock = actualizar_stock_producto(producto, nueva_existencia, fecha)
-                    ok_inv = upsert_inventario_actual(producto, costo, precio, nueva_existencia, fecha, "Ajustado por pérdida de mercancía")
+        with b1:
+            if st.button("💾 Guardar pérdida solamente", key="btn_guardar_perdida_sola"):
+                if not limpiar_texto(producto):
+                    st.error("Debes seleccionar un producto.")
+                elif cantidad <= 0:
+                    st.error("La cantidad perdida debe ser mayor que cero.")
+                elif costo_unitario <= 0:
+                    st.error("El costo unitario no puede ser cero. Revisa el costo en Inventario Actual o Productos.")
+                else:
+                    if registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, observacion):
+                        st.success("Pérdida guardada. No se descontó inventario.")
+                        st.rerun()
 
-                if ok_perdida and ok_stock and ok_inv:
-                    st.success("Pérdida guardada, inventario actualizado y Dashboard listo para reflejarla.")
-                    st.rerun()
+        with b2:
+            if st.button("📉 Guardar pérdida y descontar inventario", key="btn_guardar_perdida_descontar"):
+                if not limpiar_texto(producto):
+                    st.error("Debes seleccionar un producto.")
+                elif cantidad <= 0:
+                    st.error("La cantidad perdida debe ser mayor que cero.")
+                elif costo_unitario <= 0:
+                    st.error("El costo unitario no puede ser cero. Revisa el costo en Inventario Actual o Productos.")
+                elif cantidad > existencia_actual:
+                    st.error("La cantidad perdida no puede ser mayor que la existencia actual.")
+                else:
+                    ok_perdida = registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, observacion)
+
+                    fila_prod = get_producto_por_nombre(producto)
+                    costo = float(costo_unitario)
+                    precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
+
+                    ok_stock = True
+                    ok_inv = True
+                    if fila_prod is not None:
+                        ok_stock = actualizar_stock_producto(producto, nueva_existencia, fecha)
+                        ok_inv = upsert_inventario_actual(
+                            producto,
+                            costo,
+                            precio,
+                            nueva_existencia,
+                            fecha,
+                            f"Descontado por pérdida de mercancía. Cantidad perdida: {cantidad}"
+                        )
+
+                    if ok_perdida and ok_stock and ok_inv:
+                        st.success("Pérdida guardada y descontada del inventario correctamente.")
+                        st.rerun()
 
     df = DATA["perdidas"].copy()
     if not df.empty:
