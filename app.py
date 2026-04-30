@@ -1131,9 +1131,9 @@ def obtener_texto_clasificacion_pago(df: pd.DataFrame) -> pd.Series:
 
 def obtener_empleados_fijos_periodo(empleados_df: pd.DataFrame, desde, hasta) -> float:
     """
-    Empleados es solo catálogo. El sueldo mensual NO se resta automáticamente.
-    El Dashboard suma únicamente pagos reales registrados en adelantos_empleados.
-    Lee directamente desde Supabase para actualizarse en vivo.
+    El sueldo del empleado NO se descuenta automático.
+    Solo se suma lo pagado realmente en la tabla adelantos_empleados.
+    Todo pago que no sea comisión/bono/variable se trata como empleado fijo.
     """
     pagos = leer_pagos_empleados_actualizados()
     if pagos.empty:
@@ -1147,21 +1147,13 @@ def obtener_empleados_fijos_periodo(empleados_df: pd.DataFrame, desde, hasta) ->
     texto = obtener_texto_clasificacion_pago(pagos_f)
 
     mask_variable = texto.str.contains("variable|comision|comisión|bono|incentivo", na=False)
-    mask_fijo = texto.str.contains("salario|sueldo|quincena|nomina|nómina|mensual|fijo|primera|segunda", na=False)
-
-    # Si el pago no dice comisión/bono/variable, lo tratamos como pago fijo de nómina.
-    # Esto garantiza que una quincena de RD$6,000 se refleje aunque Supabase no tenga tipo_pago.
-    mask_sin_clasificar = ~(mask_variable)
-    mask_final = mask_fijo | mask_sin_clasificar
-
-    return float(pagos_f.loc[mask_final, "monto"].sum())
+    return float(pagos_f.loc[~mask_variable, "monto"].sum())
 
 
 
 def obtener_empleados_variables_periodo(gastos_df: pd.DataFrame, desde, hasta) -> float:
     """
-    Suma solo pagos variables reales: comisión, bono, incentivo o variable.
-    Lee directamente desde Supabase para actualizarse en vivo.
+    Solo se suman pagos variables reales: comisión, bono, incentivo o variable.
     """
     total = 0.0
 
@@ -1562,7 +1554,7 @@ menu_base = [
     "Catálogo de Gastos",
     "Gastos",
     "Empleados",
-    "Adelantos Empleados",
+    "Pagos Empleados",
     "Pérdidas",
     "Gastos Dueño",
     "Cierre de Caja",
@@ -2929,6 +2921,7 @@ elif menu == "Gastos":
 # =========================================================
 elif menu == "Empleados":
     st.title("👥 Empleados")
+    st.caption("Este módulo es solo para registrar datos del empleado. Para pagar quincenas, comisiones o bonos usa el menú Pagos Empleados.")
 
     with st.expander("📥 Subir Excel / CSV de empleados"):
         st.write("Columnas esperadas: nombre, puesto, sueldo, tipo_salario, frecuencia_pago. Activo opcional.")
@@ -3006,71 +2999,81 @@ elif menu == "Empleados":
 # =========================================================
 # ADELANTOS EMPLEADOS
 # =========================================================
-elif menu == "Adelantos Empleados":
-    st.title("💵 Pagos / Adelantos a Empleados")
-    st.caption("El sueldo registrado en Empleados es solo informativo. Solo afecta la utilidad cuando registras un pago real aquí.")
+elif menu == "Pagos Empleados":
+    st.title("💵 Pagos a Empleados")
+    st.caption("Aquí es donde se aplica el pago real. El módulo Empleados solo guarda los datos del empleado y su sueldo acordado.")
 
-    nombres_empleados = DATA["empleados"]["nombre"].astype(str).tolist() if not DATA["empleados"].empty and "nombre" in DATA["empleados"].columns else []
+    empleados_df = DATA.get("empleados", pd.DataFrame()).copy()
+    nombres_empleados = empleados_df["nombre"].astype(str).tolist() if not empleados_df.empty and "nombre" in empleados_df.columns else []
     columnas_pagos = DATA["adelantos_empleados"].columns.tolist() if not DATA["adelantos_empleados"].empty else []
 
-    with st.expander("➕ Registrar pago real", expanded=True):
+    with st.expander("➕ Aplicar pago a empleado", expanded=True):
         c1, c2, c3 = st.columns(3)
 
         with c1:
-            fecha = st.date_input("Fecha de pago", value=date.today(), key="adel_fecha")
-            empleado = st.selectbox("Empleado", nombres_empleados, key="adel_emp") if nombres_empleados else st.text_input("Empleado", key="adel_emp_txt")
+            fecha_pago = st.date_input("Fecha de pago", value=date.today(), key="pago_emp_fecha")
+            empleado = st.selectbox("Empleado", nombres_empleados, key="pago_emp_nombre") if nombres_empleados else st.text_input("Empleado", key="pago_emp_nombre_txt")
 
         with c2:
             tipo_pago = st.selectbox(
                 "Tipo de pago",
-                ["salario", "quincena", "comisión", "bono", "adelanto", "otro"],
-                key="adel_tipo_pago_select"
+                ["quincena", "salario", "comisión", "bono", "adelanto", "otro"],
+                key="pago_emp_tipo"
             )
-            monto = st.number_input("Monto pagado", min_value=0.0, step=1.0, key="adel_monto")
+            monto_pago = st.number_input("Monto pagado", min_value=0.0, step=1.0, key="pago_emp_monto")
 
         with c3:
             metodo_pago = st.selectbox(
                 "Método de pago",
                 ["efectivo", "transferencia", "tarjeta"],
-                key="adel_metodo_pago_select"
+                key="pago_emp_metodo"
             )
-            observacion = st.text_area("Observación", key="adel_detalle")
+            observacion_pago = st.text_area("Observación", key="pago_emp_obs")
 
-        if st.button("Guardar pago", key="btn_guardar_pago_empleado"):
-            detalle_final = f"tipo_pago: {tipo_pago} | metodo_pago: {metodo_pago}"
-            if observacion:
-                detalle_final += f" | {observacion}"
+        if st.button("Guardar pago de empleado", key="btn_guardar_pago_empleado_real"):
+            if not limpiar_texto(empleado):
+                st.error("Debes seleccionar o escribir el empleado.")
+            elif monto_pago <= 0:
+                st.error("El monto pagado debe ser mayor que cero.")
+            else:
+                detalle_final = f"tipo_pago: {tipo_pago} | metodo_pago: {metodo_pago}"
+                if observacion_pago:
+                    detalle_final += f" | {observacion_pago}"
 
-            payload_pago = {
-                "fecha": str(fecha),
-                "empleado": empleado,
-                "monto": float(monto),
-                "detalle": detalle_final,
-            }
+                payload_pago = {
+                    "fecha": str(fecha_pago),
+                    "empleado": empleado,
+                    "monto": float(monto_pago),
+                    "detalle": detalle_final,
+                }
 
-            # Si esas columnas existen en Supabase, también se guardan de forma separada.
-            if "tipo_pago" in columnas_pagos:
-                payload_pago["tipo_pago"] = tipo_pago
-            if "metodo_pago" in columnas_pagos:
-                payload_pago["metodo_pago"] = metodo_pago
-            if "concepto" in columnas_pagos:
-                payload_pago["concepto"] = tipo_pago
+                if "tipo_pago" in columnas_pagos:
+                    payload_pago["tipo_pago"] = tipo_pago
+                if "metodo_pago" in columnas_pagos:
+                    payload_pago["metodo_pago"] = metodo_pago
+                if "concepto" in columnas_pagos:
+                    payload_pago["concepto"] = tipo_pago
 
-            if insertar("adelantos_empleados", payload_pago):
-                st.success("Pago guardado. Ahora debe reflejarse en Dashboard según el tipo de pago.")
-                st.rerun()
+                if insertar("adelantos_empleados", payload_pago):
+                    st.success("Pago aplicado correctamente. Ya debe reflejarse en el Dashboard.")
+                    st.rerun()
 
+    st.subheader("📋 Historial de pagos aplicados")
     df = DATA["adelantos_empleados"].copy()
     if not df.empty:
-        d1, d2 = rango_fechas_ui("adelantos")
+        d1, d2 = rango_fechas_ui("pagos_empleados")
         df = filtrar_por_fechas(df, d1, d2)
-        txt = st.text_input("Buscar pago", key="buscar_adel")
+        txt = st.text_input("Buscar pago", key="buscar_pagos_empleados")
         df = buscar_df(df, txt)
+
+        total_pagos = suma_col(df, "monto")
+        st.metric("Total pagado en el período", f"RD$ {total_pagos:,.2f}")
+
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "pagos_empleados")
-        render_crud_generico("adelantos_empleados", df, "🛠️ Editar / eliminar pagos de empleados")
+        render_crud_generico("adelantos_empleados", df, "🛠️ Editar / eliminar pagos aplicados")
     else:
-        st.info("No hay pagos registrados.")
+        st.info("No hay pagos registrados todavía.")
 
 
 
