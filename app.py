@@ -3607,6 +3607,25 @@ elif menu == "Caja":
         except Exception:
             return DATA.get("caja", pd.DataFrame()).copy()
 
+    def _leer_ventas_pagos_actualizadas():
+        try:
+            resp = supabase.table("ventas_pagos").select("*").execute()
+            df = pd.DataFrame(resp.data or [])
+            return df
+        except Exception:
+            return DATA.get("ventas_pagos", pd.DataFrame()).copy()
+
+    def _leer_ventas_actualizadas():
+        try:
+            resp = supabase.table("ventas").select("*").execute()
+            df = pd.DataFrame(resp.data or [])
+            if not df.empty:
+                df = aplicar_total_contable_df(df) if "aplicar_total_contable_df" in globals() else df
+            return df
+        except Exception:
+            ventas = DATA.get("ventas", pd.DataFrame()).copy()
+            return aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() else ventas
+
     def _obtener_caja_abierta_usuario(usuario_nombre=None):
         usuario_nombre = usuario_nombre or usuario_act
         try:
@@ -3634,58 +3653,100 @@ elif menu == "Caja":
             return cajas.iloc[0].to_dict()
 
     def _ventas_de_caja(caja):
-        try:
-            fecha_apertura = caja.get("fecha_apertura")
-            ventas = DATA.get("ventas", pd.DataFrame()).copy()
-            ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() else ventas
-            if ventas.empty:
-                return ventas
-
-            if "fecha" in ventas.columns and fecha_apertura:
-                ventas["_fecha_dt"] = pd.to_datetime(ventas["fecha"], errors="coerce")
-                apertura_dt = pd.to_datetime(fecha_apertura, errors="coerce")
-                ventas = ventas[ventas["_fecha_dt"] >= apertura_dt]
-
-            caja_id = caja.get("id")
-            if "caja_id" in ventas.columns and caja_id:
-                ventas_caja = ventas[ventas["caja_id"].astype(str) == str(caja_id)].copy()
-                if not ventas_caja.empty:
-                    return ventas_caja
-
-            usuario_caja = caja.get("usuario") or usuario_act
-            if "usuario" in ventas.columns:
-                ventas = ventas[ventas["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario_caja)]
-
+        ventas = _leer_ventas_actualizadas()
+        if ventas.empty:
             return ventas
-        except Exception:
-            return pd.DataFrame()
 
-    def _sumar_metodo(df, metodo_buscar):
-        if df.empty:
+        caja_id = caja.get("id")
+        fecha_apertura = caja.get("fecha_apertura")
+        usuario_caja = caja.get("usuario") or usuario_act
+
+        if "caja_id" in ventas.columns and caja_id:
+            ventas_caja = ventas[ventas["caja_id"].astype(str) == str(caja_id)].copy()
+            if not ventas_caja.empty:
+                return ventas_caja
+
+        if "fecha" in ventas.columns and fecha_apertura:
+            ventas["_fecha_dt"] = pd.to_datetime(ventas["fecha"], errors="coerce")
+            apertura_dt = pd.to_datetime(fecha_apertura, errors="coerce")
+            ventas = ventas[ventas["_fecha_dt"] >= apertura_dt]
+
+        if "usuario" in ventas.columns:
+            ventas = ventas[ventas["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario_caja)]
+
+        return ventas
+
+    def _pagos_de_caja(caja):
+        pagos = _leer_ventas_pagos_actualizadas()
+        if pagos.empty:
+            return pagos
+
+        caja_id = caja.get("id")
+        fecha_apertura = caja.get("fecha_apertura")
+        usuario_caja = caja.get("usuario") or usuario_act
+
+        if "caja_id" in pagos.columns and caja_id:
+            pagos_caja = pagos[pagos["caja_id"].astype(str) == str(caja_id)].copy()
+            if not pagos_caja.empty:
+                return pagos_caja
+
+        # Respaldo: si ventas_pagos no tiene caja_id, usar usuario y ventas desde apertura.
+        if "usuario" in pagos.columns:
+            pagos = pagos[pagos["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario_caja)]
+
+        if "fecha" in pagos.columns and fecha_apertura:
+            pagos["_fecha_dt"] = pd.to_datetime(pagos["fecha"], errors="coerce")
+            apertura_dt = pd.to_datetime(fecha_apertura, errors="coerce")
+            pagos = pagos[pagos["_fecha_dt"] >= apertura_dt]
+
+        return pagos
+
+    def _sumar_pago_metodo(pagos, metodo_buscar):
+        if pagos.empty:
             return 0.0
-        metodo_col = "metodo_pago" if "metodo_pago" in df.columns else ("metodo" if "metodo" in df.columns else None)
-        total_col = "total_contable" if "total_contable" in df.columns else "total"
-        if not metodo_col or total_col not in df.columns:
+        metodo_col = "metodo" if "metodo" in pagos.columns else ("metodo_pago" if "metodo_pago" in pagos.columns else None)
+        if not metodo_col or "monto" not in pagos.columns:
             return 0.0
-        return float(
-            pd.to_numeric(
-                df[df[metodo_col].astype(str).apply(normalizar_texto) == metodo_buscar][total_col],
-                errors="coerce",
-            ).fillna(0).sum()
-        )
+        temp = pagos[pagos[metodo_col].astype(str).apply(normalizar_texto) == metodo_buscar]
+        return float(pd.to_numeric(temp["monto"], errors="coerce").fillna(0).sum())
 
     def _calcular_resumen_caja(caja):
         ventas_caja = _ventas_de_caja(caja)
+        pagos_caja = _pagos_de_caja(caja)
+
         fondo_inicial = float(limpiar_numero(caja.get("monto_inicial")) or 0)
-        venta_efectivo = _sumar_metodo(ventas_caja, "efectivo")
-        venta_transferencia = _sumar_metodo(ventas_caja, "transferencia")
-        venta_tarjeta = _sumar_metodo(ventas_caja, "tarjeta")
-        venta_credito = _sumar_metodo(ventas_caja, "credito")
+
+        # Principal: usar ventas_pagos porque separa efectivo/transferencia/tarjeta/crédito aunque la venta sea mixta.
+        venta_efectivo = _sumar_pago_metodo(pagos_caja, "efectivo")
+        venta_transferencia = _sumar_pago_metodo(pagos_caja, "transferencia")
+        venta_tarjeta = _sumar_pago_metodo(pagos_caja, "tarjeta")
+        venta_credito = _sumar_pago_metodo(pagos_caja, "credito")
+
+        # Respaldo para ventas viejas sin ventas_pagos: usar método de la venta.
+        if venta_efectivo + venta_transferencia + venta_tarjeta + venta_credito == 0 and not ventas_caja.empty:
+            metodo_col = "metodo_pago" if "metodo_pago" in ventas_caja.columns else ("metodo" if "metodo" in ventas_caja.columns else None)
+            total_col = "total_contable" if "total_contable" in ventas_caja.columns else "total"
+            if metodo_col and total_col in ventas_caja.columns:
+                for metodo in ["efectivo", "transferencia", "tarjeta", "credito"]:
+                    temp = ventas_caja[ventas_caja[metodo_col].astype(str).apply(normalizar_texto) == metodo]
+                    monto = float(pd.to_numeric(temp[total_col], errors="coerce").fillna(0).sum())
+                    if metodo == "efectivo":
+                        venta_efectivo = monto
+                    elif metodo == "transferencia":
+                        venta_transferencia = monto
+                    elif metodo == "tarjeta":
+                        venta_tarjeta = monto
+                    elif metodo == "credito":
+                        venta_credito = monto
+
         total_col = "total_contable" if "total_contable" in ventas_caja.columns else "total"
-        total_ventas = suma_col(ventas_caja, total_col) if not ventas_caja.empty else 0.0
+        total_ventas = suma_col(ventas_caja, total_col) if not ventas_caja.empty else (venta_efectivo + venta_transferencia + venta_tarjeta + venta_credito)
+
         efectivo_esperado = fondo_inicial + venta_efectivo
+
         return {
             "ventas_df": ventas_caja,
+            "pagos_df": pagos_caja,
             "fondo_inicial": fondo_inicial,
             "venta_efectivo": venta_efectivo,
             "venta_transferencia": venta_transferencia,
@@ -3771,6 +3832,7 @@ elif menu == "Caja":
 
         resumen = _calcular_resumen_caja(caja_abierta)
         ventas_caja = resumen["ventas_df"]
+        pagos_caja = resumen["pagos_df"]
 
         st.markdown("### 📌 Resumen de caja")
         r1, r2, r3, r4 = st.columns(4)
@@ -3784,12 +3846,19 @@ elif menu == "Caja":
         r6.metric("Tarjeta", f"RD$ {resumen['venta_tarjeta']:,.2f}")
         r7.metric("Crédito", f"RD$ {resumen['venta_credito']:,.2f}")
 
-        with st.expander("🔎 Ver ventas tomadas para este cierre", expanded=False):
+        with st.expander("🔎 Ver ventas y pagos tomados para este cierre", expanded=False):
+            st.write("Ventas tomadas:")
             if ventas_caja.empty:
                 st.info("No hay ventas registradas para esta caja.")
             else:
-                cols = [c for c in ["numero_factura", "fecha", "total", "total_contable", "recargo", "metodo_pago", "metodo", "usuario"] if c in ventas_caja.columns]
+                cols = [c for c in ["numero_factura", "fecha", "total", "total_contable", "recargo", "metodo_pago", "metodo", "usuario", "caja_id"] if c in ventas_caja.columns]
                 st.dataframe(ventas_caja[cols] if cols else ventas_caja, use_container_width=True)
+            st.write("Pagos tomados:")
+            if pagos_caja.empty:
+                st.info("No hay pagos separados para esta caja.")
+            else:
+                cols_p = [c for c in ["venta_id", "metodo", "metodo_pago", "monto", "usuario", "caja_id", "dia_operativo"] if c in pagos_caja.columns]
+                st.dataframe(pagos_caja[cols_p] if cols_p else pagos_caja, use_container_width=True)
 
         st.markdown("---")
         st.subheader("🔐 Cierre de caja")
@@ -4319,6 +4388,7 @@ elif menu == "POS":
                             "cliente_nombre": cliente_nombre,
                             "usuario": nombre_usuario_actual(),
                             "dia_operativo": ahora_str(),
+                            "caja_id": str(caja_activa.get("id")),
                             "ncf": ncf,
                             "numero_factura": numero_factura_pos,
 "tipo_venta": "POS",
@@ -4363,6 +4433,8 @@ elif menu == "POS":
                                     "metodo": metodo,
                                     "monto": float(monto),
                                     "usuario": nombre_usuario_actual(),
+                                    "caja_id": str(caja_activa.get("id")),
+                                    "dia_operativo": ahora_str(),
                                 }).execute()
                                 if metodo != "credito":
                                     try:
