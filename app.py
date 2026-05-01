@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import Any, Iterable
 
 import pandas as pd
+import uuid
 import re
 import streamlit as st
 import streamlit.components.v1 as components
@@ -708,7 +709,7 @@ def descargar_archivos(df: pd.DataFrame, base_name: str):
             data=csv_bytes,
             file_name=f"{base_name}.csv",
             mime="text/csv",
-            key=f"dl_csv_{base_name}",
+            key=f"dl_csv_{base_name}_{uuid.uuid4().hex}",
         )
     with c2:
         st.download_button(
@@ -716,7 +717,7 @@ def descargar_archivos(df: pd.DataFrame, base_name: str):
             data=xlsx_bytes,
             file_name=f"{base_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"dl_xlsx_{base_name}",
+            key=f"dl_xlsx_{base_name}_{uuid.uuid4().hex}",
         )
 
 
