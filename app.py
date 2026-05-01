@@ -1,12 +1,12 @@
 import base64
 import io
+import re
+import uuid
 import unicodedata
 from datetime import date, datetime
 from typing import Any, Iterable
 
 import pandas as pd
-import uuid
-import re
 import streamlit as st
 import streamlit.components.v1 as components
 from supabase import Client, create_client
@@ -86,6 +86,33 @@ def nombre_usuario_actual() -> str:
 
 def es_admin() -> bool:
     return normalizar_texto(usuario_sesion().get("rol", "")) == "admin"
+
+
+
+def es_cajera() -> bool:
+    return normalizar_texto(usuario_sesion().get("rol", "")) in ["cajera", "cajero"]
+
+
+def numero_factura_visible(row: Any) -> str:
+    """
+    Muestra un número de factura si existe. Si no existe columna de factura,
+    usa el ID como referencia visible sin cambiar la base.
+    """
+    try:
+        for campo in ["numero_factura", "factura", "n_factura", "ncf"]:
+            val = row.get(campo)
+            if limpiar_texto(val):
+                return limpiar_texto(val)
+        val_id = row.get("id") or row.get("identificación") or row.get("identificacion")
+        if limpiar_texto(val_id):
+            nums = re.findall(r"\d+", limpiar_texto(val_id))
+            if nums:
+                return nums[-1].zfill(3)
+            return limpiar_texto(val_id)
+    except Exception:
+        pass
+    return ""
+
 
 
 
@@ -1654,109 +1681,6 @@ def lanzar_impresion_navegador(html_doc: str):
     </html>
     """
     components.html(html_js, height=0, width=0)
-
-def es_cajera() -> bool:
-    return normalizar_texto(st.session_state.get("rol", "")) in ["cajera", "cajero"]
-
-
-def usuario_actual_nombre() -> str:
-    return limpiar_texto(st.session_state.get("usuario", "")) or limpiar_texto(st.session_state.get("username", "")) or "usuario"
-
-
-def generar_numero_factura() -> str:
-    """
-    Genera número de factura secuencial simple 001, 002, 003...
-    Usa la tabla ventas y revisa columnas comunes.
-    """
-    try:
-        resp = supabase.table("ventas").select("*").execute()
-        ventas = pd.DataFrame(resp.data or [])
-    except Exception:
-        ventas = DATA.get("ventas", pd.DataFrame()).copy()
-
-    max_num = 0
-    if not ventas.empty:
-        for col in ["numero_factura", "factura", "n_factura", "identificación", "identificacion", "id"]:
-            if col in ventas.columns:
-                for val in ventas[col].dropna().astype(str):
-                    nums = re.findall(r"\d+", val)
-                    if nums:
-                        try:
-                            max_num = max(max_num, int(nums[-1]))
-                        except Exception:
-                            pass
-    return str(max_num + 1).zfill(3)
-
-
-def obtener_factura_para_venta(venta_row: pd.Series | dict) -> str:
-    try:
-        for col in ["numero_factura", "factura", "n_factura"]:
-            val = venta_row.get(col)
-            if val:
-                return str(val)
-    except Exception:
-        pass
-    return ""
-
-
-def imprimir_factura_html(venta_row, detalle_df=None):
-    """
-    Render simple de factura/ticket para imprimir desde navegador.
-    """
-    venta_id = venta_row.get("id") or venta_row.get("identificación") or venta_row.get("identificacion") or ""
-    factura = obtener_factura_para_venta(venta_row) or str(venta_id)[-6:]
-    fecha = venta_row.get("fecha", "")
-    total = float(limpiar_numero(venta_row.get("total")) or 0)
-    metodo = venta_row.get("metodo_pago") or venta_row.get("metodo") or ""
-    usuario = venta_row.get("usuario") or venta_row.get("cajera") or usuario_actual_nombre()
-
-    filas_html = ""
-    if detalle_df is not None and not detalle_df.empty:
-        for _, it in detalle_df.iterrows():
-            prod = limpiar_texto(it.get("producto"))
-            cant = float(limpiar_numero(it.get("cantidad")) or 0)
-            precio = float(limpiar_numero(it.get("precio_unitario") or it.get("precio")) or 0)
-            linea = float(limpiar_numero(it.get("linea_total") or it.get("total_linea")) or cant * precio)
-            filas_html += f"<tr><td>{prod}</td><td>{cant:,.0f}</td><td>{precio:,.2f}</td><td>{linea:,.2f}</td></tr>"
-    else:
-        filas_html = f"<tr><td>Venta</td><td>1</td><td>{total:,.2f}</td><td>{total:,.2f}</td></tr>"
-
-    html = f"""
-    <div id='factura-print' style='font-family: Arial; max-width: 360px; padding: 10px; border: 1px solid #ddd;'>
-        <h2 style='text-align:center; margin:0;'>BIBE RON 01</h2>
-        <p style='text-align:center; margin:4px 0;'>Factura No. {factura}</p>
-        <p><b>Fecha:</b> {fecha}<br><b>Cajera:</b> {usuario}<br><b>Método:</b> {metodo}</p>
-        <table style='width:100%; border-collapse: collapse; font-size: 13px;'>
-            <thead>
-                <tr>
-                    <th style='text-align:left;'>Producto</th>
-                    <th>Cant.</th>
-                    <th>Precio</th>
-                    <th>Total</th>
-                </tr>
-            </thead>
-            <tbody>{filas_html}</tbody>
-        </table>
-        <hr>
-        <h3 style='text-align:right;'>TOTAL RD$ {total:,.2f}</h3>
-        <p style='text-align:center;'>Gracias por su compra</p>
-    </div>
-    <script>
-    function imprimirFactura() {{
-        var contenido = document.getElementById('factura-print').innerHTML;
-        var ventana = window.open('', '', 'height=600,width=400');
-        ventana.document.write('<html><head><title>Factura {factura}</title></head><body>');
-        ventana.document.write(contenido);
-        ventana.document.write('</body></html>');
-        ventana.document.close();
-        ventana.print();
-    }}
-    </script>
-    <button onclick="imprimirFactura()" style="padding:10px; margin-top:10px;">🖨️ Imprimir factura</button>
-    """
-    st.components.v1.html(html, height=520)
-
-
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -2440,68 +2364,71 @@ elif menu == "Ajustes Inventario":
 elif menu == "Ventas":
     st.title("💰 Ventas")
 
-    puede_gestionar_ventas = es_admin() or tiene_permiso("puede_editar_todo") or tiene_permiso("puede_editar_ventas") or tiene_permiso("puede_eliminar") or tiene_permiso("puede_anular")
+    puede_gestionar_ventas = (es_admin() or tiene_permiso("puede_editar_todo") or tiene_permiso("puede_editar_ventas") or tiene_permiso("puede_eliminar") or tiene_permiso("puede_anular")) and not es_cajera()
     puede_ver_utilidad = puede_ver_utilidad_global()
 
-    with st.expander("📥 Subir Excel / CSV de ventas"):
-        st.write("Columnas esperadas: fecha, total, metodo. Observación opcional.")
-        archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_ventas")
-        if archivo is not None and st.button("Cargar ventas"):
-            df = leer_archivo_subido(archivo)
-            faltan = [c for c in ["fecha", "total", "metodo"] if c not in df.columns]
-            if faltan:
-                st.error(f"Faltan columnas: {faltan}")
-            else:
-                count = 0
-                for _, row in df.iterrows():
-                    fecha = parsear_fecha(row["fecha"])
-                    total = limpiar_numero(row["total"]) or 0
-                    metodo = limpiar_texto(row["metodo"])
-                    observacion = limpiar_texto(row["observacion"]) if "observacion" in df.columns else ""
-                    if fecha:
-                        insertar(
-                            "ventas",
-                            {
-                                "fecha": fecha,
-                                "total": float(total),
-                                "metodo": metodo,
-                                "metodo_pago": metodo,
-                                "observacion": observacion,
-                                "usuario": nombre_usuario_actual(),
-                                "cliente_nombre": "Venta general",
-                                "anulado": False,
-                            },
-                        )
-                        count += 1
-                st.success(f"Se cargaron {count} ventas.")
-                st.rerun()
+    if not es_cajera():
+        with st.expander("📥 Subir Excel / CSV de ventas"):
+            st.write("Columnas esperadas: fecha, total, metodo. Observación opcional.")
+            archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_ventas")
+            if archivo is not None and st.button("Cargar ventas"):
+                df = leer_archivo_subido(archivo)
+                faltan = [c for c in ["fecha", "total", "metodo"] if c not in df.columns]
+                if faltan:
+                    st.error(f"Faltan columnas: {faltan}")
+                else:
+                    count = 0
+                    for _, row in df.iterrows():
+                        fecha = parsear_fecha(row["fecha"])
+                        total = limpiar_numero(row["total"]) or 0
+                        metodo = limpiar_texto(row["metodo"])
+                        observacion = limpiar_texto(row["observacion"]) if "observacion" in df.columns else ""
+                        if fecha:
+                            insertar(
+                                "ventas",
+                                {
+                                    "fecha": fecha,
+                                    "total": float(total),
+                                    "metodo": metodo,
+                                    "metodo_pago": metodo,
+                                    "observacion": observacion,
+                                    "usuario": nombre_usuario_actual(),
+                                    "cliente_nombre": "Venta general",
+                                    "anulado": False,
+                                },
+                            )
+                            count += 1
+                    st.success(f"Se cargaron {count} ventas.")
+                    st.rerun()
 
-    with st.expander("➕ Agregar venta manual", expanded=True):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            fecha = st.date_input("Fecha", value=date.today(), key="venta_fecha")
-        with c2:
-            total = st.number_input("Total", min_value=0.0, step=1.0, key="venta_total")
-        with c3:
-            metodo = st.selectbox("Método", ["efectivo", "transferencia", "tarjeta"], key="venta_metodo")
-        observacion = st.text_input("Observación", key="venta_obs")
+    if not es_cajera():
+        with st.expander("➕ Agregar venta manual", expanded=True):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                fecha = st.date_input("Fecha", value=date.today(), key="venta_fecha")
+            with c2:
+                total = st.number_input("Total", min_value=0.0, step=1.0, key="venta_total")
+            with c3:
+                metodo = st.selectbox("Método", ["efectivo", "transferencia", "tarjeta"], key="venta_metodo")
+            observacion = st.text_input("Observación", key="venta_obs")
 
-        if st.button("Guardar venta"):
-            if insertar(
-                "ventas",
-                {
-                    "fecha": str(fecha),
-                    "total": float(total),
-                    "metodo": metodo,
-                    "metodo_pago": metodo,
-                    "observacion": observacion,
-                    "usuario": nombre_usuario_actual(),
-                    "cliente_nombre": "Venta general",
-                    "anulado": False,
-                },
-            ):
-                st.success("Venta guardada.")
-                st.rerun()
+            if st.button("Guardar venta"):
+                if insertar(
+                    "ventas",
+                    {
+                        "fecha": str(fecha),
+                        "total": float(total),
+                        "metodo": metodo,
+                        "metodo_pago": metodo,
+                        "observacion": observacion,
+                        "usuario": nombre_usuario_actual(),
+                        "cliente_nombre": "Venta general",
+                        "anulado": False,
+                    },
+                ):
+                    st.success("Venta guardada.")
+                    st.rerun()
+
 
     # Lectura robusta: sin filtros cerrados para no ocultar ventas registradas
     try:
@@ -2551,6 +2478,16 @@ elif menu == "Ventas":
         if metodo_filtro != "Todos" and col_metodo:
             df = df[df[col_metodo].astype(str).str.lower() == metodo_filtro.lower()]
 
+        if es_cajera():
+            usuario_actual = normalizar_texto(nombre_usuario_actual())
+            if "usuario" in df.columns:
+                df = df[df["usuario"].astype(str).apply(normalizar_texto) == usuario_actual]
+            elif "cajera" in df.columns:
+                df = df[df["cajera"].astype(str).apply(normalizar_texto) == usuario_actual]
+            else:
+                df = df.iloc[0:0]
+            st.caption("Vista cajera: solo puedes ver tus ventas. No puedes editar, eliminar, anular, descargar ni registrar ventas manuales.")
+
         total_vendido = float(pd.to_numeric(df.get("total", 0), errors="coerce").fillna(0).sum()) if not df.empty else 0.0
         utilidad_visible = float(pd.to_numeric(df.get("ganancia_bruta", 0), errors="coerce").fillna(0).sum()) if not df.empty else 0.0
         metric_cols = st.columns(3) if puede_ver_utilidad else st.columns(2)
@@ -2560,9 +2497,12 @@ elif menu == "Ventas":
             metric_cols[2].metric("Utilidad bruta visible", f"RD$ {utilidad_visible:,.2f}")
 
         df_show = df.copy().sort_values("fecha", ascending=False)
+        if not df_show.empty:
+            df_show["factura"] = df_show.apply(numero_factura_visible, axis=1)
         columnas_preferidas = [
             c
             for c in [
+                "factura",
                 "id",
                 "identificación",
                 "fecha",
@@ -2591,134 +2531,99 @@ elif menu == "Ventas":
         # BLOQUE NUEVO: EDITAR VENTA COMPLETA
         # PÉGALO DEBAJO DE:
         # st.dataframe(df[columnas_preferidas] if columnas_preferidas else df, use_container_width=True)
-        # if not es_cajera():
-            descargar_archivos(df, "ventas")
+        # descargar_archivos(df, "ventas")
         # DENTRO DEL MÓDULO: elif menu == "Ventas":
         # =========================================================
 
-        st.subheader("✏️ Editar venta completa")
+        if puede_gestionar_ventas:
+            st.subheader("✏️ Editar venta completa")
 
-        ventas_visibles = df.copy()
-        if not ventas_visibles.empty:
-            opciones_venta = []
-            mapa_ventas = {}
+            ventas_visibles = df.copy()
+            if not ventas_visibles.empty:
+                opciones_venta = []
+                mapa_ventas = {}
 
-            for _, row in ventas_visibles.iterrows():
-                venta_id = row.get("id") or row.get("identificación")
-                etiqueta = f"{venta_id} | {row.get('fecha')} | Total RD$ {float(limpiar_numero(row.get('total')) or 0):,.2f}"
-                opciones_venta.append(etiqueta)
-                mapa_ventas[etiqueta] = row
+                for _, row in ventas_visibles.iterrows():
+                    venta_id = row.get("id") or row.get("identificación")
+                    etiqueta = f"{venta_id} | {row.get('fecha')} | Total RD$ {float(limpiar_numero(row.get('total')) or 0):,.2f}"
+                    opciones_venta.append(etiqueta)
+                    mapa_ventas[etiqueta] = row
 
-            venta_sel = st.selectbox("Selecciona la venta a editar", opciones_venta, key="venta_editar_sel")
-            venta_row = mapa_ventas[venta_sel]
-            venta_id = venta_row.get("id") or venta_row.get("identificación")
+                venta_sel = st.selectbox("Selecciona la venta a editar", opciones_venta, key="venta_editar_sel")
+                venta_row = mapa_ventas[venta_sel]
+                venta_id = venta_row.get("id") or venta_row.get("identificación")
 
-            detalle_resp = supabase.table("detalle_venta").select("*").eq("venta_id", str(venta_id)).execute()
-            detalle_data = detalle_resp.data or []
-            detalle_df = pd.DataFrame(detalle_data)
+                detalle_resp = supabase.table("detalle_venta").select("*").eq("venta_id", str(venta_id)).execute()
+                detalle_data = detalle_resp.data or []
+                detalle_df = pd.DataFrame(detalle_data)
 
-            if detalle_df.empty:
-                st.warning("Esta venta no tiene detalle para editar.")
-            else:
-                productos_df = DATA["productos"].copy()
-                productos_lista = productos_df["nombre"].astype(str).tolist() if not productos_df.empty and "nombre" in productos_df.columns else []
+                if detalle_df.empty:
+                    st.warning("Esta venta no tiene detalle para editar.")
+                else:
+                    productos_df = DATA["productos"].copy()
+                    productos_lista = productos_df["nombre"].astype(str).tolist() if not productos_df.empty and "nombre" in productos_df.columns else []
 
-                st.write("### Detalle actual de la venta")
-                nuevos_items = []
+                    st.write("### Detalle actual de la venta")
+                    nuevos_items = []
 
-                for i, item in detalle_df.iterrows():
-                    st.markdown(f"**Línea {i + 1}**")
-                    c1, c2, c3, c4, c5, c6 = st.columns([3, 1, 1, 1, 1, 1])
+                    for i, item in detalle_df.iterrows():
+                        st.markdown(f"**Línea {i + 1}**")
+                        c1, c2, c3, c4, c5, c6 = st.columns([3, 1, 1, 1, 1, 1])
 
-                    with c1:
-                        producto_actual = st.text_input(
-                            f"Producto {i}",
-                            value=str(item.get("producto", "")),
-                            key=f"edit_producto_{i}"
-                        )
-                    with c2:
-                        cantidad_nueva = st.number_input(
-                            f"Cantidad {i}",
-                            min_value=0.0,
-                            step=1.0,
-                            value=float(limpiar_numero(item.get("cantidad")) or 0),
-                            key=f"edit_cantidad_{i}"
-                        )
-                    with c3:
-                        precio_nuevo = st.number_input(
-                            f"Precio {i}",
-                            min_value=0.0,
-                            step=1.0,
-                            value=float(limpiar_numero(item.get("precio_unitario") or item.get("precio")) or 0),
-                            key=f"edit_precio_{i}"
-                        )
-                    with c4:
-                        costo_nuevo = st.number_input(
-                            f"Costo {i}",
-                            min_value=0.0,
-                            step=1.0,
-                            value=float(limpiar_numero(item.get("costo_unitario") or item.get("costo")) or 0),
-                            key=f"edit_costo_{i}"
-                        )
-                    with c5:
-                        descuento_nuevo = st.number_input(
-                            f"Desc. {i}",
-                            min_value=0.0,
-                            step=1.0,
-                            value=float(limpiar_numero(item.get("descuento")) or 0),
-                            key=f"edit_desc_{i}"
-                        )
-                    with c6:
-                        eliminar_linea = st.checkbox("❌", value=False, key=f"edit_eliminar_{i}")
+                        with c1:
+                            producto_actual = st.text_input(
+                                f"Producto {i}",
+                                value=str(item.get("producto", "")),
+                                key=f"edit_producto_{i}"
+                            )
+                        with c2:
+                            cantidad_nueva = st.number_input(
+                                f"Cantidad {i}",
+                                min_value=0.0,
+                                step=1.0,
+                                value=float(limpiar_numero(item.get("cantidad")) or 0),
+                                key=f"edit_cantidad_{i}"
+                            )
+                        with c3:
+                            precio_nuevo = st.number_input(
+                                f"Precio {i}",
+                                min_value=0.0,
+                                step=1.0,
+                                value=float(limpiar_numero(item.get("precio_unitario") or item.get("precio")) or 0),
+                                key=f"edit_precio_{i}"
+                            )
+                        with c4:
+                            costo_nuevo = st.number_input(
+                                f"Costo {i}",
+                                min_value=0.0,
+                                step=1.0,
+                                value=float(limpiar_numero(item.get("costo_unitario") or item.get("costo")) or 0),
+                                key=f"edit_costo_{i}"
+                            )
+                        with c5:
+                            descuento_nuevo = st.number_input(
+                                f"Desc. {i}",
+                                min_value=0.0,
+                                step=1.0,
+                                value=float(limpiar_numero(item.get("descuento")) or 0),
+                                key=f"edit_desc_{i}"
+                            )
+                        with c6:
+                            eliminar_linea = st.checkbox("❌", value=False, key=f"edit_eliminar_{i}")
 
-                    if not eliminar_linea and cantidad_nueva > 0:
-                        linea_total = (cantidad_nueva * precio_nuevo) - descuento_nuevo
-                        ganancia_linea = (precio_nuevo - costo_nuevo) * cantidad_nueva - descuento_nuevo
-
-                        nuevos_items.append({
-                            "producto_id": item.get("producto_id"),
-                            "producto": producto_actual,
-                            "codigo": item.get("código") or item.get("codigo"),
-                            "cantidad": float(cantidad_nueva),
-                            "precio_unitario": float(precio_nuevo),
-                            "costo_unitario": float(costo_nuevo),
-                            "descuento": float(descuento_nuevo),
-                            "recargo": float(limpiar_numero(item.get("recargo")) or 0),
-                            "linea_total": float(linea_total),
-                            "ganancia_linea": float(ganancia_linea),
-                            "usuario": nombre_usuario_actual(),
-                            "fecha": ahora_str(),
-                            "anulado": False,
-                            "motivo_anulacion": "",
-                        })
-
-                st.write("### ➕ Agregar producto nuevo a esta venta")
-                if productos_lista:
-                    cna1, cna2, cna3 = st.columns(3)
-                    with cna1:
-                        prod_nuevo_nombre = st.selectbox("Producto nuevo", [""] + productos_lista, key="venta_nuevo_producto")
-                    with cna2:
-                        prod_nueva_cantidad = st.number_input("Cantidad nueva", min_value=0.0, step=1.0, value=0.0, key="venta_nueva_cantidad")
-                    with cna3:
-                        agregar_nuevo = st.checkbox("Agregar a la venta", key="venta_agregar_nuevo")
-
-                    if agregar_nuevo and prod_nuevo_nombre and prod_nueva_cantidad > 0:
-                        prod_row = get_producto_por_nombre(prod_nuevo_nombre)
-                        if prod_row is not None:
-                            precio_nuevo = float(limpiar_numero(prod_row.get("precio")) or 0)
-                            costo_nuevo = float(limpiar_numero(prod_row.get("costo")) or 0)
-                            linea_total = prod_nueva_cantidad * precio_nuevo
-                            ganancia_linea = (precio_nuevo - costo_nuevo) * prod_nueva_cantidad
+                        if not eliminar_linea and cantidad_nueva > 0:
+                            linea_total = (cantidad_nueva * precio_nuevo) - descuento_nuevo
+                            ganancia_linea = (precio_nuevo - costo_nuevo) * cantidad_nueva - descuento_nuevo
 
                             nuevos_items.append({
-                                "producto_id": prod_row.get("id"),
-                                "producto": prod_nuevo_nombre,
-                                "codigo": prod_row.get("codigo"),
-                                "cantidad": float(prod_nueva_cantidad),
+                                "producto_id": item.get("producto_id"),
+                                "producto": producto_actual,
+                                "codigo": item.get("código") or item.get("codigo"),
+                                "cantidad": float(cantidad_nueva),
                                 "precio_unitario": float(precio_nuevo),
                                 "costo_unitario": float(costo_nuevo),
-                                "descuento": 0.0,
-                                "recargo": 0.0,
+                                "descuento": float(descuento_nuevo),
+                                "recargo": float(limpiar_numero(item.get("recargo")) or 0),
                                 "linea_total": float(linea_total),
                                 "ganancia_linea": float(ganancia_linea),
                                 "usuario": nombre_usuario_actual(),
@@ -2727,102 +2632,116 @@ elif menu == "Ventas":
                                 "motivo_anulacion": "",
                             })
 
-                st.write("### Método de pago")
-                metodo_pago_nuevo = st.selectbox(
-                    "Método de pago nuevo",
-                    ["efectivo", "transferencia", "tarjeta", "credito", "mixto"],
-                    index=["efectivo", "transferencia", "tarjeta", "credito", "mixto"].index(
-                        str(venta_row.get("metodo_pago") or "efectivo").lower()
-                    ) if str(venta_row.get("metodo_pago") or "efectivo").lower() in ["efectivo", "transferencia", "tarjeta", "credito", "mixto"] else 0,
-                    key="venta_edit_metodo_pago"
-                )
+                    st.write("### ➕ Agregar producto nuevo a esta venta")
+                    if productos_lista:
+                        cna1, cna2, cna3 = st.columns(3)
+                        with cna1:
+                            prod_nuevo_nombre = st.selectbox("Producto nuevo", [""] + productos_lista, key="venta_nuevo_producto")
+                        with cna2:
+                            prod_nueva_cantidad = st.number_input("Cantidad nueva", min_value=0.0, step=1.0, value=0.0, key="venta_nueva_cantidad")
+                        with cna3:
+                            agregar_nuevo = st.checkbox("Agregar a la venta", key="venta_agregar_nuevo")
 
-                if st.button("💾 Guardar edición completa", key="btn_guardar_edicion_completa"):
-                    try:
-                        detalle_original = detalle_df.to_dict("records")
+                        if agregar_nuevo and prod_nuevo_nombre and prod_nueva_cantidad > 0:
+                            prod_row = get_producto_por_nombre(prod_nuevo_nombre)
+                            if prod_row is not None:
+                                precio_nuevo = float(limpiar_numero(prod_row.get("precio")) or 0)
+                                costo_nuevo = float(limpiar_numero(prod_row.get("costo")) or 0)
+                                linea_total = prod_nueva_cantidad * precio_nuevo
+                                ganancia_linea = (precio_nuevo - costo_nuevo) * prod_nueva_cantidad
 
-                        # 1. devolver inventario viejo
-                        for item in detalle_original:
-                            prod_id = item.get("producto_id")
-                            cant_old = float(limpiar_numero(item.get("cantidad")) or 0)
-                            if prod_id:
-                                prod_match = productos_df[productos_df["id"].astype(str) == str(prod_id)] if not productos_df.empty and "id" in productos_df.columns else pd.DataFrame()
-                                if not prod_match.empty:
-                                    prod_row = prod_match.iloc[0]
-                                    stock_actual = obtener_existencia_producto(prod_row)
-                                    actualizar_existencia_producto(prod_row, stock_actual + cant_old)
+                                nuevos_items.append({
+                                    "producto_id": prod_row.get("id"),
+                                    "producto": prod_nuevo_nombre,
+                                    "codigo": prod_row.get("codigo"),
+                                    "cantidad": float(prod_nueva_cantidad),
+                                    "precio_unitario": float(precio_nuevo),
+                                    "costo_unitario": float(costo_nuevo),
+                                    "descuento": 0.0,
+                                    "recargo": 0.0,
+                                    "linea_total": float(linea_total),
+                                    "ganancia_linea": float(ganancia_linea),
+                                    "usuario": nombre_usuario_actual(),
+                                    "fecha": ahora_str(),
+                                    "anulado": False,
+                                    "motivo_anulacion": "",
+                                })
 
-                        # 2. borrar detalle viejo
-                        supabase.table("detalle_venta").delete().eq("venta_id", str(venta_id)).execute()
+                    st.write("### Método de pago")
+                    metodo_pago_nuevo = st.selectbox(
+                        "Método de pago nuevo",
+                        ["efectivo", "transferencia", "tarjeta", "credito", "mixto"],
+                        index=["efectivo", "transferencia", "tarjeta", "credito", "mixto"].index(
+                            str(venta_row.get("metodo_pago") or "efectivo").lower()
+                        ) if str(venta_row.get("metodo_pago") or "efectivo").lower() in ["efectivo", "transferencia", "tarjeta", "credito", "mixto"] else 0,
+                        key="venta_edit_metodo_pago"
+                    )
 
-                        # 3. insertar detalle nuevo y descontar inventario nuevo
-                        nuevo_total = 0.0
-                        nueva_ganancia = 0.0
-
-                        for item in nuevos_items:
-                            item_insert = item.copy()
-                            item_insert["venta_id"] = str(venta_id)
-                            supabase.table("detalle_venta").insert(item_insert).execute()
-
-                            prod_id = item.get("producto_id")
-                            cant_new = float(item.get("cantidad") or 0)
-                            nuevo_total += float(item.get("linea_total") or 0)
-                            nueva_ganancia += float(item.get("ganancia_linea") or 0)
-
-                            if prod_id:
-                                prod_match = productos_df[productos_df["id"].astype(str) == str(prod_id)] if not productos_df.empty and "id" in productos_df.columns else pd.DataFrame()
-                                if not prod_match.empty:
-                                    prod_row = prod_match.iloc[0]
-                                    stock_actual = obtener_existencia_producto(prod_row)
-                                    actualizar_existencia_producto(prod_row, stock_actual - cant_new)
-
-                        # 4. actualizar venta
-                        supabase.table("ventas").update({
-                            "total": float(nuevo_total),
-                            "subtotal": float(nuevo_total),
-                            "metodo_pago": metodo_pago_nuevo,
-                            "ganancia_bruta": float(nueva_ganancia),
-                        }).eq("id", str(venta_id)).execute()
-
-                        # 5. actualizar pagos si existe registro
+                    if st.button("💾 Guardar edición completa", key="btn_guardar_edicion_completa"):
                         try:
-                            supabase.table("ventas_pagos").update({
+                            detalle_original = detalle_df.to_dict("records")
+
+                            # 1. devolver inventario viejo
+                            for item in detalle_original:
+                                prod_id = item.get("producto_id")
+                                cant_old = float(limpiar_numero(item.get("cantidad")) or 0)
+                                if prod_id:
+                                    prod_match = productos_df[productos_df["id"].astype(str) == str(prod_id)] if not productos_df.empty and "id" in productos_df.columns else pd.DataFrame()
+                                    if not prod_match.empty:
+                                        prod_row = prod_match.iloc[0]
+                                        stock_actual = obtener_existencia_producto(prod_row)
+                                        actualizar_existencia_producto(prod_row, stock_actual + cant_old)
+
+                            # 2. borrar detalle viejo
+                            supabase.table("detalle_venta").delete().eq("venta_id", str(venta_id)).execute()
+
+                            # 3. insertar detalle nuevo y descontar inventario nuevo
+                            nuevo_total = 0.0
+                            nueva_ganancia = 0.0
+
+                            for item in nuevos_items:
+                                item_insert = item.copy()
+                                item_insert["venta_id"] = str(venta_id)
+                                supabase.table("detalle_venta").insert(item_insert).execute()
+
+                                prod_id = item.get("producto_id")
+                                cant_new = float(item.get("cantidad") or 0)
+                                nuevo_total += float(item.get("linea_total") or 0)
+                                nueva_ganancia += float(item.get("ganancia_linea") or 0)
+
+                                if prod_id:
+                                    prod_match = productos_df[productos_df["id"].astype(str) == str(prod_id)] if not productos_df.empty and "id" in productos_df.columns else pd.DataFrame()
+                                    if not prod_match.empty:
+                                        prod_row = prod_match.iloc[0]
+                                        stock_actual = obtener_existencia_producto(prod_row)
+                                        actualizar_existencia_producto(prod_row, stock_actual - cant_new)
+
+                            # 4. actualizar venta
+                            supabase.table("ventas").update({
+                                "total": float(nuevo_total),
+                                "subtotal": float(nuevo_total),
                                 "metodo_pago": metodo_pago_nuevo,
-                                "monto": float(nuevo_total),
-                            }).eq("venta_id", str(venta_id)).execute()
-                        except Exception:
-                            pass
+                                "ganancia_bruta": float(nueva_ganancia),
+                            }).eq("id", str(venta_id)).execute()
 
-                        st.success("Venta editada completamente.")
-                        st.rerun()
+                            # 5. actualizar pagos si existe registro
+                            try:
+                                supabase.table("ventas_pagos").update({
+                                    "metodo_pago": metodo_pago_nuevo,
+                                    "monto": float(nuevo_total),
+                                }).eq("venta_id", str(venta_id)).execute()
+                            except Exception:
+                                pass
 
-                    except Exception as exc:
-                        st.error(f"No se pudo guardar la edición completa: {exc}")
+                            st.success("Venta editada completamente.")
+                            st.rerun()
+
+                        except Exception as exc:
+                            st.error(f"No se pudo guardar la edición completa: {exc}")
 
 
 
-    st.subheader("🧾 Ver / imprimir factura")
-    ventas_para_factura = df_show.copy() if "df_show" in locals() else df.copy()
-    if not ventas_para_factura.empty:
-        opciones_fact = []
-        mapa_fact = {}
-        for _, row in ventas_para_factura.iterrows():
-            rid = row.get("id") or row.get("identificación") or row.get("identificacion")
-            nf = obtener_factura_para_venta(row) or str(rid)[-6:]
-            etiqueta = f"Factura {nf} | {row.get('fecha')} | RD$ {float(limpiar_numero(row.get('total')) or 0):,.2f}"
-            opciones_fact.append(etiqueta)
-            mapa_fact[etiqueta] = row
-        sel_fact = st.selectbox("Selecciona factura", opciones_fact, key="sel_factura_imprimir")
-        row_fact = mapa_fact[sel_fact]
-        venta_id_fact = row_fact.get("id") or row_fact.get("identificación") or row_fact.get("identificacion")
-        try:
-            det_resp = supabase.table("detalle_venta").select("*").eq("venta_id", str(venta_id_fact)).execute()
-            detalle_fact = pd.DataFrame(det_resp.data or [])
-        except Exception:
-            detalle_fact = pd.DataFrame()
-        imprimir_factura_html(row_fact, detalle_fact)
-
-        if puede_gestionar_ventas and not es_cajera():
+        if puede_gestionar_ventas:
             with st.expander("🛠️ Editar / eliminar ventas", expanded=False):
                 opciones = []
                 mapa_ids = {}
@@ -3946,7 +3865,6 @@ elif menu == "POS":
                             "descuento": float(descuento_global),
                             "recargo": float(recargo),
                             "total": float(total_final),
-                    "numero_factura": numero_factura_actual,
                             "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
                             "cliente_id": cliente_id,
                             "cliente_nombre": cliente_nombre,
