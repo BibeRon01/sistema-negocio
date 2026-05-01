@@ -95,26 +95,27 @@ def es_cajera() -> bool:
 
 def numero_factura_visible(row: Any) -> str:
     """
-    Muestra un número de factura si existe. Si no existe columna de factura,
-    usa el ID como referencia visible sin cambiar la base.
+    Muestra factura limpia. Prioridad:
+    1) numero_factura/factura/n_factura
+    2) si no existe, usa números del ID como referencia.
     """
     try:
-        for campo in ["numero_factura", "factura", "n_factura", "ncf"]:
+        for campo in ["numero_factura", "factura", "n_factura"]:
             val = row.get(campo)
             if limpiar_texto(val):
+                nums = re.findall(r"\d+", limpiar_texto(val))
+                if nums:
+                    return nums[-1].zfill(5)
                 return limpiar_texto(val)
+
         val_id = row.get("id") or row.get("identificación") or row.get("identificacion")
         if limpiar_texto(val_id):
             nums = re.findall(r"\d+", limpiar_texto(val_id))
             if nums:
-                return nums[-1].zfill(3)
-            return limpiar_texto(val_id)
+                return nums[-1].zfill(5)
     except Exception:
         pass
     return ""
-
-
-
 
 def tiene_permiso(flag: str) -> bool:
     user = usuario_sesion()
@@ -1690,28 +1691,37 @@ def lanzar_impresion_navegador(html_doc: str):
 
 def generar_numero_factura_pos() -> str:
     """
-    Genera un número visible tipo 001, 002, 003...
-    Si existen columnas numero_factura/factura las usa; si no, usa el ID/cantidad como base.
+    Genera una secuencia limpia de factura:
+    00001, 00002, 00003...
+    Usa primero la columna numero_factura de ventas.
+    Si todavía no hay facturas, empieza en 00001.
     """
     try:
-        resp = supabase.table("ventas").select("*").execute()
+        resp = supabase.table("ventas").select("numero_factura").execute()
         ventas = pd.DataFrame(resp.data or [])
     except Exception:
         ventas = DATA.get("ventas", pd.DataFrame()).copy()
 
     max_num = 0
-    if not ventas.empty:
-        for col in ["numero_factura", "factura", "n_factura", "id", "identificación", "identificacion"]:
-            if col in ventas.columns:
-                for val in ventas[col].dropna().astype(str):
-                    nums = re.findall(r"\d+", val)
-                    if nums:
-                        try:
-                            max_num = max(max_num, int(nums[-1]))
-                        except Exception:
-                            pass
-    return str(max_num + 1).zfill(3)
 
+    if not ventas.empty and "numero_factura" in ventas.columns:
+        for val in ventas["numero_factura"].dropna().astype(str):
+            nums = re.findall(r"\d+", val)
+            if nums:
+                try:
+                    max_num = max(max_num, int(nums[-1]))
+                except Exception:
+                    pass
+
+    if max_num == 0:
+        try:
+            resp_count = supabase.table("ventas").select("id").execute()
+            existentes = resp_count.data or []
+            max_num = len(existentes)
+        except Exception:
+            max_num = len(DATA.get("ventas", pd.DataFrame()).index)
+
+    return str(max_num + 1).zfill(5)
 
 def mostrar_factura_pos(post_venta: dict):
     """
@@ -2613,6 +2623,7 @@ elif menu == "Ventas":
         columnas_preferidas = [
             c
             for c in [
+                "numero_factura",
                 "factura",
                 "id",
                 "identificación",
@@ -3988,6 +3999,7 @@ elif menu == "POS":
                             total_linea = float(item["cantidad"]) * float(item["precio_unitario"])
                             supabase.table("detalle_venta").insert({
                                 "venta_id": str(venta_id),
+                            "numero_factura": numero_factura_pos,
                                 "producto_id": str(prod["id"]),
                                 "codigo": item["codigo"],
                                 "producto": item["producto"],
