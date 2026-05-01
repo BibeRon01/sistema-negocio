@@ -94,25 +94,17 @@ def es_cajera() -> bool:
 
 
 def numero_factura_visible(row: Any) -> str:
-    """
-    Muestra factura limpia. Prioridad:
-    1) numero_factura/factura/n_factura
-    2) si no existe, usa números del ID como referencia.
-    """
     try:
         for campo in ["numero_factura", "factura", "n_factura"]:
             val = row.get(campo)
-            if limpiar_texto(val):
-                nums = re.findall(r"\d+", limpiar_texto(val))
-                if nums:
-                    return nums[-1].zfill(5)
-                return limpiar_texto(val)
-
+            txt = limpiar_texto(val)
+            if txt:
+                if re.fullmatch(r"\d{1,5}", txt):
+                    return txt.zfill(5)
+                return txt
         val_id = row.get("id") or row.get("identificación") or row.get("identificacion")
         if limpiar_texto(val_id):
-            nums = re.findall(r"\d+", limpiar_texto(val_id))
-            if nums:
-                return nums[-1].zfill(5)
+            return limpiar_texto(val_id)
     except Exception:
         pass
     return ""
@@ -1693,8 +1685,7 @@ def generar_numero_factura_pos() -> str:
     """
     Genera una secuencia limpia de factura:
     00001, 00002, 00003...
-    Usa primero la columna numero_factura de ventas.
-    Si todavía no hay facturas, empieza en 00001.
+    Ignora números raros anteriores que salieron de UUID/ID.
     """
     try:
         resp = supabase.table("ventas").select("numero_factura").execute()
@@ -1706,20 +1697,14 @@ def generar_numero_factura_pos() -> str:
 
     if not ventas.empty and "numero_factura" in ventas.columns:
         for val in ventas["numero_factura"].dropna().astype(str):
-            nums = re.findall(r"\d+", val)
-            if nums:
+            txt = val.strip()
+            # Solo acepta secuencias limpias de 1 a 5 dígitos.
+            # Ej: 1, 01, 00001, 00025
+            if re.fullmatch(r"\d{1,5}", txt):
                 try:
-                    max_num = max(max_num, int(nums[-1]))
+                    max_num = max(max_num, int(txt))
                 except Exception:
                     pass
-
-    if max_num == 0:
-        try:
-            resp_count = supabase.table("ventas").select("id").execute()
-            existentes = resp_count.data or []
-            max_num = len(existentes)
-        except Exception:
-            max_num = len(DATA.get("ventas", pd.DataFrame()).index)
 
     return str(max_num + 1).zfill(5)
 
@@ -3987,7 +3972,7 @@ elif menu == "POS":
                             "dia_operativo": ahora_str(),
                             "ncf": ncf,
                             "numero_factura": numero_factura_pos,
-                            "tipo_venta": "POS",
+"tipo_venta": "POS",
                             "estado": "completada",
                             "anulado": False,
                         }).execute()
@@ -3999,8 +3984,7 @@ elif menu == "POS":
                             total_linea = float(item["cantidad"]) * float(item["precio_unitario"])
                             supabase.table("detalle_venta").insert({
                                 "venta_id": str(venta_id),
-                            "numero_factura": numero_factura_pos,
-                                "producto_id": str(prod["id"]),
+"producto_id": str(prod["id"]),
                                 "codigo": item["codigo"],
                                 "producto": item["producto"],
                                 "cantidad": float(item["cantidad"]),
@@ -4061,6 +4045,7 @@ elif menu == "POS":
                         DATA.update(cargar_datos())
                         st.session_state["pos_post_venta"] = {
                             "venta_id": str(venta_id),
+                            "numero_factura": numero_factura_pos,
                             "total": float(total_final),
                             "cambio": float(cambio),
                             "cliente_nombre": cliente_nombre,
