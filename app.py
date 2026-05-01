@@ -1368,8 +1368,43 @@ def rango_periodo(tipo_periodo: str):
     return hoy.replace(day=1), hoy
 
 
+
+def calcular_total_dinero_inventario() -> float:
+    """
+    Calcula el valor total del inventario:
+    existencia actual x costo.
+    Usa inventario_actual como fuente principal.
+    """
+    try:
+        inv = DATA.get("inventario_actual", pd.DataFrame()).copy()
+        if inv.empty:
+            return 0.0
+
+        col_exist = None
+        for c in ["existencia_sistema", "cantidad", "stock", "existencias"]:
+            if c in inv.columns:
+                col_exist = c
+                break
+
+        col_costo = None
+        for c in ["costo", "costo_unitario", "costo_promedio", "precio_compra", "ultimo_costo"]:
+            if c in inv.columns:
+                col_costo = c
+                break
+
+        if not col_exist or not col_costo:
+            return 0.0
+
+        inv[col_exist] = pd.to_numeric(inv[col_exist], errors="coerce").fillna(0)
+        inv[col_costo] = pd.to_numeric(inv[col_costo], errors="coerce").fillna(0)
+
+        return float((inv[col_exist] * inv[col_costo]).sum())
+    except Exception:
+        return 0.0
+
+
 def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0) -> dict[str, float]:
-    ventas_df = obtener_ventas_periodo_actualizadas(desde, hasta) if "obtener_ventas_periodo_actualizadas" in globals() else filtrar_por_fechas(DATA["ventas"], desde, hasta)
+    ventas_df = obtener_ventas_periodo_actualizadas(desde, hasta)
     compras_df = filtrar_por_fechas(DATA["compras"], desde, hasta)
     gastos_df = filtrar_por_fechas(DATA["gastos"], desde, hasta)
     perdidas_df = filtrar_por_fechas(DATA["perdidas"], desde, hasta)
@@ -1383,14 +1418,10 @@ def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0)
     empleados_variables = obtener_empleados_variables_periodo(DATA["gastos"], desde, hasta)
     perdidas_tot = suma_col(perdidas_df, "valor")
     retiros_tot = suma_col(dueno_df, "monto")
-    total_inventario_dinero = total_dinero_inventario_actual()
     adelantos_tot = suma_col(adelantos_df, "monto")
-
-    utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df) if "obtener_utilidad_bruta_periodo" in globals() else 0.0
+    utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df)
     utilidad_bruta = float(utilidad_bruta_ventas) + float(utilidad_bruta_manual)
 
-    # Retiros del dueño NO son gasto del negocio.
-    # Solo se descuentan del 65% que le corresponde al dueño.
     utilidad_neta = (
         float(utilidad_bruta)
         - gastos_fijos
@@ -1399,11 +1430,6 @@ def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0)
         - empleados_variables
         - perdidas_tot
     )
-
-    dueno_65 = utilidad_neta * 0.65
-    gerente_35 = utilidad_neta * 0.35
-    saldo_dueno_final = dueno_65 - retiros_tot
-
     return {
         "ventas": ventas_tot,
         "compras": compras_tot,
@@ -1418,12 +1444,9 @@ def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0)
         "utilidad_bruta_manual": float(utilidad_bruta_manual),
         "utilidad_bruta": float(utilidad_bruta),
         "utilidad_neta": utilidad_neta,
-        "dueno_65": dueno_65,
-        "retiros_dueno_aplicados": retiros_tot,
-        "saldo_dueno_final": saldo_dueno_final,
-        "gerente_35": gerente_35,
+        "dueno_65": utilidad_neta * 0.65,
+        "gerente_35": utilidad_neta * 0.35,
     }
-
 
 
 def serie_periodica(df: pd.DataFrame, columna: str, frecuencia: str = "M") -> pd.DataFrame:
@@ -1629,88 +1652,6 @@ def lanzar_impresion_navegador(html_doc: str):
     </html>
     """
     components.html(html_js, height=0, width=0)
-
-
-def preparar_vista_inventario_actual(invent: pd.DataFrame) -> pd.DataFrame:
-    """
-    Vista limpia para Inventario Actual:
-    Producto, Existencia, Costo, Precio, Valor inventario y Observación.
-    Oculta columnas técnicas y calcula valor_inventario = existencia * costo.
-    """
-    if invent is None or invent.empty:
-        return pd.DataFrame(columns=["producto", "existencia", "costo", "precio", "valor_inventario", "observacion"])
-
-    out = invent.copy()
-
-    # Normalizar columnas esperadas
-    if "producto" not in out.columns and "nombre" in out.columns:
-        out["producto"] = out["nombre"]
-
-    # Existencia
-    existencia = pd.Series([0.0] * len(out), index=out.index)
-    for col in ["existencia_sistema", "existencia", "existencias", "stock", "cantidad"]:
-        if col in out.columns:
-            vals = pd.to_numeric(out[col], errors="coerce")
-            existencia = existencia.where(existencia != 0, vals.fillna(0))
-    out["existencia"] = existencia.fillna(0).astype(float)
-
-    # Costo
-    costo = pd.Series([0.0] * len(out), index=out.index)
-    for col in ["costo", "costo_unitario", "costo_promedio", "precio_compra", "ultimo_costo"]:
-        if col in out.columns:
-            vals = pd.to_numeric(out[col], errors="coerce")
-            costo = costo.where(costo != 0, vals.fillna(0))
-    out["costo"] = costo.fillna(0).astype(float)
-
-    # Precio
-    precio = pd.Series([0.0] * len(out), index=out.index)
-    for col in ["precio", "precio_unitario", "precio_venta"]:
-        if col in out.columns:
-            vals = pd.to_numeric(out[col], errors="coerce")
-            precio = precio.where(precio != 0, vals.fillna(0))
-    out["precio"] = precio.fillna(0).astype(float)
-
-    out["valor_inventario"] = out["existencia"] * out["costo"]
-
-    if "observacion" not in out.columns:
-        out["observacion"] = ""
-
-    columnas = ["producto", "existencia", "costo", "precio", "valor_inventario", "observacion"]
-    return out[[c for c in columnas if c in out.columns]]
-
-
-def total_dinero_inventario_actual() -> float:
-    invent = DATA.get("inventario_actual", pd.DataFrame()).copy()
-    vista = preparar_vista_inventario_actual(invent)
-    return suma_col(vista, "valor_inventario")
-
-
-def codigo_producto_existe(codigo: str, excluir_id: Any = None) -> bool:
-    codigo_limpio = limpiar_texto(codigo)
-    if not codigo_limpio:
-        return False
-
-    df = DATA.get("productos", pd.DataFrame()).copy()
-    if df.empty or "codigo" not in df.columns:
-        return False
-
-    tmp = df.copy()
-    tmp["_codigo_norm"] = tmp["codigo"].astype(str).apply(normalizar_texto)
-    codigo_norm = normalizar_texto(codigo_limpio)
-    match = tmp[tmp["_codigo_norm"] == codigo_norm]
-
-    if excluir_id is not None and "id" in match.columns:
-        match = match[match["id"].astype(str) != str(excluir_id)]
-
-    return not match.empty
-
-
-def generar_codigo_automatico_producto() -> str:
-    import uuid
-    return f"PROD-{str(uuid.uuid4())[:8].upper()}"
-
-
-
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1794,19 +1735,15 @@ if menu == "Dashboard":
     utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df)
     utilidad_bruta_manual = st.number_input("Utilidad bruta manual / ajuste", min_value=0.0, step=1.0, key="dash_utilidad_bruta_manual")
     utilidad_bruta = float(utilidad_bruta_ventas) + float(utilidad_bruta_manual)
-    # Retiros del dueño NO son gasto del negocio.
-    # Solo se descuentan del 65% que le toca al dueño.
     utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
 
     dueno_65 = utilidad_neta * 0.65
     gerente_35 = utilidad_neta * 0.35
-    saldo_dueno_final = dueno_65 - retiros_tot
 
-    c1, c2, c3, c_inv = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     c1.metric("Ventas", f"RD$ {ventas_tot:,.2f}")
     c2.metric("Compras", f"RD$ {compras_tot:,.2f}")
     c3.metric("Pérdidas", f"RD$ {perdidas_tot:,.2f}")
-    c_inv.metric("Total dinero en inventario", f"RD$ {total_inventario_dinero:,.2f}")
 
     pagos_empleados_debug = filtrar_por_fechas(leer_pagos_empleados_actualizados(), desde, hasta)
     adelantos_tot = suma_col(pagos_empleados_debug, "monto")
@@ -1832,11 +1769,9 @@ if menu == "Dashboard":
     c12.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
     c13.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
 
-    c14, c15, c16 = st.columns(3)
+    c14, c15 = st.columns(2)
     c14.metric("35% gerente", f"RD$ {gerente_35:,.2f}")
-    c15.metric("Retiros dueño", f"RD$ {retiros_tot:,.2f}")
-    c16.metric("Saldo final dueño", f"RD$ {saldo_dueno_final:,.2f}")
-    st.caption("Nota: los retiros del dueño solo se descuentan del 65% del dueño; no afectan la utilidad neta ni el 35% del gerente.")
+    c15.metric("Ajuste manual utilidad", f"RD$ {utilidad_bruta_manual:,.2f}")
 
     st.subheader("📈 Gráficos")
     v_mes = agrupar_mensual(ventas_df, "total")
@@ -1988,11 +1923,9 @@ elif menu == "Productos":
                 existente = get_producto_por_codigo(codigo) if codigo else None
                 if existente is None:
                     existente = get_producto_por_nombre(nombre)
-                codigo_final = limpiar_texto(codigo) or generar_codigo_automatico_producto()
-
                 payload = {
                     "fecha": str(fecha),
-                    "codigo": codigo_final,
+                    "codigo": limpiar_texto(codigo),
                     "nombre": limpiar_texto(nombre),
                     "categoria": limpiar_texto(categoria),
                     "costo": float(costo),
@@ -2007,9 +1940,6 @@ elif menu == "Productos":
                 if "stock" in DATA["productos"].columns:
                     payload["stock"] = float(cantidad) if usa_inventario else 0.0
                 if existente is not None:
-                    if codigo_producto_existe(codigo_final, excluir_id=existente["id"]):
-                        st.error("⚠️ Ya existe otro producto con ese código. Cambia el código antes de guardar.")
-                        st.stop()
                     ok = actualizar("productos", existente["id"], payload)
                     if ok:
                         prod_sync = refrescar_producto_por_id(existente["id"])
@@ -2019,9 +1949,6 @@ elif menu == "Productos":
                         st.success("Producto actualizado sin duplicarse.")
                         st.rerun()
                 else:
-                    if codigo_producto_existe(codigo_final):
-                        st.error("⚠️ Ya existe un producto con ese código. No se puede duplicar.")
-                        st.stop()
                     ok = insertar("productos", payload)
                     if ok:
                         prod_sync = get_producto_por_codigo(limpiar_texto(codigo)) if limpiar_texto(codigo) else get_producto_por_nombre(limpiar_texto(nombre))
@@ -2051,7 +1978,6 @@ elif menu == "Productos":
 # =========================================================
 elif menu == "Inventario Actual":
     st.title("📊 Inventario Actual")
-    st.caption("Aquí puedes cargar el inventario inicial del sistema viejo y ver el dinero real que tienes en inventario.")
 
     with st.expander("📥 Subir Excel / CSV de inventario actual", expanded=True):
         st.write("Columnas esperadas: nombre o producto, cantidad o existencia_sistema. Costo y precio opcionales.")
@@ -2070,14 +1996,12 @@ elif menu == "Inventario Actual":
                     producto = limpiar_texto(row["producto"])
                     if not producto:
                         continue
-
                     existencia = limpiar_numero(row["existencia_sistema"]) or 0
                     fila_prod = get_producto_por_nombre(producto)
 
                     if fila_prod is not None:
                         costo = limpiar_numero(row["costo"]) if "costo" in df.columns else limpiar_numero(fila_prod.get("costo")) or 0
                         precio = limpiar_numero(row["precio"]) if "precio" in df.columns else limpiar_numero(fila_prod.get("precio")) or 0
-
                         actualizar(
                             "productos",
                             fila_prod["id"],
@@ -2110,27 +2034,13 @@ elif menu == "Inventario Actual":
     invent = DATA["inventario_actual"].copy()
     if not invent.empty:
         st.subheader("📋 Inventario guardado")
-
         d1, d2 = rango_fechas_ui("inventario_actual")
         invent = filtrar_por_fechas(invent, d1, d2)
         txt = st.text_input("Buscar en inventario actual", key="buscar_inv_actual")
         invent = buscar_df(invent, txt)
-
-        vista_inv = preparar_vista_inventario_actual(invent)
-
-        total_unidades = suma_col(vista_inv, "existencia")
-        total_dinero = suma_col(vista_inv, "valor_inventario")
-
-        m1, m2 = st.columns(2)
-        m1.metric("Total unidades en inventario", f"{total_unidades:,.0f}")
-        m2.metric("Total dinero en inventario", f"RD$ {total_dinero:,.2f}")
-
-        st.dataframe(vista_inv, use_container_width=True)
-        descargar_archivos(vista_inv, "inventario_actual_limpio")
-
-        with st.expander("🛠️ Ver tabla técnica / editar inventario", expanded=False):
-            st.dataframe(invent, use_container_width=True)
-            render_crud_generico("inventario_actual", invent, "🛠️ Editar / eliminar inventario actual")
+        st.dataframe(invent, use_container_width=True)
+        descargar_archivos(invent, "inventario_actual")
+        render_crud_generico("inventario_actual", invent, "🛠️ Editar / eliminar inventario actual")
     else:
         st.info("No hay inventario actual registrado.")
 
@@ -2992,22 +2902,6 @@ elif menu == "Compras":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "compras")
-
-        with st.expander("📊 Resumen de compras por producto", expanded=False):
-            if "producto" in df.columns:
-                cols_comp = [c for c in ["cantidad", "total", "monto"] if c in df.columns]
-                if cols_comp:
-                    rep_comp = df.copy()
-                    for c in cols_comp:
-                        rep_comp[c] = pd.to_numeric(rep_comp[c], errors="coerce").fillna(0)
-                    rep_comp = rep_comp.groupby("producto", as_index=False)[cols_comp].sum()
-                    st.dataframe(rep_comp, use_container_width=True)
-                    descargar_archivos(rep_comp, "compras_por_producto")
-                else:
-                    st.info("No hay columnas de cantidad/total para resumir.")
-            else:
-                st.info("No hay columna producto en compras.")
-
         render_crud_generico("compras", df, "🛠️ Editar / eliminar compras")
     else:
         st.info("No hay compras registradas.")
@@ -3628,9 +3522,8 @@ elif menu == "Estado de Resultados":
             ["Empleados variables", empleados_variables],
             ["Adelantos", adelantos_tot],
             ["Pérdidas", perdidas_tot],
-            ["Retiros del dueño (se descuenta solo al 65%)", retiros_tot],
+            ["Retiros del dueño", retiros_tot],
             ["65% dueño", utilidad_neta * 0.65],
-            ["Saldo final dueño", (utilidad_neta * 0.65) - retiros_tot],
             ["35% gerente", utilidad_neta * 0.35],
             ["Utilidad neta", utilidad_neta],
         ],
@@ -3751,43 +3644,6 @@ elif menu == "Reportes":
     if not perdidas_s.empty:
         st.write("Pérdidas")
         st.line_chart(perdidas_s.set_index("periodo"))
-
-
-    st.subheader("📦 Reporte de ventas por producto")
-    detalle_ventas_df = filtrar_por_fechas(DATA.get("detalle_venta", pd.DataFrame()).copy(), desde, hasta) if "fecha" in DATA.get("detalle_venta", pd.DataFrame()).columns else DATA.get("detalle_venta", pd.DataFrame()).copy()
-    if not detalle_ventas_df.empty and "producto" in detalle_ventas_df.columns:
-        cols_sum = [c for c in ["cantidad", "total_linea", "ganancia_linea"] if c in detalle_ventas_df.columns]
-        if cols_sum:
-            rep_prod = detalle_ventas_df.copy()
-            for c in cols_sum:
-                rep_prod[c] = pd.to_numeric(rep_prod[c], errors="coerce").fillna(0)
-            rep_prod = rep_prod.groupby("producto", as_index=False)[cols_sum].sum()
-            st.dataframe(rep_prod, use_container_width=True)
-            descargar_archivos(rep_prod, "reporte_ventas_por_producto")
-    else:
-        st.info("No hay detalle de ventas para este reporte.")
-
-    st.subheader("📉 Reporte de pérdidas por producto")
-    perdidas_rep = filtrar_por_fechas(DATA["perdidas"], desde, hasta).copy()
-    if not perdidas_rep.empty and "producto" in perdidas_rep.columns:
-        cols_perd = [c for c in ["cantidad", "valor"] if c in perdidas_rep.columns]
-        if cols_perd:
-            for c in cols_perd:
-                perdidas_rep[c] = pd.to_numeric(perdidas_rep[c], errors="coerce").fillna(0)
-            rep_perd = perdidas_rep.groupby("producto", as_index=False)[cols_perd].sum()
-            st.dataframe(rep_perd, use_container_width=True)
-            descargar_archivos(rep_perd, "reporte_perdidas_por_producto")
-    else:
-        st.info("No hay pérdidas para este reporte.")
-
-    st.subheader("💵 Reporte de pagos a empleados")
-    pagos_emp = filtrar_por_fechas(DATA["adelantos_empleados"], desde, hasta).copy()
-    if not pagos_emp.empty:
-        st.dataframe(pagos_emp, use_container_width=True)
-        descargar_archivos(pagos_emp, "reporte_pagos_empleados")
-    else:
-        st.info("No hay pagos a empleados en este rango.")
-
 
 # =========================================================
 # AUDITORÍA
