@@ -1661,6 +1661,10 @@ def construir_html_impresion(post_venta: dict, tipo: str = "factura") -> str:
 
 
 def lanzar_impresion_navegador(html_doc: str):
+    """
+    Abre una ventana imprimible. Si el navegador bloquea el pop-up,
+    el usuario podrá imprimir desde la vista previa con el botón interno.
+    """
     html_js = f"""
     <html>
     <body>
@@ -1674,13 +1678,15 @@ def lanzar_impresion_navegador(html_doc: str):
         w.focus();
         setTimeout(() => {{
           w.print();
-        }}, 300);
+        }}, 500);
+      }} else {{
+        alert('El navegador bloqueó la ventana de impresión. Usa el botón Imprimir dentro de la vista previa.');
       }}
     </script>
     </body>
     </html>
     """
-    components.html(html_js, height=0, width=0)
+    components.html(html_js, height=80, width=300)
 
 def generar_numero_factura_pos() -> str:
     """
@@ -1710,36 +1716,80 @@ def generar_numero_factura_pos() -> str:
 def mostrar_factura_pos(post_venta: dict):
     """
     Muestra factura/ticket visible y descargable para cajera y admin.
+    Incluye botón de impresión dentro de la vista previa para evitar bloqueo de pop-ups.
     """
     if not post_venta:
         return
 
     html_factura = construir_html_impresion(post_venta, "factura")
     html_ticket = construir_html_impresion(post_venta, "ticket")
+    venta_ref = post_venta.get("numero_factura") or post_venta.get("venta_id") or "factura"
 
     st.markdown("### 🧾 Factura / Ticket")
-    st.caption("Permitido para cajera y administradora. Puedes imprimir o descargar la factura.")
+    st.caption("Permitido para cajera y administradora. Si el navegador bloquea la impresión automática, usa el botón dentro de la vista previa.")
 
     p1, p2, p3 = st.columns(3)
     with p1:
         if st.button("🖨️ Imprimir factura", key=f"btn_pos_imprimir_factura_{post_venta.get('venta_id')}"):
             lanzar_impresion_navegador(html_factura)
-            st.success("Factura enviada al navegador para imprimir.")
+            st.success("Factura enviada al navegador para imprimir. Si no se abrió, usa el botón dentro de la vista previa.")
     with p2:
         if st.button("🖨️ Imprimir ticket", key=f"btn_pos_imprimir_ticket_{post_venta.get('venta_id')}"):
             lanzar_impresion_navegador(html_ticket)
-            st.success("Ticket enviado al navegador para imprimir.")
+            st.success("Ticket enviado al navegador para imprimir. Si no se abrió, usa el botón dentro de la vista previa.")
     with p3:
         st.download_button(
             "⬇️ Descargar factura",
             data=html_factura.encode("utf-8"),
-            file_name=f"factura_{post_venta.get('numero_factura') or post_venta.get('venta_id')}.html",
+            file_name=f"factura_{venta_ref}.html",
             mime="text/html",
             key=f"descargar_factura_html_{post_venta.get('venta_id')}",
         )
 
+    html_preview = f"""
+    <html>
+    <head>
+      <meta charset='utf-8'>
+      <style>
+        body {{ font-family: Arial, sans-serif; padding: 12px; }}
+        .toolbar {{
+          position: sticky;
+          top: 0;
+          background: #ffffff;
+          padding: 10px;
+          border-bottom: 1px solid #ddd;
+          z-index: 999;
+          text-align: center;
+        }}
+        .btn {{
+          padding: 10px 18px;
+          border: none;
+          border-radius: 6px;
+          background: #0f766e;
+          color: white;
+          font-weight: bold;
+          cursor: pointer;
+          margin: 4px;
+        }}
+        @media print {{
+          .toolbar {{ display: none; }}
+          body {{ padding: 0; }}
+        }}
+      </style>
+    </head>
+    <body>
+      <div class='toolbar'>
+        <button class='btn' onclick='window.print()'>🖨️ Imprimir esta factura</button>
+        <button class='btn' onclick='document.body.style.zoom="85%"'>Ajustar vista</button>
+      </div>
+      {html_factura}
+    </body>
+    </html>
+    """
+
     with st.expander("👁️ Ver factura antes de imprimir", expanded=True):
-        components.html(html_factura, height=620, scrolling=True)
+        components.html(html_preview, height=760, scrolling=True)
+        st.info("Para imprimir: usa el botón verde dentro de la factura. También puedes descargarla y abrirla en Chrome.")
 
 
 # =========================================================
