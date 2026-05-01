@@ -760,6 +760,37 @@ def registrar_auditoria(accion: str, tabla: str, detalle: str = ""):
 
 
 
+def total_contable_sin_recargo(row) -> float:
+    """
+    Total real para contabilidad/caja/dashboard.
+    El recargo de tarjeta NO se toma como ingreso real.
+    """
+    try:
+        total = float(limpiar_numero(row.get("total")) or 0)
+        recargo = float(limpiar_numero(row.get("recargo")) or limpiar_numero(row.get("recargo_tarjeta")) or 0)
+        return max(total - recargo, 0)
+    except Exception:
+        try:
+            return float(limpiar_numero(row.get("subtotal")) or limpiar_numero(row.get("total")) or 0)
+        except Exception:
+            return 0.0
+
+
+def aplicar_total_contable_df(df):
+    """
+    Crea una columna total_contable = total - recargo.
+    Debe estar definida antes de cargar_datos().
+    """
+    try:
+        if df is None or df.empty:
+            return df
+        out = df.copy()
+        out["total_contable"] = out.apply(total_contable_sin_recargo, axis=1)
+        return out
+    except Exception:
+        return df
+
+
 def leer_tabla(nombre_tabla: str, order_by: str = "id") -> pd.DataFrame:
     try:
         resp = supabase.table(nombre_tabla).select("*").order(order_by).execute()
@@ -1786,30 +1817,6 @@ def mostrar_factura_pos(post_venta: dict):
         components.html(html_preview, height=760, scrolling=True)
         st.info("Para imprimir: usa el botón verde dentro de la factura. También puedes descargarla y abrirla en Chrome.")
 
-
-
-def total_contable_sin_recargo(row: Any) -> float:
-    """
-    Total real para contabilidad/caja/dashboard.
-    El recargo de tarjeta NO se toma como ingreso real.
-    """
-    try:
-        total = float(limpiar_numero(row.get("total")) or 0)
-        recargo = float(limpiar_numero(row.get("recargo")) or limpiar_numero(row.get("recargo_tarjeta")) or 0)
-        return max(total - recargo, 0)
-    except Exception:
-        return float(limpiar_numero(row.get("subtotal")) or limpiar_numero(row.get("total")) or 0)
-
-
-def aplicar_total_contable_df(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Crea una columna total_contable = total - recargo.
-    """
-    if df is None or df.empty:
-        return df
-    out = df.copy()
-    out["total_contable"] = out.apply(total_contable_sin_recargo, axis=1)
-    return out
 
 
 # =========================================================
