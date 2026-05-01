@@ -4613,11 +4613,13 @@ elif menu == "POS":
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
             csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
 
+            tarjeta_info = float(locals().get("tarjeta", 0) or locals().get("pago_tarjeta", 0) or 0)
+            recargo_info = float(locals().get("recargo", 0) or locals().get("recargo_tarjeta", 0) or 0)
             st.markdown("### 💳 Recargo de tarjeta")
             st.info(
-                f"Tarjeta registrada para contabilidad: RD$ {tarjeta:,.2f} | "
-                f"Recargo informativo 4%: RD$ {recargo:,.2f} | "
-                f"Total que debes cobrar por tarjeta: RD$ {tarjeta + recargo:,.2f}"
+                f"Tarjeta registrada para contabilidad: RD$ {tarjeta_info:,.2f} | "
+                f"Recargo informativo 4%: RD$ {recargo_info:,.2f} | "
+                f"Total que debes cobrar por tarjeta: RD$ {tarjeta_info + recargo_info:,.2f}"
             )
             st.caption("El recargo de tarjeta es solo para saber cuánto cobrar al cliente. No entra en caja, dashboard ni utilidad.")
 
