@@ -1369,7 +1369,7 @@ def rango_periodo(tipo_periodo: str):
 
 
 def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0) -> dict[str, float]:
-    ventas_df = obtener_ventas_periodo_actualizadas(desde, hasta)
+    ventas_df = obtener_ventas_periodo_actualizadas(desde, hasta) if "obtener_ventas_periodo_actualizadas" in globals() else filtrar_por_fechas(DATA["ventas"], desde, hasta)
     compras_df = filtrar_por_fechas(DATA["compras"], desde, hasta)
     gastos_df = filtrar_por_fechas(DATA["gastos"], desde, hasta)
     perdidas_df = filtrar_por_fechas(DATA["perdidas"], desde, hasta)
@@ -1384,9 +1384,12 @@ def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0)
     perdidas_tot = suma_col(perdidas_df, "valor")
     retiros_tot = suma_col(dueno_df, "monto")
     adelantos_tot = suma_col(adelantos_df, "monto")
-    utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df)
+
+    utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df) if "obtener_utilidad_bruta_periodo" in globals() else 0.0
     utilidad_bruta = float(utilidad_bruta_ventas) + float(utilidad_bruta_manual)
 
+    # Retiros del dueño NO son gasto del negocio.
+    # Solo se descuentan del 65% que le corresponde al dueño.
     utilidad_neta = (
         float(utilidad_bruta)
         - gastos_fijos
@@ -1395,6 +1398,11 @@ def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0)
         - empleados_variables
         - perdidas_tot
     )
+
+    dueno_65 = utilidad_neta * 0.65
+    gerente_35 = utilidad_neta * 0.35
+    saldo_dueno_final = dueno_65 - retiros_tot
+
     return {
         "ventas": ventas_tot,
         "compras": compras_tot,
@@ -1409,9 +1417,12 @@ def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0)
         "utilidad_bruta_manual": float(utilidad_bruta_manual),
         "utilidad_bruta": float(utilidad_bruta),
         "utilidad_neta": utilidad_neta,
-        "dueno_65": utilidad_neta * 0.65,
-        "gerente_35": utilidad_neta * 0.35,
+        "dueno_65": dueno_65,
+        "retiros_dueno_aplicados": retiros_tot,
+        "saldo_dueno_final": saldo_dueno_final,
+        "gerente_35": gerente_35,
     }
+
 
 
 def serie_periodica(df: pd.DataFrame, columna: str, frecuencia: str = "M") -> pd.DataFrame:
@@ -1700,10 +1711,13 @@ if menu == "Dashboard":
     utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df)
     utilidad_bruta_manual = st.number_input("Utilidad bruta manual / ajuste", min_value=0.0, step=1.0, key="dash_utilidad_bruta_manual")
     utilidad_bruta = float(utilidad_bruta_ventas) + float(utilidad_bruta_manual)
+    # Retiros del dueño NO son gasto del negocio.
+    # Solo se descuentan del 65% que le toca al dueño.
     utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
 
     dueno_65 = utilidad_neta * 0.65
     gerente_35 = utilidad_neta * 0.35
+    saldo_dueno_final = dueno_65 - retiros_tot
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Ventas", f"RD$ {ventas_tot:,.2f}")
@@ -1734,9 +1748,11 @@ if menu == "Dashboard":
     c12.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
     c13.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
 
-    c14, c15 = st.columns(2)
+    c14, c15, c16 = st.columns(3)
     c14.metric("35% gerente", f"RD$ {gerente_35:,.2f}")
-    c15.metric("Ajuste manual utilidad", f"RD$ {utilidad_bruta_manual:,.2f}")
+    c15.metric("Retiros dueño", f"RD$ {retiros_tot:,.2f}")
+    c16.metric("Saldo final dueño", f"RD$ {saldo_dueno_final:,.2f}")
+    st.caption("Nota: los retiros del dueño solo se descuentan del 65% del dueño; no afectan la utilidad neta ni el 35% del gerente.")
 
     st.subheader("📈 Gráficos")
     v_mes = agrupar_mensual(ventas_df, "total")
@@ -3487,8 +3503,9 @@ elif menu == "Estado de Resultados":
             ["Empleados variables", empleados_variables],
             ["Adelantos", adelantos_tot],
             ["Pérdidas", perdidas_tot],
-            ["Retiros del dueño", retiros_tot],
+            ["Retiros del dueño (se descuenta solo al 65%)", retiros_tot],
             ["65% dueño", utilidad_neta * 0.65],
+            ["Saldo final dueño", (utilidad_neta * 0.65) - retiros_tot],
             ["35% gerente", utilidad_neta * 0.35],
             ["Utilidad neta", utilidad_neta],
         ],
