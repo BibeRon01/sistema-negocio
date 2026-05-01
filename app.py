@@ -4466,6 +4466,20 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
+
+    def _actualizar_cantidad_carrito_pos(idx_item, nueva_cantidad):
+        try:
+            nueva_cantidad = float(nueva_cantidad)
+            if nueva_cantidad <= 0:
+                return
+            item = st.session_state["carrito"][idx_item]
+            precio = float(item.get("precio_unitario", item.get("precio", 0)) or 0)
+            item["cantidad"] = nueva_cantidad
+            item["total_linea"] = nueva_cantidad * precio
+            st.session_state["carrito"][idx_item] = item
+        except Exception as e:
+            st.warning(f"No se pudo actualizar la cantidad: {e}")
+
     caja_activa = obtener_caja_abierta()
     if caja_activa is None:
         st.warning("Debes abrir la caja antes de vender.")
@@ -4565,7 +4579,7 @@ elif menu == "POS":
             df_carrito = pd.DataFrame(carrito)
             st.data_editor(df_carrito, use_container_width=True, disabled=["producto_id", "codigo", "producto"], key="editor_carrito")
 
-            st.caption("Si te equivocas antes de cobrar, quita el producto aquí mismo.")
+            st.caption("Si te equivocas antes de cobrar, puedes cambiar la cantidad o quitar el producto aquí mismo.")
             for i, item in enumerate(list(carrito)):
                 col_q1, col_q2, col_q3, col_q4 = st.columns([4, 2, 2, 1])
                 with col_q1:
@@ -4611,8 +4625,13 @@ elif menu == "POS":
             csum1.metric("Subtotal", f"RD$ {subtotal:,.2f}")
             csum2.metric("Recargo tarjeta", f"RD$ {recargo:,.2f}")
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
-            csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
+            csum4.metric("Cambio / faltante", f"RD$ {cambio_real:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante_real:,.2f}")
 
+            total_real_para_cuadrar = float(subtotal)
+            total_cobrar_cliente = float(total_final)
+            pagos_reales_registrados = float(efectivo) + float(transferencia) + float(tarjeta) + float(credito)
+            faltante_real = max(total_real_para_cuadrar - pagos_reales_registrados, 0.0)
+            cambio_real = max(pagos_reales_registrados - total_real_para_cuadrar, 0.0)
             tarjeta_info = float(locals().get("tarjeta", 0) or locals().get("pago_tarjeta", 0) or 0)
             recargo_info = float(locals().get("recargo", 0) or locals().get("recargo_tarjeta", 0) or 0)
             st.markdown("### 💳 Recargo de tarjeta")
@@ -4621,7 +4640,7 @@ elif menu == "POS":
                 f"Recargo informativo 4%: RD$ {recargo_info:,.2f} | "
                 f"Total que debes cobrar por tarjeta: RD$ {tarjeta_info + recargo_info:,.2f}"
             )
-            st.caption("El recargo de tarjeta es solo para saber cuánto cobrar al cliente. No entra en caja, dashboard ni utilidad.")
+            st.caption("Ese recargo no se escribe en efectivo, transferencia ni crédito. Solo informa cuánto cobrar por tarjeta.")
 
             ncf = st.text_input("NCF (opcional)", key="pos_ncf")
             numero_factura_pos = generar_numero_factura_pos()
@@ -4724,7 +4743,7 @@ elif menu == "POS":
                         st.session_state["pos_post_venta"] = {
                             "venta_id": str(venta_id),
                             "numero_factura": numero_factura_pos,
-                            "total": float(total_final),
+                            "total": float(subtotal),
                             "total_real": float(subtotal),
                             "cambio": float(cambio),
                             "cliente_nombre": cliente_nombre,
