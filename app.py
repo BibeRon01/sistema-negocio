@@ -3600,13 +3600,38 @@ elif menu == "Caja":
     usuario_act = nombre_usuario_actual() if "nombre_usuario_actual" in globals() else usuario_sesion().get("usuario", "")
     hoy = date.today()
 
-    def _obtener_caja_abierta():
+    def _leer_cajas():
         try:
-            resp = supabase.table("caja").select("*").eq("estado", "abierta").eq("usuario", usuario_act).order("fecha_apertura", desc=True).limit(1).execute()
+            resp = supabase.table("caja").select("*").order("fecha_apertura", desc=True).execute()
+            return pd.DataFrame(resp.data or [])
+        except Exception:
+            return DATA.get("caja", pd.DataFrame()).copy()
+
+    def _obtener_caja_abierta_usuario(usuario_nombre=None):
+        usuario_nombre = usuario_nombre or usuario_act
+        try:
+            resp = (
+                supabase.table("caja")
+                .select("*")
+                .eq("estado", "abierta")
+                .eq("usuario", usuario_nombre)
+                .order("fecha_apertura", desc=True)
+                .limit(1)
+                .execute()
+            )
             data = resp.data or []
             return data[0] if data else None
         except Exception:
-            return None
+            cajas = _leer_cajas()
+            if cajas.empty:
+                return None
+            if "estado" in cajas.columns:
+                cajas = cajas[cajas["estado"].astype(str).apply(normalizar_texto) == "abierta"]
+            if "usuario" in cajas.columns:
+                cajas = cajas[cajas["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario_nombre)]
+            if cajas.empty:
+                return None
+            return cajas.iloc[0].to_dict()
 
     def _ventas_de_caja(caja):
         try:
@@ -3621,15 +3646,15 @@ elif menu == "Caja":
                 apertura_dt = pd.to_datetime(fecha_apertura, errors="coerce")
                 ventas = ventas[ventas["_fecha_dt"] >= apertura_dt]
 
-            # Si la venta guarda caja_id, usamos caja_id. Si no, usamos usuario.
             caja_id = caja.get("id")
             if "caja_id" in ventas.columns and caja_id:
                 ventas_caja = ventas[ventas["caja_id"].astype(str) == str(caja_id)].copy()
                 if not ventas_caja.empty:
                     return ventas_caja
 
+            usuario_caja = caja.get("usuario") or usuario_act
             if "usuario" in ventas.columns:
-                ventas = ventas[ventas["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario_act)]
+                ventas = ventas[ventas["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario_caja)]
 
             return ventas
         except Exception:
@@ -3642,9 +3667,82 @@ elif menu == "Caja":
         total_col = "total_contable" if "total_contable" in df.columns else "total"
         if not metodo_col or total_col not in df.columns:
             return 0.0
-        return float(pd.to_numeric(df[df[metodo_col].astype(str).apply(normalizar_texto) == metodo_buscar][total_col], errors="coerce").fillna(0).sum())
+        return float(
+            pd.to_numeric(
+                df[df[metodo_col].astype(str).apply(normalizar_texto) == metodo_buscar][total_col],
+                errors="coerce",
+            ).fillna(0).sum()
+        )
 
-    caja_abierta = _obtener_caja_abierta()
+    def _calcular_resumen_caja(caja):
+        ventas_caja = _ventas_de_caja(caja)
+        fondo_inicial = float(limpiar_numero(caja.get("monto_inicial")) or 0)
+        venta_efectivo = _sumar_metodo(ventas_caja, "efectivo")
+        venta_transferencia = _sumar_metodo(ventas_caja, "transferencia")
+        venta_tarjeta = _sumar_metodo(ventas_caja, "tarjeta")
+        venta_credito = _sumar_metodo(ventas_caja, "credito")
+        total_col = "total_contable" if "total_contable" in ventas_caja.columns else "total"
+        total_ventas = suma_col(ventas_caja, total_col) if not ventas_caja.empty else 0.0
+        efectivo_esperado = fondo_inicial + venta_efectivo
+        return {
+            "ventas_df": ventas_caja,
+            "fondo_inicial": fondo_inicial,
+            "venta_efectivo": venta_efectivo,
+            "venta_transferencia": venta_transferencia,
+            "venta_tarjeta": venta_tarjeta,
+            "venta_credito": venta_credito,
+            "total_ventas": total_ventas,
+            "efectivo_esperado": efectivo_esperado,
+        }
+
+    def _cerrar_caja(caja, efectivo_contado, obs_cierre, usuario_cierre=None):
+        usuario_cierre = usuario_cierre or usuario_act
+        resumen = _calcular_resumen_caja(caja)
+
+        diferencia = float(efectivo_contado) - float(resumen["efectivo_esperado"])
+        faltante = abs(diferencia) if diferencia < 0 else 0.0
+        sobrante = diferencia if diferencia > 0 else 0.0
+
+        cierre_payload = {
+            "fecha_cierre": datetime.now().isoformat(),
+            "estado": "cerrada",
+            "efectivo_contado": float(efectivo_contado),
+            "efectivo_esperado": float(resumen["efectivo_esperado"]),
+            "total_efectivo": float(resumen["venta_efectivo"]),
+            "total_transferencia": float(resumen["venta_transferencia"]),
+            "total_tarjeta": float(resumen["venta_tarjeta"]),
+            "total_credito": float(resumen["venta_credito"]),
+            "total_ventas": float(resumen["total_ventas"]),
+            "faltante": float(faltante),
+            "sobrante": float(sobrante),
+            "diferencia": float(diferencia),
+            "observacion": obs_cierre,
+        }
+
+        ok_update = actualizar("caja", caja.get("id"), cierre_payload)
+
+        cierre_reg = {
+            "caja_id": str(caja.get("id")),
+            "usuario": caja.get("usuario") or usuario_cierre,
+            "usuario_id": str(caja.get("usuario_id") or usuario_sesion().get("id", "")),
+            "fecha": datetime.now().isoformat(),
+            "monto_inicial": float(resumen["fondo_inicial"]),
+            "efectivo_contado": float(efectivo_contado),
+            "efectivo_esperado": float(resumen["efectivo_esperado"]),
+            "total_efectivo": float(resumen["venta_efectivo"]),
+            "total_transferencia": float(resumen["venta_transferencia"]),
+            "total_tarjeta": float(resumen["venta_tarjeta"]),
+            "total_credito": float(resumen["venta_credito"]),
+            "total_ventas": float(resumen["total_ventas"]),
+            "faltante": float(faltante),
+            "sobrante": float(sobrante),
+            "diferencia": float(diferencia),
+            "observacion": obs_cierre,
+        }
+        insertar("cierre_caja", cierre_reg)
+        return ok_update
+
+    caja_abierta = _obtener_caja_abierta_usuario(usuario_act)
 
     if not caja_abierta:
         st.subheader("🔓 Abrir caja")
@@ -3671,30 +3769,20 @@ elif menu == "Caja":
     else:
         st.success("Tienes una caja abierta.")
 
-        ventas_caja = _ventas_de_caja(caja_abierta)
-
-        fondo_inicial = float(limpiar_numero(caja_abierta.get("monto_inicial")) or 0)
-        venta_efectivo = _sumar_metodo(ventas_caja, "efectivo")
-        venta_transferencia = _sumar_metodo(ventas_caja, "transferencia")
-        venta_tarjeta = _sumar_metodo(ventas_caja, "tarjeta")
-        venta_credito = _sumar_metodo(ventas_caja, "credito")
-        # Algunas ventas mixtas quedan marcadas como mixto. Para no perderlas, se suman al total vendido,
-        # pero el efectivo esperado solo usa efectivo real + fondo inicial.
-        total_col = "total_contable" if "total_contable" in ventas_caja.columns else "total"
-        total_ventas = suma_col(ventas_caja, total_col) if not ventas_caja.empty else 0.0
-        efectivo_esperado = fondo_inicial + venta_efectivo
+        resumen = _calcular_resumen_caja(caja_abierta)
+        ventas_caja = resumen["ventas_df"]
 
         st.markdown("### 📌 Resumen de caja")
         r1, r2, r3, r4 = st.columns(4)
-        r1.metric("Caja inicial", f"RD$ {fondo_inicial:,.2f}")
-        r2.metric("Ventas efectivo", f"RD$ {venta_efectivo:,.2f}")
-        r3.metric("Efectivo esperado", f"RD$ {efectivo_esperado:,.2f}")
-        r4.metric("Total ventas", f"RD$ {total_ventas:,.2f}")
+        r1.metric("Caja inicial", f"RD$ {resumen['fondo_inicial']:,.2f}")
+        r2.metric("Ventas efectivo", f"RD$ {resumen['venta_efectivo']:,.2f}")
+        r3.metric("Efectivo esperado", f"RD$ {resumen['efectivo_esperado']:,.2f}")
+        r4.metric("Total ventas", f"RD$ {resumen['total_ventas']:,.2f}")
 
         r5, r6, r7 = st.columns(3)
-        r5.metric("Transferencia", f"RD$ {venta_transferencia:,.2f}")
-        r6.metric("Tarjeta", f"RD$ {venta_tarjeta:,.2f}")
-        r7.metric("Crédito", f"RD$ {venta_credito:,.2f}")
+        r5.metric("Transferencia", f"RD$ {resumen['venta_transferencia']:,.2f}")
+        r6.metric("Tarjeta", f"RD$ {resumen['venta_tarjeta']:,.2f}")
+        r7.metric("Crédito", f"RD$ {resumen['venta_credito']:,.2f}")
 
         with st.expander("🔎 Ver ventas tomadas para este cierre", expanded=False):
             if ventas_caja.empty:
@@ -3711,16 +3799,16 @@ elif menu == "Caja":
             "Efectivo físico contado",
             min_value=0.0,
             step=1.0,
-            value=float(efectivo_esperado),
+            value=float(resumen["efectivo_esperado"]),
             key="caja_efectivo_fisico_contado",
         )
 
-        diferencia = float(efectivo_contado) - float(efectivo_esperado)
+        diferencia = float(efectivo_contado) - float(resumen["efectivo_esperado"])
         faltante = abs(diferencia) if diferencia < 0 else 0.0
         sobrante = diferencia if diferencia > 0 else 0.0
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Efectivo esperado", f"RD$ {efectivo_esperado:,.2f}")
+        c1.metric("Efectivo esperado", f"RD$ {resumen['efectivo_esperado']:,.2f}")
         c2.metric("Efectivo contado", f"RD$ {efectivo_contado:,.2f}")
         if diferencia < 0:
             c3.metric("Faltante", f"RD$ {faltante:,.2f}")
@@ -3732,42 +3820,7 @@ elif menu == "Caja":
         obs_cierre = st.text_area("Observación de cierre", key="caja_obs_cierre")
 
         if st.button("Cerrar caja", key="btn_cerrar_caja_pro"):
-            cierre_payload = {
-                "fecha_cierre": datetime.now().isoformat(),
-                "estado": "cerrada",
-                "efectivo_contado": float(efectivo_contado),
-                "efectivo_esperado": float(efectivo_esperado),
-                "total_efectivo": float(venta_efectivo),
-                "total_transferencia": float(venta_transferencia),
-                "total_tarjeta": float(venta_tarjeta),
-                "total_credito": float(venta_credito),
-                "total_ventas": float(total_ventas),
-                "faltante": float(faltante),
-                "sobrante": float(sobrante),
-                "diferencia": float(diferencia),
-                "observacion": obs_cierre,
-            }
-            ok_update = actualizar("caja", caja_abierta.get("id"), cierre_payload)
-
-            cierre_reg = {
-                "caja_id": str(caja_abierta.get("id")),
-                "usuario": usuario_act,
-                "fecha": datetime.now().isoformat(),
-                "monto_inicial": float(fondo_inicial),
-                "efectivo_contado": float(efectivo_contado),
-                "efectivo_esperado": float(efectivo_esperado),
-                "total_efectivo": float(venta_efectivo),
-                "total_transferencia": float(venta_transferencia),
-                "total_tarjeta": float(venta_tarjeta),
-                "total_credito": float(venta_credito),
-                "total_ventas": float(total_ventas),
-                "faltante": float(faltante),
-                "sobrante": float(sobrante),
-                "diferencia": float(diferencia),
-                "observacion": obs_cierre,
-            }
-            insertar("cierre_caja", cierre_reg)
-
+            ok_update = _cerrar_caja(caja_abierta, efectivo_contado, obs_cierre, usuario_act)
             if ok_update:
                 st.success("Caja cerrada correctamente.")
                 st.rerun()
@@ -3778,9 +3831,138 @@ elif menu == "Caja":
     if cierres.empty:
         st.info("No hay cierres de caja registrados.")
     else:
+        if es_cajera() and "usuario" in cierres.columns:
+            cierres = cierres[cierres["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario_act)]
         st.dataframe(cierres, use_container_width=True)
         if not es_cajera():
             descargar_archivos(cierres, "cierres_caja")
+
+    if es_admin():
+        st.markdown("---")
+        st.subheader("🧑‍💼 Control administrativo de cajas")
+
+        cajas_admin = _leer_cajas()
+        if cajas_admin.empty:
+            st.info("No hay cajas registradas.")
+        else:
+            cfa, cfb, cfc = st.columns(3)
+            usuarios = ["Todos"]
+            if "usuario" in cajas_admin.columns:
+                usuarios += sorted([u for u in cajas_admin["usuario"].dropna().astype(str).unique().tolist() if u])
+            usuario_filtro = cfa.selectbox("Filtrar por usuario", usuarios, key="admin_caja_usuario")
+            estado_filtro = cfb.selectbox("Filtrar por estado", ["Todos", "abierta", "cerrada"], key="admin_caja_estado")
+            texto_filtro = cfc.text_input("Buscar", key="admin_caja_buscar")
+
+            cajas_vista = cajas_admin.copy()
+            if usuario_filtro != "Todos" and "usuario" in cajas_vista.columns:
+                cajas_vista = cajas_vista[cajas_vista["usuario"].astype(str) == usuario_filtro]
+            if estado_filtro != "Todos" and "estado" in cajas_vista.columns:
+                cajas_vista = cajas_vista[cajas_vista["estado"].astype(str).apply(normalizar_texto) == estado_filtro]
+            cajas_vista = buscar_df(cajas_vista, texto_filtro)
+
+            cols_caja = [c for c in [
+                "id", "usuario", "fecha_apertura", "fecha_cierre", "estado", "monto_inicial",
+                "efectivo_esperado", "efectivo_contado", "diferencia", "faltante", "sobrante",
+                "total_ventas", "total_efectivo", "total_transferencia", "total_tarjeta", "total_credito", "observacion"
+            ] if c in cajas_vista.columns]
+            st.dataframe(cajas_vista[cols_caja] if cols_caja else cajas_vista, use_container_width=True)
+
+            cajas_abiertas = cajas_admin.copy()
+            if "estado" in cajas_abiertas.columns:
+                cajas_abiertas = cajas_abiertas[cajas_abiertas["estado"].astype(str).apply(normalizar_texto) == "abierta"]
+
+            with st.expander("🔐 Cerrar caja abierta como administradora", expanded=False):
+                if cajas_abiertas.empty:
+                    st.info("No hay cajas abiertas.")
+                else:
+                    opciones = []
+                    mapa = {}
+                    for _, r in cajas_abiertas.iterrows():
+                        etiqueta = f"{r.get('usuario','')} | apertura: {r.get('fecha_apertura','')} | fondo RD$ {float(limpiar_numero(r.get('monto_inicial')) or 0):,.2f}"
+                        opciones.append(etiqueta)
+                        mapa[etiqueta] = r.to_dict()
+
+                    sel = st.selectbox("Selecciona caja abierta", opciones, key="admin_caja_abierta_sel")
+                    caja_sel = mapa[sel]
+                    resumen_sel = _calcular_resumen_caja(caja_sel)
+
+                    aa, ab, ac, ad = st.columns(4)
+                    aa.metric("Usuario", caja_sel.get("usuario", ""))
+                    ab.metric("Caja inicial", f"RD$ {resumen_sel['fondo_inicial']:,.2f}")
+                    ac.metric("Efectivo esperado", f"RD$ {resumen_sel['efectivo_esperado']:,.2f}")
+                    ad.metric("Total ventas", f"RD$ {resumen_sel['total_ventas']:,.2f}")
+
+                    efectivo_admin = st.number_input(
+                        "Efectivo contado por administración",
+                        min_value=0.0,
+                        step=1.0,
+                        value=float(resumen_sel["efectivo_esperado"]),
+                        key="admin_caja_efectivo_contado",
+                    )
+                    diferencia_admin = float(efectivo_admin) - float(resumen_sel["efectivo_esperado"])
+                    if diferencia_admin < 0:
+                        st.warning(f"Faltante: RD$ {abs(diferencia_admin):,.2f}")
+                    elif diferencia_admin > 0:
+                        st.success(f"Sobrante: RD$ {diferencia_admin:,.2f}")
+                    else:
+                        st.info("Caja cuadrada. Diferencia RD$ 0.00")
+
+                    obs_admin = st.text_area("Observación cierre administrativo", key="admin_caja_obs")
+                    if st.button("Cerrar esta caja como ADMIN", key="admin_btn_cerrar_caja"):
+                        ok = _cerrar_caja(caja_sel, efectivo_admin, f"Cierre administrativo. {obs_admin}", usuario_act)
+                        if ok:
+                            st.success("Caja cerrada por administración.")
+                            st.rerun()
+
+            with st.expander("✏️ Editar datos de una caja cerrada", expanded=False):
+                cajas_cerradas = cajas_admin.copy()
+                if "estado" in cajas_cerradas.columns:
+                    cajas_cerradas = cajas_cerradas[cajas_cerradas["estado"].astype(str).apply(normalizar_texto) == "cerrada"]
+
+                if cajas_cerradas.empty:
+                    st.info("No hay cajas cerradas para editar.")
+                else:
+                    opciones2 = []
+                    mapa2 = {}
+                    for _, r in cajas_cerradas.iterrows():
+                        etiqueta = f"{r.get('usuario','')} | cierre: {r.get('fecha_cierre','')} | dif RD$ {float(limpiar_numero(r.get('diferencia')) or 0):,.2f}"
+                        opciones2.append(etiqueta)
+                        mapa2[etiqueta] = r.to_dict()
+
+                    sel2 = st.selectbox("Selecciona caja cerrada", opciones2, key="admin_caja_cerrada_sel")
+                    caja_cerrada = mapa2[sel2]
+
+                    efectivo_edit = st.number_input(
+                        "Efectivo contado corregido",
+                        min_value=0.0,
+                        step=1.0,
+                        value=float(limpiar_numero(caja_cerrada.get("efectivo_contado")) or 0),
+                        key="admin_edit_efectivo_contado",
+                    )
+                    esperado_edit = float(limpiar_numero(caja_cerrada.get("efectivo_esperado")) or 0)
+                    diff_edit = float(efectivo_edit) - esperado_edit
+                    falt_edit = abs(diff_edit) if diff_edit < 0 else 0.0
+                    sobr_edit = diff_edit if diff_edit > 0 else 0.0
+                    obs_edit = st.text_area(
+                        "Observación corregida",
+                        value=limpiar_texto(caja_cerrada.get("observacion")),
+                        key="admin_edit_obs_caja",
+                    )
+
+                    st.metric("Nueva diferencia", f"RD$ {diff_edit:,.2f}")
+
+                    if st.button("Guardar corrección de caja", key="admin_guardar_correccion_caja"):
+                        payload_edit = {
+                            "efectivo_contado": float(efectivo_edit),
+                            "diferencia": float(diff_edit),
+                            "faltante": float(falt_edit),
+                            "sobrante": float(sobr_edit),
+                            "observacion": obs_edit,
+                        }
+                        ok = actualizar("caja", caja_cerrada.get("id"), payload_edit)
+                        if ok:
+                            st.success("Caja corregida.")
+                            st.rerun()
 
 # =========================================================
 # ESTADO DE RESULTADOS
