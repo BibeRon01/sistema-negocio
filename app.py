@@ -1731,92 +1731,74 @@ if menu == "Dashboard":
     empleados_variables = obtener_empleados_variables_periodo(DATA["gastos"], desde, hasta)
     perdidas_tot = suma_col(perdidas_df, "valor")
     retiros_tot = suma_col(dueno_df, "monto")
+    total_inventario_dinero = calcular_total_dinero_inventario()
+
+    pagos_empleados_debug = filtrar_por_fechas(leer_pagos_empleados_actualizados(), desde, hasta) if "leer_pagos_empleados_actualizados" in globals() else DATA.get("adelantos_empleados", pd.DataFrame()).copy()
+    pagos_empleados_tot = suma_col(pagos_empleados_debug, "monto")
 
     utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df)
     utilidad_bruta_manual = st.number_input("Utilidad bruta manual / ajuste", min_value=0.0, step=1.0, key="dash_utilidad_bruta_manual")
     utilidad_bruta = float(utilidad_bruta_ventas) + float(utilidad_bruta_manual)
-    utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
 
+    utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
     dueno_65 = utilidad_neta * 0.65
     gerente_35 = utilidad_neta * 0.35
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Ventas", f"RD$ {ventas_tot:,.2f}")
-    c2.metric("Compras", f"RD$ {compras_tot:,.2f}")
-    c3.metric("Pérdidas", f"RD$ {perdidas_tot:,.2f}")
+    # El retiro del dueño NO afecta al gerente ni baja la utilidad neta.
+    # Solo se descuenta del 65% correspondiente al dueño.
+    saldo_dueno_final = dueno_65 - retiros_tot
+    saldo_gerente_final = gerente_35
 
-    pagos_empleados_debug = filtrar_por_fechas(leer_pagos_empleados_actualizados(), desde, hasta)
-    adelantos_tot = suma_col(pagos_empleados_debug, "monto")
+    st.markdown("### 💼 Resumen general")
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("Ventas", f"RD$ {ventas_tot:,.2f}")
+    a2.metric("Compras", f"RD$ {compras_tot:,.2f}")
+    a3.metric("Pérdidas", f"RD$ {perdidas_tot:,.2f}")
+    a4.metric("Total dinero en inventario", f"RD$ {total_inventario_dinero:,.2f}")
+
+    st.markdown("### 💸 Gastos y pagos")
+    b1, b2, b3, b4 = st.columns(4)
+    b1.metric("Gastos fijos", f"RD$ {gastos_fijos:,.2f}")
+    b2.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
+    b3.metric("Empleados fijos pagados", f"RD$ {empleados_fijos:,.2f}")
+    b4.metric("Empleados variables pagados", f"RD$ {empleados_variables:,.2f}")
 
     with st.expander("🔎 Ver pagos de empleados tomados para Dashboard", expanded=False):
         if pagos_empleados_debug.empty:
             st.info("No hay pagos de empleados en este rango.")
         else:
             st.dataframe(pagos_empleados_debug, use_container_width=True)
-    c4, c5, c6 = st.columns(3)
-    c4.metric("Gastos fijos", f"RD$ {gastos_fijos:,.2f}")
-    c5.metric("Gastos variables", f"RD$ {gastos_variables:,.2f}")
-    c6.metric("Retiros dueño", f"RD$ {retiros_tot:,.2f}")
 
-    c7, c8, c9 = st.columns(3)
-    c7.metric("Empleados fijos pagados", f"RD$ {empleados_fijos:,.2f}")
-    c8.metric("Empleados variables pagados", f"RD$ {empleados_variables:,.2f}")
-    c9.metric("Adelantos", f"RD$ {adelantos_tot:,.2f}")
+    st.markdown("### 📊 Utilidad y reparto")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Utilidad bruta ventas", f"RD$ {utilidad_bruta_ventas:,.2f}")
+    c2.metric("Utilidad bruta total", f"RD$ {utilidad_bruta:,.2f}")
+    c3.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
+    c4.metric("Ajuste manual utilidad", f"RD$ {utilidad_bruta_manual:,.2f}")
 
-    c10, c11, c12, c13 = st.columns(4)
-    c10.metric("Utilidad bruta ventas", f"RD$ {utilidad_bruta_ventas:,.2f}")
-    c11.metric("Utilidad bruta total", f"RD$ {utilidad_bruta:,.2f}")
-    c12.metric("Utilidad neta", f"RD$ {utilidad_neta:,.2f}")
-    c13.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
+    st.markdown("### 👥 Reparto dueño / gerente")
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
+    d2.metric("Retiros del dueño", f"RD$ {retiros_tot:,.2f}")
+    d3.metric("Saldo final dueño", f"RD$ {saldo_dueno_final:,.2f}")
+    d4.metric("35% gerente", f"RD$ {saldo_gerente_final:,.2f}")
 
-    c14, c15 = st.columns(2)
-    c14.metric("35% gerente", f"RD$ {gerente_35:,.2f}")
-    c15.metric("Ajuste manual utilidad", f"RD$ {utilidad_bruta_manual:,.2f}")
+    st.caption("Los retiros del dueño solo se descuentan del 65% del dueño. No afectan el 35% del gerente.")
 
-    st.subheader("📈 Gráficos")
-    v_mes = agrupar_mensual(ventas_df, "total")
-    g_mes = agrupar_mensual(gastos_df, "monto")
-    p_mes = agrupar_mensual(perdidas_df, "valor")
-    c_mes = agrupar_mensual(compras_df, "monto")
+    st.markdown("### 📈 Gráficos")
+    charts = [
+        ("Ventas por mes", ventas_df, "total"),
+        ("Compras por mes", compras_df, "monto"),
+        ("Gastos por mes", gastos_df, "monto"),
+        ("Pérdidas por mes", perdidas_df, "valor"),
+    ]
 
-    if not v_mes.empty:
-        st.write("Ventas por mes")
-        st.line_chart(v_mes.set_index("mes"))
-
-    if not c_mes.empty:
-        st.write("Compras por mes")
-        st.bar_chart(c_mes.set_index("mes"))
-
-    if not g_mes.empty:
-        st.write("Gastos por mes")
-        st.bar_chart(g_mes.set_index("mes"))
-
-    if not p_mes.empty:
-        st.write("Pérdidas por mes")
-        st.line_chart(p_mes.set_index("mes"))
-
-    st.subheader("🧠 Análisis del negocio")
-    for mensaje in analisis_negocio(
-        ventas_tot,
-        compras_tot,
-        gastos_fijos,
-        gastos_variables,
-        empleados_fijos,
-        empleados_variables,
-        perdidas_tot,
-        utilidad_neta,
-    ):
-        st.write(mensaje)
-
-    st.subheader("🧾 Pérdidas por producto")
-    if not perdidas_df.empty and "producto" in perdidas_df.columns:
-        cols = columnas_disponibles(perdidas_df, ["cantidad", "valor"])
-        rep = perdidas_df.groupby("producto", as_index=False)[cols].sum().sort_values(cols[-1], ascending=False)
-        st.dataframe(rep, use_container_width=True)
-        descargar_archivos(rep, "perdidas_por_producto")
-    else:
-        st.info("No hay pérdidas en el rango seleccionado.")
-
+    for titulo, df_chart, col_val in charts:
+        if not df_chart.empty and col_val in df_chart.columns and "fecha" in df_chart.columns:
+            graf = agrupar_mensual(df_chart, col_val)
+            if not graf.empty:
+                st.write(titulo)
+                st.bar_chart(graf.set_index("mes")["valor"])
 
 # =========================================================
 # PRODUCTOS
