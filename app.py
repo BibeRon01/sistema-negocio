@@ -1595,7 +1595,7 @@ def construir_html_impresion(post_venta: dict, tipo: str = "factura") -> str:
     if not filas:
         filas = "<tr><td colspan='4' style='text-align:center'>Sin detalle</td></tr>"
 
-    ncf = html_escape(post_venta.get("ncf") or post_venta.get("venta_id") or "")
+    ncf = html_escape(post_venta.get("numero_factura") or post_venta.get("ncf") or post_venta.get("venta_id") or "")
     cliente = html_escape(post_venta.get("cliente_nombre") or "Venta general")
     metodo = html_escape(post_venta.get("metodo_pago") or "")
     fecha_txt = html_escape(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -1681,6 +1681,67 @@ def lanzar_impresion_navegador(html_doc: str):
     </html>
     """
     components.html(html_js, height=0, width=0)
+
+def generar_numero_factura_pos() -> str:
+    """
+    Genera un número visible tipo 001, 002, 003...
+    Si existen columnas numero_factura/factura las usa; si no, usa el ID/cantidad como base.
+    """
+    try:
+        resp = supabase.table("ventas").select("*").execute()
+        ventas = pd.DataFrame(resp.data or [])
+    except Exception:
+        ventas = DATA.get("ventas", pd.DataFrame()).copy()
+
+    max_num = 0
+    if not ventas.empty:
+        for col in ["numero_factura", "factura", "n_factura", "id", "identificación", "identificacion"]:
+            if col in ventas.columns:
+                for val in ventas[col].dropna().astype(str):
+                    nums = re.findall(r"\d+", val)
+                    if nums:
+                        try:
+                            max_num = max(max_num, int(nums[-1]))
+                        except Exception:
+                            pass
+    return str(max_num + 1).zfill(3)
+
+
+def mostrar_factura_pos(post_venta: dict):
+    """
+    Muestra factura/ticket visible y descargable para cajera y admin.
+    """
+    if not post_venta:
+        return
+
+    html_factura = construir_html_impresion(post_venta, "factura")
+    html_ticket = construir_html_impresion(post_venta, "ticket")
+
+    st.markdown("### 🧾 Factura / Ticket")
+    st.caption("Permitido para cajera y administradora. Puedes imprimir o descargar la factura.")
+
+    p1, p2, p3 = st.columns(3)
+    with p1:
+        if st.button("🖨️ Imprimir factura", key=f"btn_pos_imprimir_factura_{post_venta.get('venta_id')}"):
+            lanzar_impresion_navegador(html_factura)
+            st.success("Factura enviada al navegador para imprimir.")
+    with p2:
+        if st.button("🖨️ Imprimir ticket", key=f"btn_pos_imprimir_ticket_{post_venta.get('venta_id')}"):
+            lanzar_impresion_navegador(html_ticket)
+            st.success("Ticket enviado al navegador para imprimir.")
+    with p3:
+        st.download_button(
+            "⬇️ Descargar factura",
+            data=html_factura.encode("utf-8"),
+            file_name=f"factura_{post_venta.get('numero_factura') or post_venta.get('venta_id')}.html",
+            mime="text/html",
+            key=f"descargar_factura_html_{post_venta.get('venta_id')}",
+        )
+
+    with st.expander("👁️ Ver factura antes de imprimir", expanded=True):
+        components.html(html_factura, height=620, scrolling=True)
+
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -3778,26 +3839,17 @@ elif menu == "POS":
 
         post_venta = st.session_state.get("pos_post_venta")
         if post_venta:
-            st.success(f"Venta registrada correctamente. Factura/ID: {post_venta.get('venta_id', '')}")
+            st.success(f"Venta registrada correctamente. Factura No.: {post_venta.get('numero_factura') or post_venta.get('venta_id', '')}")
             p1, p2, p3 = st.columns(3)
             p1.metric("Total", f"RD$ {float(post_venta.get('total', 0)):,.2f}")
             p2.metric("Cambio", f"RD$ {float(post_venta.get('cambio', 0)):,.2f}")
             p3.metric("Método", str(post_venta.get('metodo_pago', '')))
-            b1, b2, b3 = st.columns(3)
-            with b1:
-                if st.button("🧾 Imprimir Ticket", key="btn_print_ticket"):
-                    html_ticket = construir_html_impresion(post_venta, "ticket")
-                    lanzar_impresion_navegador(html_ticket)
-                    st.success("Enviando ticket al navegador para imprimir.")
-            with b2:
-                if st.button("🧾 Imprimir Factura", key="btn_print_factura"):
-                    html_factura = construir_html_impresion(post_venta, "factura")
-                    lanzar_impresion_navegador(html_factura)
-                    st.success("Enviando factura al navegador para imprimir.")
-            with b3:
-                if st.button("✅ Terminar", key="btn_pos_post_venta_terminar"):
-                    st.session_state["pos_post_venta"] = None
-                    st.rerun()
+
+            mostrar_factura_pos(post_venta)
+
+            if st.button("✅ Terminar", key=f"btn_pos_post_venta_terminar_{post_venta.get('venta_id')}"):
+                st.session_state["pos_post_venta"] = None
+                st.rerun()
             st.markdown("---")
 
         if carrito:
@@ -3852,6 +3904,8 @@ elif menu == "POS":
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
             csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
             ncf = st.text_input("NCF (opcional)", key="pos_ncf")
+            numero_factura_pos = generar_numero_factura_pos()
+            st.caption(f"Factura No. {numero_factura_pos}")
             if st.button("💳 Cobrar", key="btn_pos_cobrar"):
                 if faltante > 0.001:
                     st.error("Los pagos no cubren el total final.")
@@ -3871,6 +3925,7 @@ elif menu == "POS":
                             "usuario": nombre_usuario_actual(),
                             "dia_operativo": ahora_str(),
                             "ncf": ncf,
+                            "numero_factura": numero_factura_pos,
                             "tipo_venta": "POS",
                             "estado": "completada",
                             "anulado": False,
