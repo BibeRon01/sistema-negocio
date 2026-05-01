@@ -881,7 +881,10 @@ def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
 def ajustar_pagos_sin_recargo_tarjeta(pagos_df: pd.DataFrame, ventas_df: pd.DataFrame | None = None) -> pd.DataFrame:
     """
     Ajusta ventas_pagos para que el recargo de tarjeta NO se tome como ingreso real.
-    El recargo solo sirve para calcular cuánto cobrar al cliente.
+    Regla:
+    - La venta real es total_contable = total - recargo.
+    - Si los pagos suman más que la venta real, ese exceso se considera recargo.
+    - El exceso se descuenta primero del pago de tarjeta.
     """
     if pagos_df is None or pagos_df.empty:
         return pagos_df
@@ -896,36 +899,68 @@ def ajustar_pagos_sin_recargo_tarjeta(pagos_df: pd.DataFrame, ventas_df: pd.Data
     if not metodo_col:
         return pagos
 
-    # Si existe la venta relacionada, ajustar el pago de tarjeta restando el recargo guardado en ventas.
-    if ventas_df is not None and not ventas_df.empty and "venta_id" in pagos.columns:
-        ventas = ventas_df.copy()
-        ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() else ventas
+    if ventas_df is None or ventas_df.empty:
+        return pagos
 
-        id_col = None
-        for c in ["id", "identificación", "identificacion"]:
-            if c in ventas.columns:
-                id_col = c
+    ventas = ventas_df.copy()
+    ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() else ventas
+
+    id_col = None
+    for c in ["id", "identificación", "identificacion"]:
+        if c in ventas.columns:
+            id_col = c
+            break
+
+    if not id_col or "venta_id" not in pagos.columns:
+        # Respaldo global: si pagos > ventas reales, restar exceso de tarjeta
+        total_ventas_real = suma_col(ventas, "total_contable") if "total_contable" in ventas.columns else suma_col(ventas, "total")
+        total_pagos = float(pagos["monto"].sum())
+        exceso = max(total_pagos - total_ventas_real, 0.0)
+        if exceso > 0:
+            idx_tarjeta = pagos[pagos[metodo_col].astype(str).apply(normalizar_texto) == "tarjeta"].index
+            for idx in idx_tarjeta:
+                if exceso <= 0:
+                    break
+                monto = float(pagos.at[idx, "monto"])
+                quitar = min(monto, exceso)
+                pagos.at[idx, "monto"] = monto - quitar
+                exceso -= quitar
+        return pagos
+
+    # Ajuste por venta
+    for _, venta in ventas.iterrows():
+        venta_id = str(venta.get(id_col))
+        if not venta_id:
+            continue
+
+        pagos_idx = pagos[pagos["venta_id"].astype(str) == venta_id].index
+        if len(pagos_idx) == 0:
+            continue
+
+        total_real = float(limpiar_numero(venta.get("total_contable")) or limpiar_numero(venta.get("subtotal")) or limpiar_numero(venta.get("total")) or 0)
+        total_pagado = float(pagos.loc[pagos_idx, "monto"].sum())
+
+        recargo_guardado = float(limpiar_numero(venta.get("recargo")) or limpiar_numero(venta.get("recargo_tarjeta")) or 0)
+        exceso = max(total_pagado - total_real, recargo_guardado, 0.0)
+
+        if exceso <= 0:
+            continue
+
+        # Descontar el recargo primero de tarjeta
+        tarjeta_idx = [
+            idx for idx in pagos_idx
+            if normalizar_texto(pagos.at[idx, metodo_col]) == "tarjeta"
+        ]
+
+        for idx in tarjeta_idx:
+            if exceso <= 0:
                 break
-
-        if id_col:
-            rec_map = {}
-            total_map = {}
-            for _, v in ventas.iterrows():
-                vid = str(v.get(id_col))
-                rec_map[vid] = float(limpiar_numero(v.get("recargo")) or limpiar_numero(v.get("recargo_tarjeta")) or 0)
-                total_map[vid] = float(limpiar_numero(v.get("total_contable")) or limpiar_numero(v.get("total")) or 0)
-
-            for idx, row in pagos.iterrows():
-                metodo = normalizar_texto(row.get(metodo_col))
-                if metodo == "tarjeta":
-                    vid = str(row.get("venta_id"))
-                    recargo = rec_map.get(vid, 0.0)
-                    if recargo > 0:
-                        pagos.at[idx, "monto"] = max(float(row.get("monto") or 0) - recargo, 0.0)
+            monto = float(pagos.at[idx, "monto"])
+            quitar = min(monto, exceso)
+            pagos.at[idx, "monto"] = monto - quitar
+            exceso -= quitar
 
     return pagos
-
-
 # =========================================================
 # CARGA GLOBAL
 # =========================================================
