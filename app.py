@@ -880,12 +880,9 @@ def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
 
 def ajustar_pagos_sin_recargo_tarjeta(pagos_df: pd.DataFrame, ventas_df: pd.DataFrame | None = None) -> pd.DataFrame:
     """
-    Ajusta ventas_pagos para que el recargo de tarjeta NO se tome como ingreso real.
-    Regla fuerte:
-    - La venta real es total_contable = total - recargo.
-    - Si los pagos suman más que la venta real, ese exceso es recargo.
-    - El exceso se descuenta primero de tarjeta, luego efectivo, luego transferencia, luego crédito.
-      Esto corrige casos viejos donde el recargo cayó en efectivo o transferencia.
+    Evita que el recargo de tarjeta entre al cuadre.
+    Si pagos suman más que el total real de venta, ese exceso se descuenta.
+    Si los pagos ya suman igual al total real, no toca nada.
     """
     if pagos_df is None or pagos_df.empty:
         return pagos_df
@@ -895,30 +892,24 @@ def ajustar_pagos_sin_recargo_tarjeta(pagos_df: pd.DataFrame, ventas_df: pd.Data
         return pagos
 
     pagos["monto"] = pd.to_numeric(pagos["monto"], errors="coerce").fillna(0)
-
     metodo_col = "metodo" if "metodo" in pagos.columns else ("metodo_pago" if "metodo_pago" in pagos.columns else None)
-    if not metodo_col:
+    if not metodo_col or ventas_df is None or ventas_df.empty:
         return pagos
 
-    def quitar_exceso(indices, exceso):
-        prioridad = ["tarjeta", "efectivo", "transferencia", "credito"]
-        for metodo_prioridad in prioridad:
+    ventas = ventas_df.copy()
+    ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() else ventas
+
+    def descontar_exceso(indices, exceso):
+        for metodo_prioridad in ["tarjeta", "efectivo", "transferencia", "credito"]:
             for idx in indices:
                 if exceso <= 0:
-                    return exceso
+                    return
                 if normalizar_texto(pagos.at[idx, metodo_col]) != metodo_prioridad:
                     continue
                 monto = float(pagos.at[idx, "monto"])
                 quitar = min(monto, exceso)
                 pagos.at[idx, "monto"] = monto - quitar
                 exceso -= quitar
-        return exceso
-
-    if ventas_df is None or ventas_df.empty:
-        return pagos
-
-    ventas = ventas_df.copy()
-    ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() else ventas
 
     id_col = None
     for c in ["id", "identificación", "identificacion"]:
@@ -926,36 +917,28 @@ def ajustar_pagos_sin_recargo_tarjeta(pagos_df: pd.DataFrame, ventas_df: pd.Data
             id_col = c
             break
 
-    # Si no se puede cruzar por venta_id, corregir por caja global
-    if not id_col or "venta_id" not in pagos.columns:
-        total_ventas_real = suma_col(ventas, "total_contable") if "total_contable" in ventas.columns else suma_col(ventas, "total")
-        total_pagos = float(pagos["monto"].sum())
-        exceso_global = max(total_pagos - total_ventas_real, 0.0)
-        if exceso_global > 0:
-            quitar_exceso(list(pagos.index), exceso_global)
+    if id_col and "venta_id" in pagos.columns:
+        for _, venta in ventas.iterrows():
+            venta_id = str(venta.get(id_col))
+            pagos_idx = list(pagos[pagos["venta_id"].astype(str) == venta_id].index)
+            if not pagos_idx:
+                continue
+            total_real = float(
+                limpiar_numero(venta.get("total_contable"))
+                or limpiar_numero(venta.get("subtotal"))
+                or limpiar_numero(venta.get("total"))
+                or 0
+            )
+            total_pagado = float(pagos.loc[pagos_idx, "monto"].sum())
+            exceso = max(total_pagado - total_real, 0.0)
+            if exceso > 0:
+                descontar_exceso(pagos_idx, exceso)
         return pagos
 
-    for _, venta in ventas.iterrows():
-        venta_id = str(venta.get(id_col))
-        if not venta_id:
-            continue
-
-        pagos_idx = list(pagos[pagos["venta_id"].astype(str) == venta_id].index)
-        if not pagos_idx:
-            continue
-
-        total_real = float(
-            limpiar_numero(venta.get("total_contable"))
-            or limpiar_numero(venta.get("subtotal"))
-            or limpiar_numero(venta.get("total"))
-            or 0
-        )
-        total_pagado = float(pagos.loc[pagos_idx, "monto"].sum())
-        recargo_guardado = float(limpiar_numero(venta.get("recargo")) or limpiar_numero(venta.get("recargo_tarjeta")) or 0)
-
-        exceso = max(total_pagado - total_real, recargo_guardado, 0.0)
-        if exceso > 0:
-            quitar_exceso(pagos_idx, exceso)
+    total_real_global = suma_col(ventas, "total_contable") if "total_contable" in ventas.columns else suma_col(ventas, "total")
+    exceso_global = max(float(pagos["monto"].sum()) - float(total_real_global), 0.0)
+    if exceso_global > 0:
+        descontar_exceso(list(pagos.index), exceso_global)
 
     return pagos
 # =========================================================
@@ -4629,6 +4612,15 @@ elif menu == "POS":
             csum2.metric("Recargo tarjeta", f"RD$ {recargo:,.2f}")
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
             csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
+
+            st.markdown("### 💳 Recargo de tarjeta")
+            st.info(
+                f"Tarjeta registrada para contabilidad: RD$ {tarjeta:,.2f} | "
+                f"Recargo informativo 4%: RD$ {recargo:,.2f} | "
+                f"Total que debes cobrar por tarjeta: RD$ {tarjeta + recargo:,.2f}"
+            )
+            st.caption("El recargo de tarjeta es solo para saber cuánto cobrar al cliente. No entra en caja, dashboard ni utilidad.")
+
             ncf = st.text_input("NCF (opcional)", key="pos_ncf")
             numero_factura_pos = generar_numero_factura_pos()
             st.caption(f"Factura No. {numero_factura_pos}")
@@ -4691,12 +4683,10 @@ elif menu == "POS":
                         for metodo, monto in pagos.items():
                             if monto > 0:
                                 monto_contable_pago = float(monto)
-                                if metodo == "tarjeta":
-                                    monto_contable_pago = max(float(monto) - float(recargo), 0.0)
                                 supabase.table("ventas_pagos").insert({
                                     "venta_id": str(venta_id),
                                     "metodo": metodo,
-                                    "monto": float(monto_contable_pago),
+                                    "monto": float(monto),
                                     "usuario": nombre_usuario_actual(),
                                     "caja_id": str(caja_activa.get("id")),
                                     "dia_operativo": ahora_str(),
@@ -4710,7 +4700,7 @@ elif menu == "POS":
                                             "origen": "venta",
                                             "referencia_id": str(venta_id),
                                             "metodo_pago": metodo,
-                                            "monto": float(monto_contable_pago),
+                                            "monto": float(monto),
                                             "descripcion": f"Venta POS {venta_id}",
                                             "usuario": nombre_usuario_actual(),
                                         }).execute()
@@ -4732,7 +4722,8 @@ elif menu == "POS":
                         st.session_state["pos_post_venta"] = {
                             "venta_id": str(venta_id),
                             "numero_factura": numero_factura_pos,
-                            "total": float(subtotal),
+                            "total": float(total_final),
+                            "total_real": float(subtotal),
                             "cambio": float(cambio),
                             "cliente_nombre": cliente_nombre,
                             "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
