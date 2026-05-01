@@ -879,27 +879,19 @@ def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
 
 
 def ajustar_pagos_sin_recargo_tarjeta(pagos_df: pd.DataFrame, ventas_df: pd.DataFrame | None = None) -> pd.DataFrame:
-    """
-    Evita que el recargo de tarjeta entre al cuadre.
-    Si pagos suman más que el total real de venta, ese exceso se descuenta.
-    Si los pagos ya suman igual al total real, no toca nada.
-    """
     if pagos_df is None or pagos_df.empty:
         return pagos_df
-
     pagos = pagos_df.copy()
     if "monto" not in pagos.columns:
         return pagos
-
     pagos["monto"] = pd.to_numeric(pagos["monto"], errors="coerce").fillna(0)
     metodo_col = "metodo" if "metodo" in pagos.columns else ("metodo_pago" if "metodo_pago" in pagos.columns else None)
     if not metodo_col or ventas_df is None or ventas_df.empty:
         return pagos
-
     ventas = ventas_df.copy()
     ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() else ventas
 
-    def descontar_exceso(indices, exceso):
+    def descontar(indices, exceso):
         for metodo_prioridad in ["tarjeta", "efectivo", "transferencia", "credito"]:
             for idx in indices:
                 if exceso <= 0:
@@ -911,36 +903,20 @@ def ajustar_pagos_sin_recargo_tarjeta(pagos_df: pd.DataFrame, ventas_df: pd.Data
                 pagos.at[idx, "monto"] = monto - quitar
                 exceso -= quitar
 
-    id_col = None
-    for c in ["id", "identificación", "identificacion"]:
-        if c in ventas.columns:
-            id_col = c
-            break
-
+    id_col = next((c for c in ["id", "identificación", "identificacion"] if c in ventas.columns), None)
     if id_col and "venta_id" in pagos.columns:
         for _, venta in ventas.iterrows():
             venta_id = str(venta.get(id_col))
-            pagos_idx = list(pagos[pagos["venta_id"].astype(str) == venta_id].index)
-            if not pagos_idx:
+            idxs = list(pagos[pagos["venta_id"].astype(str) == venta_id].index)
+            if not idxs:
                 continue
-            total_real = float(
-                limpiar_numero(venta.get("total_contable"))
-                or limpiar_numero(venta.get("subtotal"))
-                or limpiar_numero(venta.get("total"))
-                or 0
-            )
-            total_pagado = float(pagos.loc[pagos_idx, "monto"].sum())
+            total_real = float(limpiar_numero(venta.get("total_contable")) or limpiar_numero(venta.get("subtotal")) or limpiar_numero(venta.get("total")) or 0)
+            total_pagado = float(pagos.loc[idxs, "monto"].sum())
             exceso = max(total_pagado - total_real, 0.0)
             if exceso > 0:
-                descontar_exceso(pagos_idx, exceso)
-        return pagos
-
-    total_real_global = suma_col(ventas, "total_contable") if "total_contable" in ventas.columns else suma_col(ventas, "total")
-    exceso_global = max(float(pagos["monto"].sum()) - float(total_real_global), 0.0)
-    if exceso_global > 0:
-        descontar_exceso(list(pagos.index), exceso_global)
-
+                descontar(idxs, exceso)
     return pagos
+
 # =========================================================
 # CARGA GLOBAL
 # =========================================================
@@ -4466,20 +4442,6 @@ elif menu == "Auditoría":
 # =========================================================
 elif menu == "POS":
     st.title("🛒 POS")
-
-    def _actualizar_cantidad_carrito_pos(idx_item, nueva_cantidad):
-        try:
-            nueva_cantidad = float(nueva_cantidad)
-            if nueva_cantidad <= 0:
-                return
-            item = st.session_state["carrito"][idx_item]
-            precio = float(item.get("precio_unitario", item.get("precio", 0)) or 0)
-            item["cantidad"] = nueva_cantidad
-            item["total_linea"] = nueva_cantidad * precio
-            st.session_state["carrito"][idx_item] = item
-        except Exception as e:
-            st.warning(f"No se pudo actualizar la cantidad: {e}")
-
     caja_activa = obtener_caja_abierta()
     if caja_activa is None:
         st.warning("Debes abrir la caja antes de vender.")
@@ -4579,7 +4541,7 @@ elif menu == "POS":
             df_carrito = pd.DataFrame(carrito)
             st.data_editor(df_carrito, use_container_width=True, disabled=["producto_id", "codigo", "producto"], key="editor_carrito")
 
-            st.caption("Si te equivocas antes de cobrar, puedes cambiar la cantidad o quitar el producto aquí mismo.")
+            st.caption("Si te equivocas antes de cobrar, quita el producto aquí mismo.")
             for i, item in enumerate(list(carrito)):
                 col_q1, col_q2, col_q3, col_q4 = st.columns([4, 2, 2, 1])
                 with col_q1:
@@ -4625,18 +4587,8 @@ elif menu == "POS":
             csum1.metric("Subtotal", f"RD$ {subtotal:,.2f}")
             csum2.metric("Recargo tarjeta", f"RD$ {recargo:,.2f}")
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
+            csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
 
-            total_real_para_cuadrar = float(subtotal)
-            pagos_reales_registrados = float(efectivo) + float(transferencia) + float(tarjeta) + float(credito)
-            faltante_real = max(total_real_para_cuadrar - pagos_reales_registrados, 0.0)
-            cambio_real = max(pagos_reales_registrados - total_real_para_cuadrar, 0.0)
-            csum4.metric("Cambio / faltante", f"RD$ {cambio_real:,.2f}" if cambio_real > 0 else f"Faltan RD$ {faltante_real:,.2f}")
-
-            total_real_para_cuadrar = float(subtotal)
-            total_cobrar_cliente = float(total_final)
-            pagos_reales_registrados = float(efectivo) + float(transferencia) + float(tarjeta) + float(credito)
-            faltante_real = max(total_real_para_cuadrar - pagos_reales_registrados, 0.0)
-            cambio_real = max(pagos_reales_registrados - total_real_para_cuadrar, 0.0)
             tarjeta_info = float(locals().get("tarjeta", 0) or locals().get("pago_tarjeta", 0) or 0)
             recargo_info = float(locals().get("recargo", 0) or locals().get("recargo_tarjeta", 0) or 0)
             st.markdown("### 💳 Recargo de tarjeta")
