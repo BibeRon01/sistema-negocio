@@ -5,6 +5,7 @@ from datetime import date, datetime
 from typing import Any, Iterable
 
 import pandas as pd
+import re
 import streamlit as st
 import streamlit.components.v1 as components
 from supabase import Client, create_client
@@ -1652,6 +1653,109 @@ def lanzar_impresion_navegador(html_doc: str):
     </html>
     """
     components.html(html_js, height=0, width=0)
+
+def es_cajera() -> bool:
+    return normalizar_texto(st.session_state.get("rol", "")) in ["cajera", "cajero"]
+
+
+def usuario_actual_nombre() -> str:
+    return limpiar_texto(st.session_state.get("usuario", "")) or limpiar_texto(st.session_state.get("username", "")) or "usuario"
+
+
+def generar_numero_factura() -> str:
+    """
+    Genera número de factura secuencial simple 001, 002, 003...
+    Usa la tabla ventas y revisa columnas comunes.
+    """
+    try:
+        resp = supabase.table("ventas").select("*").execute()
+        ventas = pd.DataFrame(resp.data or [])
+    except Exception:
+        ventas = DATA.get("ventas", pd.DataFrame()).copy()
+
+    max_num = 0
+    if not ventas.empty:
+        for col in ["numero_factura", "factura", "n_factura", "identificación", "identificacion", "id"]:
+            if col in ventas.columns:
+                for val in ventas[col].dropna().astype(str):
+                    nums = re.findall(r"\d+", val)
+                    if nums:
+                        try:
+                            max_num = max(max_num, int(nums[-1]))
+                        except Exception:
+                            pass
+    return str(max_num + 1).zfill(3)
+
+
+def obtener_factura_para_venta(venta_row: pd.Series | dict) -> str:
+    try:
+        for col in ["numero_factura", "factura", "n_factura"]:
+            val = venta_row.get(col)
+            if val:
+                return str(val)
+    except Exception:
+        pass
+    return ""
+
+
+def imprimir_factura_html(venta_row, detalle_df=None):
+    """
+    Render simple de factura/ticket para imprimir desde navegador.
+    """
+    venta_id = venta_row.get("id") or venta_row.get("identificación") or venta_row.get("identificacion") or ""
+    factura = obtener_factura_para_venta(venta_row) or str(venta_id)[-6:]
+    fecha = venta_row.get("fecha", "")
+    total = float(limpiar_numero(venta_row.get("total")) or 0)
+    metodo = venta_row.get("metodo_pago") or venta_row.get("metodo") or ""
+    usuario = venta_row.get("usuario") or venta_row.get("cajera") or usuario_actual_nombre()
+
+    filas_html = ""
+    if detalle_df is not None and not detalle_df.empty:
+        for _, it in detalle_df.iterrows():
+            prod = limpiar_texto(it.get("producto"))
+            cant = float(limpiar_numero(it.get("cantidad")) or 0)
+            precio = float(limpiar_numero(it.get("precio_unitario") or it.get("precio")) or 0)
+            linea = float(limpiar_numero(it.get("linea_total") or it.get("total_linea")) or cant * precio)
+            filas_html += f"<tr><td>{prod}</td><td>{cant:,.0f}</td><td>{precio:,.2f}</td><td>{linea:,.2f}</td></tr>"
+    else:
+        filas_html = f"<tr><td>Venta</td><td>1</td><td>{total:,.2f}</td><td>{total:,.2f}</td></tr>"
+
+    html = f"""
+    <div id='factura-print' style='font-family: Arial; max-width: 360px; padding: 10px; border: 1px solid #ddd;'>
+        <h2 style='text-align:center; margin:0;'>BIBE RON 01</h2>
+        <p style='text-align:center; margin:4px 0;'>Factura No. {factura}</p>
+        <p><b>Fecha:</b> {fecha}<br><b>Cajera:</b> {usuario}<br><b>Método:</b> {metodo}</p>
+        <table style='width:100%; border-collapse: collapse; font-size: 13px;'>
+            <thead>
+                <tr>
+                    <th style='text-align:left;'>Producto</th>
+                    <th>Cant.</th>
+                    <th>Precio</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>{filas_html}</tbody>
+        </table>
+        <hr>
+        <h3 style='text-align:right;'>TOTAL RD$ {total:,.2f}</h3>
+        <p style='text-align:center;'>Gracias por su compra</p>
+    </div>
+    <script>
+    function imprimirFactura() {{
+        var contenido = document.getElementById('factura-print').innerHTML;
+        var ventana = window.open('', '', 'height=600,width=400');
+        ventana.document.write('<html><head><title>Factura {factura}</title></head><body>');
+        ventana.document.write(contenido);
+        ventana.document.write('</body></html>');
+        ventana.document.close();
+        ventana.print();
+    }}
+    </script>
+    <button onclick="imprimirFactura()" style="padding:10px; margin-top:10px;">🖨️ Imprimir factura</button>
+    """
+    st.components.v1.html(html, height=520)
+
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -2479,13 +2583,15 @@ elif menu == "Ventas":
         if not puede_ver_utilidad:
             columnas_preferidas = [c for c in columnas_preferidas if c not in ["ganancia_bruta", "ganancia_bruta_manual"]]
         st.dataframe(df_show[columnas_preferidas] if columnas_preferidas else df_show, use_container_width=True)
-        descargar_archivos(df_show[columnas_preferidas] if columnas_preferidas else df_show, "ventas")
+        if not es_cajera():
+            descargar_archivos(df_show[columnas_preferidas] if columnas_preferidas else df_show, "ventas")
 
         # =========================================================
         # BLOQUE NUEVO: EDITAR VENTA COMPLETA
         # PÉGALO DEBAJO DE:
         # st.dataframe(df[columnas_preferidas] if columnas_preferidas else df, use_container_width=True)
-        # descargar_archivos(df, "ventas")
+        # if not es_cajera():
+            descargar_archivos(df, "ventas")
         # DENTRO DEL MÓDULO: elif menu == "Ventas":
         # =========================================================
 
@@ -2693,7 +2799,29 @@ elif menu == "Ventas":
                         st.error(f"No se pudo guardar la edición completa: {exc}")
 
 
-        if puede_gestionar_ventas:
+
+    st.subheader("🧾 Ver / imprimir factura")
+    ventas_para_factura = df_show.copy() if "df_show" in locals() else df.copy()
+    if not ventas_para_factura.empty:
+        opciones_fact = []
+        mapa_fact = {}
+        for _, row in ventas_para_factura.iterrows():
+            rid = row.get("id") or row.get("identificación") or row.get("identificacion")
+            nf = obtener_factura_para_venta(row) or str(rid)[-6:]
+            etiqueta = f"Factura {nf} | {row.get('fecha')} | RD$ {float(limpiar_numero(row.get('total')) or 0):,.2f}"
+            opciones_fact.append(etiqueta)
+            mapa_fact[etiqueta] = row
+        sel_fact = st.selectbox("Selecciona factura", opciones_fact, key="sel_factura_imprimir")
+        row_fact = mapa_fact[sel_fact]
+        venta_id_fact = row_fact.get("id") or row_fact.get("identificación") or row_fact.get("identificacion")
+        try:
+            det_resp = supabase.table("detalle_venta").select("*").eq("venta_id", str(venta_id_fact)).execute()
+            detalle_fact = pd.DataFrame(det_resp.data or [])
+        except Exception:
+            detalle_fact = pd.DataFrame()
+        imprimir_factura_html(row_fact, detalle_fact)
+
+        if puede_gestionar_ventas and not es_cajera():
             with st.expander("🛠️ Editar / eliminar ventas", expanded=False):
                 opciones = []
                 mapa_ids = {}
@@ -3817,6 +3945,7 @@ elif menu == "POS":
                             "descuento": float(descuento_global),
                             "recargo": float(recargo),
                             "total": float(total_final),
+                    "numero_factura": numero_factura_actual,
                             "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
                             "cliente_id": cliente_id,
                             "cliente_nombre": cliente_nombre,
