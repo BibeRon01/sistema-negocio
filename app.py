@@ -1617,48 +1617,6 @@ def lanzar_impresion_navegador(html_doc: str):
     </html>
     """
     components.html(html_js, height=0, width=0)
-
-def sincronizar_todos_productos_a_inventario(fecha_mov=None) -> tuple[int, int]:
-    """
-    Crea o actualiza Inventario Actual para productos viejos que solo existen en Productos.
-    No duplica: usa upsert_inventario_actual por nombre del producto.
-    """
-    if fecha_mov is None:
-        fecha_mov = date.today()
-
-    productos_df = DATA.get("productos", pd.DataFrame()).copy()
-    if productos_df.empty:
-        return 0, 0
-
-    creados_actualizados = 0
-    errores = 0
-
-    for _, row in productos_df.iterrows():
-        try:
-            nombre = obtener_nombre_producto(row)
-            if not nombre:
-                continue
-            costo = float(limpiar_numero(row.get("costo")) or limpiar_numero(row.get("costo_unitario")) or 0)
-            precio = float(limpiar_numero(row.get("precio")) or limpiar_numero(row.get("precio_unitario")) or 0)
-            existencia = float(obtener_existencia_producto(row))
-            ok = upsert_inventario_actual(
-                nombre,
-                costo,
-                precio,
-                existencia,
-                fecha_mov,
-                "Sincronizado desde productos viejos"
-            )
-            if ok:
-                creados_actualizados += 1
-            else:
-                errores += 1
-        except Exception:
-            errores += 1
-
-    return creados_actualizados, errores
-
-
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1986,18 +1944,7 @@ elif menu == "Productos":
 elif menu == "Inventario Actual":
     st.title("📊 Inventario Actual")
 
-    with st.expander("🔄 Sincronizar productos viejos al inventario", expanded=True):
-        st.write("Usa esta opción para enviar a Inventario Actual los productos que ya estaban registrados antes y no aparecen en inventario.")
-        fecha_sync = st.date_input("Fecha de sincronización", value=date.today(), key="fecha_sync_inv_actual")
-        if st.button("Enviar todos los productos a Inventario Actual", key="btn_sync_productos_inv_actual"):
-            ok_count, err_count = sincronizar_todos_productos_a_inventario(fecha_sync)
-            if err_count == 0:
-                st.success(f"Inventario sincronizado correctamente. Productos procesados: {ok_count}.")
-            else:
-                st.warning(f"Productos procesados: {ok_count}. Con errores: {err_count}.")
-            st.rerun()
-
-    with st.expander("📥 Subir Excel / CSV de inventario actual", expanded=False):
+    with st.expander("📥 Subir Excel / CSV de inventario actual", expanded=True):
         st.write("Columnas esperadas: nombre o producto, cantidad o existencia_sistema. Costo y precio opcionales.")
         archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_inventario")
         fecha_inv = st.date_input("Fecha del inventario", value=date.today(), key="fecha_inv_actual")
@@ -3229,7 +3176,7 @@ elif menu == "Pagos Empleados":
 # =========================================================
 elif menu == "Pérdidas":
     st.title("📉 Pérdidas")
-    st.caption("El costo unitario se toma automáticamente desde Inventario Actual. Puedes registrar la pérdida sola o registrarla y descontarla del inventario.")
+    st.caption("Puedes guardar la pérdida sola o guardarla y descontarla del inventario. Si la guardaste sola, luego puedes aplicarla al inventario desde el historial.")
 
     productos_lista = DATA["productos"]["nombre"].astype(str).tolist() if not DATA["productos"].empty and "nombre" in DATA["productos"].columns else []
 
@@ -3267,8 +3214,6 @@ elif menu == "Pérdidas":
             observacion = st.text_area("Observación", key="perd_obs")
 
         nueva_existencia = max(float(existencia_actual) - float(cantidad), 0.0)
-        if existencia_actual <= 0 and producto:
-            st.warning("Este producto no aparece con existencia en Inventario Actual. Si es un producto viejo, primero sincronízalo desde Inventario Actual.")
         st.info(f"Si aplicas al inventario, la existencia bajará de {existencia_actual:,.0f} a {nueva_existencia:,.0f}.")
 
         b1, b2 = st.columns(2)
@@ -3282,8 +3227,9 @@ elif menu == "Pérdidas":
                 elif costo_unitario <= 0:
                     st.error("El costo unitario no puede ser cero. Revisa el costo en Inventario Actual o Productos.")
                 else:
-                    if registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, observacion):
-                        st.success("Pérdida guardada. No se descontó inventario.")
+                    obs_final = (observacion or "") + " | Pendiente de descontar inventario"
+                    if registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, obs_final):
+                        st.success("Pérdida guardada. Queda pendiente de descontar inventario.")
                         st.rerun()
 
         with b2:
@@ -3297,7 +3243,8 @@ elif menu == "Pérdidas":
                 elif cantidad > existencia_actual:
                     st.error("La cantidad perdida no puede ser mayor que la existencia actual.")
                 else:
-                    ok_perdida = registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, observacion)
+                    obs_final = (observacion or "") + f" | Inventario descontado. Cantidad perdida: {cantidad}"
+                    ok_perdida = registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, obs_final)
 
                     fila_prod = get_producto_por_nombre(producto)
                     costo = float(costo_unitario)
@@ -3328,6 +3275,75 @@ elif menu == "Pérdidas":
         df = buscar_df(df, txt)
         st.dataframe(df, use_container_width=True)
         descargar_archivos(df, "perdidas")
+
+        st.subheader("📉 Descontar del inventario una pérdida ya guardada")
+        pendientes = df.copy()
+        if "observacion" in pendientes.columns:
+            obs_norm = pendientes["observacion"].astype(str).apply(normalizar_texto)
+            pendientes = pendientes[~obs_norm.str.contains("inventario descontado", na=False)]
+
+        if pendientes.empty:
+            st.info("No hay pérdidas pendientes de descontar en el inventario dentro del filtro seleccionado.")
+        else:
+            opciones = []
+            mapa_perdidas = {}
+            for _, r in pendientes.iterrows():
+                perdida_id = r.get("id") or r.get("identificación") or r.get("identificacion")
+                prod = r.get("producto", "")
+                cant = float(limpiar_numero(r.get("cantidad")) or 0)
+                costo = float(limpiar_numero(r.get("costo_unitario")) or limpiar_numero(r.get("costo")) or 0)
+                fecha_r = r.get("fecha", "")
+                etiqueta = f"{perdida_id} | {prod} | cant: {cant:,.0f} | costo: {costo:,.2f} | fecha: {fecha_r}"
+                opciones.append(etiqueta)
+                mapa_perdidas[etiqueta] = r
+
+            sel_perdida = st.selectbox("Selecciona pérdida pendiente", opciones, key="perdida_pendiente_descuento")
+            fila_p = mapa_perdidas[sel_perdida]
+
+            perdida_id = fila_p.get("id") or fila_p.get("identificación") or fila_p.get("identificacion")
+            producto_p = limpiar_texto(fila_p.get("producto"))
+            cantidad_p = float(limpiar_numero(fila_p.get("cantidad")) or 0)
+            costo_p = float(limpiar_numero(fila_p.get("costo_unitario")) or limpiar_numero(fila_p.get("costo")) or obtener_costo_desde_inventario(producto_p) or 0)
+            existencia_p = obtener_existencia_desde_inventario(producto_p)
+            nueva_existencia_p = max(float(existencia_p) - float(cantidad_p), 0.0)
+
+            cpa, cpb, cpc = st.columns(3)
+            cpa.metric("Existencia actual", f"{existencia_p:,.0f}")
+            cpb.metric("Cantidad a descontar", f"{cantidad_p:,.0f}")
+            cpc.metric("Nueva existencia", f"{nueva_existencia_p:,.0f}")
+
+            if st.button("📉 Aplicar descuento al inventario", key="btn_aplicar_descuento_perdida_pendiente"):
+                if cantidad_p <= 0:
+                    st.error("La pérdida seleccionada no tiene cantidad válida.")
+                elif cantidad_p > existencia_p:
+                    st.error("La cantidad perdida no puede ser mayor que la existencia actual.")
+                else:
+                    fila_prod = get_producto_por_nombre(producto_p)
+                    precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
+
+                    ok_stock = True
+                    ok_inv = True
+                    if fila_prod is not None:
+                        ok_stock = actualizar_stock_producto(producto_p, nueva_existencia_p, date.today())
+                        ok_inv = upsert_inventario_actual(
+                            producto_p,
+                            costo_p,
+                            precio,
+                            nueva_existencia_p,
+                            date.today(),
+                            f"Descontado desde pérdida ya guardada. Pérdida ID: {perdida_id}"
+                        )
+
+                    ok_update = True
+                    if perdida_id:
+                        obs_anterior = limpiar_texto(fila_p.get("observacion"))
+                        obs_nueva = (obs_anterior + " | " if obs_anterior else "") + "Inventario descontado"
+                        ok_update = actualizar("perdidas", perdida_id, {"observacion": obs_nueva})
+
+                    if ok_stock and ok_inv and ok_update:
+                        st.success("Pérdida aplicada al inventario correctamente.")
+                        st.rerun()
+
         render_crud_generico("perdidas", df, "🛠️ Editar / eliminar pérdidas")
     else:
         st.info("No hay pérdidas registradas.")
