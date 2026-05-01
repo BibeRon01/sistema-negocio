@@ -4625,7 +4625,12 @@ elif menu == "POS":
             csum1.metric("Subtotal", f"RD$ {subtotal:,.2f}")
             csum2.metric("Recargo tarjeta", f"RD$ {recargo:,.2f}")
             csum3.metric("Total final", f"RD$ {total_final:,.2f}")
-            csum4.metric("Cambio / faltante", f"RD$ {cambio_real:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante_real:,.2f}")
+
+            total_real_para_cuadrar = float(subtotal)
+            pagos_reales_registrados = float(efectivo) + float(transferencia) + float(tarjeta) + float(credito)
+            faltante_real = max(total_real_para_cuadrar - pagos_reales_registrados, 0.0)
+            cambio_real = max(pagos_reales_registrados - total_real_para_cuadrar, 0.0)
+            csum4.metric("Cambio / faltante", f"RD$ {cambio_real:,.2f}" if cambio_real > 0 else f"Faltan RD$ {faltante_real:,.2f}")
 
             total_real_para_cuadrar = float(subtotal)
             total_cobrar_cliente = float(total_final)
