@@ -877,6 +877,55 @@ def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
     st.error(f"Error al anular en {nombre_tabla}: {ultimo_error}")
     return False
 
+
+def ajustar_pagos_sin_recargo_tarjeta(pagos_df: pd.DataFrame, ventas_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    """
+    Ajusta ventas_pagos para que el recargo de tarjeta NO se tome como ingreso real.
+    El recargo solo sirve para calcular cuánto cobrar al cliente.
+    """
+    if pagos_df is None or pagos_df.empty:
+        return pagos_df
+
+    pagos = pagos_df.copy()
+    if "monto" not in pagos.columns:
+        return pagos
+
+    pagos["monto"] = pd.to_numeric(pagos["monto"], errors="coerce").fillna(0)
+
+    metodo_col = "metodo" if "metodo" in pagos.columns else ("metodo_pago" if "metodo_pago" in pagos.columns else None)
+    if not metodo_col:
+        return pagos
+
+    # Si existe la venta relacionada, ajustar el pago de tarjeta restando el recargo guardado en ventas.
+    if ventas_df is not None and not ventas_df.empty and "venta_id" in pagos.columns:
+        ventas = ventas_df.copy()
+        ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() else ventas
+
+        id_col = None
+        for c in ["id", "identificación", "identificacion"]:
+            if c in ventas.columns:
+                id_col = c
+                break
+
+        if id_col:
+            rec_map = {}
+            total_map = {}
+            for _, v in ventas.iterrows():
+                vid = str(v.get(id_col))
+                rec_map[vid] = float(limpiar_numero(v.get("recargo")) or limpiar_numero(v.get("recargo_tarjeta")) or 0)
+                total_map[vid] = float(limpiar_numero(v.get("total_contable")) or limpiar_numero(v.get("total")) or 0)
+
+            for idx, row in pagos.iterrows():
+                metodo = normalizar_texto(row.get(metodo_col))
+                if metodo == "tarjeta":
+                    vid = str(row.get("venta_id"))
+                    recargo = rec_map.get(vid, 0.0)
+                    if recargo > 0:
+                        pagos.at[idx, "monto"] = max(float(row.get("monto") or 0) - recargo, 0.0)
+
+    return pagos
+
+
 # =========================================================
 # CARGA GLOBAL
 # =========================================================
@@ -3744,6 +3793,7 @@ elif menu == "Caja":
     def _calcular_resumen_caja(caja):
         ventas_caja = _ventas_de_caja(caja)
         pagos_caja = _pagos_de_caja(caja, ventas_caja)
+        pagos_caja = ajustar_pagos_sin_recargo_tarjeta(pagos_caja, ventas_caja)
 
         fondo_inicial = float(limpiar_numero(caja.get("monto_inicial")) or 0)
 
@@ -4544,10 +4594,13 @@ elif menu == "POS":
                         pagos = {"efectivo": pago_efectivo, "transferencia": pago_transferencia, "tarjeta": pago_tarjeta, "credito": pago_credito}
                         for metodo, monto in pagos.items():
                             if monto > 0:
+                                monto_contable_pago = float(monto)
+                                if metodo == "tarjeta":
+                                    monto_contable_pago = max(float(monto) - float(recargo), 0.0)
                                 supabase.table("ventas_pagos").insert({
                                     "venta_id": str(venta_id),
                                     "metodo": metodo,
-                                    "monto": float(monto),
+                                    "monto": float(monto_contable_pago),
                                     "usuario": nombre_usuario_actual(),
                                     "caja_id": str(caja_activa.get("id")),
                                     "dia_operativo": ahora_str(),
@@ -4561,7 +4614,7 @@ elif menu == "POS":
                                             "origen": "venta",
                                             "referencia_id": str(venta_id),
                                             "metodo_pago": metodo,
-                                            "monto": float(monto) if metodo != "tarjeta" else float(monto + recargo),
+                                            "monto": float(monto_contable_pago),
                                             "descripcion": f"Venta POS {venta_id}",
                                             "usuario": nombre_usuario_actual(),
                                         }).execute()
