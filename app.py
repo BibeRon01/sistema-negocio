@@ -4579,32 +4579,39 @@ elif menu == "POS":
                 pago_credito = st.number_input("Crédito / fiado", min_value=0.0, step=1.0, key="pos_pag_cr")
             recargo_pct = limpiar_numero(cfg.get("recargo_tarjeta_pct")) or 0.0
             recargo = float(pago_tarjeta) * (recargo_pct / 100.0)
-            total_final = max(subtotal - descuento_global + recargo, 0.0)
-            pagos_total = pago_efectivo + pago_transferencia + pago_tarjeta + pago_credito
-            cambio = max(pagos_total - total_final, 0.0)
-            faltante = max(total_final - pagos_total, 0.0)
-            csum1, csum2, csum3, csum4 = st.columns(4)
-            csum1.metric("Subtotal", f"RD$ {subtotal:,.2f}")
-            csum2.metric("Recargo tarjeta", f"RD$ {recargo:,.2f}")
-            csum3.metric("Total final", f"RD$ {total_final:,.2f}")
-            csum4.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
 
-            tarjeta_info = float(locals().get("tarjeta", 0) or locals().get("pago_tarjeta", 0) or 0)
-            recargo_info = float(locals().get("recargo", 0) or locals().get("recargo_tarjeta", 0) or 0)
-            st.markdown("### 💳 Recargo de tarjeta")
+            # IMPORTANTE:
+            # El recargo de tarjeta NO forma parte de la venta real.
+            # Solo sirve como nota para saber cuánto cobrar al cliente por tarjeta.
+            total_real_venta = max(subtotal - descuento_global, 0.0)
+            total_a_cobrar_cliente = total_real_venta + recargo
+            total_final = total_real_venta
+
+            pagos_total = pago_efectivo + pago_transferencia + pago_tarjeta + pago_credito
+            cambio = max(pagos_total - total_real_venta, 0.0)
+            faltante = max(total_real_venta - pagos_total, 0.0)
+
+            csum1, csum2, csum3 = st.columns(3)
+            csum1.metric("Total venta real", f"RD$ {total_real_venta:,.2f}")
+            csum2.metric("Pagos registrados", f"RD$ {pagos_total:,.2f}")
+            csum3.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
+
+            tarjeta_info = float(pago_tarjeta or 0)
+            recargo_info = float(recargo or 0)
+            st.markdown("### 📝 Nota de recargo de tarjeta")
             st.info(
                 f"Tarjeta registrada para contabilidad: RD$ {tarjeta_info:,.2f} | "
-                f"Recargo informativo 4%: RD$ {recargo_info:,.2f} | "
+                f"Recargo informativo {recargo_pct:g}%: RD$ {recargo_info:,.2f} | "
                 f"Total que debes cobrar por tarjeta: RD$ {tarjeta_info + recargo_info:,.2f}"
             )
-            st.caption("Ese recargo no se escribe en efectivo, transferencia ni crédito. Solo informa cuánto cobrar por tarjeta.")
+            st.caption("Este recargo NO se registra como venta, NO entra en caja y NO se coloca en efectivo, transferencia ni crédito.")
 
             ncf = st.text_input("NCF (opcional)", key="pos_ncf")
             numero_factura_pos = generar_numero_factura_pos()
             st.caption(f"Factura No. {numero_factura_pos}")
             if st.button("💳 Cobrar", key="btn_pos_cobrar"):
                 if faltante > 0.001:
-                    st.error("Los pagos no cubren el total final.")
+                    st.error("Los pagos no cubren el total real de la venta.")
                 elif pago_credito > 0 and cliente_nombre == "Venta general":
                     st.error("Para vender a crédito debes asignar un cliente.")
                 else:
