@@ -2022,11 +2022,15 @@ if es_admin() or tiene_permiso("puede_configurar"):
 else:
     menu_opciones = []
     if tiene_permiso("puede_vender"):
-        menu_opciones += ["Caja",
-        "Dinero Real", "POS", "Ventas"]
+        menu_opciones += ["Caja", "POS", "Ventas"]
     if tiene_permiso("puede_ver_reportes"):
         menu_opciones += ["Clientes", "Créditos"]
     menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
+
+
+# Seguridad: Dinero Real solo para administrador
+if not es_admin() and "Dinero Real" in menu_opciones:
+    menu_opciones = [m for m in menu_opciones if m != "Dinero Real"]
 
 menu = st.sidebar.selectbox("Menú", menu_opciones)
 
@@ -4891,6 +4895,9 @@ elif menu == "POS":
 
 elif menu == "Dinero Real":
     st.title("💰 Dinero Real")
+    if not es_admin():
+        st.error("No tienes permiso para acceder a Dinero Real.")
+        st.stop()
     st.caption("Muestra cuánto dinero hay en efectivo, banco y total general. Los depósitos solo mueven dinero de lugar.")
 
     resumen = calcular_dinero_real()
@@ -4973,6 +4980,133 @@ elif menu == "Dinero Real":
         cols = [c for c in ["fecha", "tipo", "categoria", "metodo_pago", "cuenta", "cuenta_origen", "cuenta_destino", "monto", "descripcion", "usuario"] if c in movs.columns]
         st.dataframe(movs[cols] if cols else movs, use_container_width=True)
         descargar_archivos(movs[cols] if cols else movs, "movimientos_dinero")
+
+        st.markdown("---")
+        st.subheader("✏️ Editar / eliminar movimiento manual")
+        st.caption("Usa esta opción solo para corregir movimientos manuales registrados por error.")
+
+        movs_edit = leer_actualizado("movimientos_dinero")
+        if movs_edit.empty:
+            st.info("No hay movimientos para editar.")
+        else:
+            # Mostrar los más recientes primero
+            if "fecha" in movs_edit.columns:
+                movs_edit["_fecha_dt"] = pd.to_datetime(movs_edit["fecha"], errors="coerce")
+                movs_edit = movs_edit.sort_values("_fecha_dt", ascending=False)
+
+            opciones_mov = []
+            mapa_mov = {}
+            for _, r in movs_edit.iterrows():
+                rid = r.get("id")
+                fecha = r.get("fecha", "")
+                tipo = r.get("tipo", "")
+                monto = float(limpiar_numero(r.get("monto")) or 0)
+                desc = limpiar_texto(r.get("descripcion"))
+                etiqueta = f"{fecha} | {tipo} | RD$ {monto:,.2f} | {desc[:40]}"
+                opciones_mov.append(etiqueta)
+                mapa_mov[etiqueta] = r.to_dict()
+
+            sel_mov = st.selectbox("Selecciona movimiento", opciones_mov, key="dinero_edit_sel")
+            mov = mapa_mov[sel_mov]
+            mov_id = mov.get("id")
+
+            e1, e2 = st.columns(2)
+            tipo_actual = limpiar_texto(mov.get("tipo")) or "entrada"
+            tipos = ["entrada", "salida", "transferencia interna", "depósito al banco", "retiro del banco", "aporte", "retiro"]
+            tipo_edit = e1.selectbox(
+                "Tipo",
+                tipos,
+                index=tipos.index(tipo_actual) if tipo_actual in tipos else 0,
+                key="dinero_edit_tipo",
+            )
+            monto_edit = e2.number_input(
+                "Monto",
+                min_value=0.0,
+                step=1.0,
+                value=float(limpiar_numero(mov.get("monto")) or 0),
+                key="dinero_edit_monto",
+            )
+
+            desc_edit = st.text_input(
+                "Descripción",
+                value=limpiar_texto(mov.get("descripcion")),
+                key="dinero_edit_desc",
+            )
+
+            metodo_edit = ""
+            cuenta_edit = ""
+            cuenta_origen_edit = ""
+            cuenta_destino_edit = ""
+
+            if tipo_edit in ["transferencia interna", "depósito al banco", "retiro del banco"]:
+                if tipo_edit == "depósito al banco":
+                    cuenta_origen_edit = "Efectivo negocio"
+                    cuenta_destino_edit = "Banco"
+                elif tipo_edit == "retiro del banco":
+                    cuenta_origen_edit = "Banco"
+                    cuenta_destino_edit = "Efectivo negocio"
+                else:
+                    ce1, ce2 = st.columns(2)
+                    origen_actual = limpiar_texto(mov.get("cuenta_origen")) or "Efectivo negocio"
+                    destino_actual = limpiar_texto(mov.get("cuenta_destino")) or "Banco"
+                    cuentas_opts = ["Efectivo negocio", "Banco"]
+                    cuenta_origen_edit = ce1.selectbox(
+                        "Cuenta origen",
+                        cuentas_opts,
+                        index=cuentas_opts.index(origen_actual) if origen_actual in cuentas_opts else 0,
+                        key="dinero_edit_origen",
+                    )
+                    cuenta_destino_edit = ce2.selectbox(
+                        "Cuenta destino",
+                        cuentas_opts,
+                        index=cuentas_opts.index(destino_actual) if destino_actual in cuentas_opts else 1,
+                        key="dinero_edit_destino",
+                    )
+            else:
+                metodo_actual = limpiar_texto(mov.get("metodo_pago")) or "efectivo"
+                metodos = ["efectivo", "transferencia", "tarjeta", "banco"]
+                metodo_edit = st.selectbox(
+                    "Método / cuenta",
+                    metodos,
+                    index=metodos.index(metodo_actual) if metodo_actual in metodos else 0,
+                    key="dinero_edit_metodo",
+                )
+                cuenta_edit = cuenta_por_metodo_pago(metodo_edit)
+
+            b1, b2 = st.columns(2)
+            with b1:
+                if st.button("💾 Guardar corrección", key="btn_dinero_guardar_correccion"):
+                    if monto_edit <= 0:
+                        st.error("El monto debe ser mayor que cero.")
+                    elif tipo_edit in ["transferencia interna", "depósito al banco", "retiro del banco"] and cuenta_origen_edit == cuenta_destino_edit:
+                        st.error("La cuenta origen y destino no pueden ser iguales.")
+                    else:
+                        payload = {
+                            "tipo": tipo_edit,
+                            "monto": float(monto_edit),
+                            "descripcion": desc_edit,
+                            "metodo_pago": metodo_edit,
+                            "cuenta": cuenta_edit,
+                            "cuenta_origen": cuenta_origen_edit,
+                            "cuenta_destino": cuenta_destino_edit,
+                            "categoria": limpiar_texto(mov.get("categoria")) or "manual",
+                            "usuario": nombre_usuario_actual() if "nombre_usuario_actual" in globals() else "",
+                        }
+                        ok = actualizar("movimientos_dinero", mov_id, payload)
+                        if ok:
+                            st.success("Movimiento corregido.")
+                            st.rerun()
+
+            with b2:
+                confirmar_delete = st.checkbox("Confirmo eliminar este movimiento", key="dinero_confirmar_delete")
+                if st.button("🗑️ Eliminar movimiento", key="btn_dinero_eliminar_mov"):
+                    if not confirmar_delete:
+                        st.warning("Marca la confirmación antes de eliminar.")
+                    else:
+                        ok = eliminar("movimientos_dinero", mov_id)
+                        if ok:
+                            st.success("Movimiento eliminado.")
+                            st.rerun()
 
 
 
