@@ -763,27 +763,43 @@ def registrar_auditoria(accion: str, tabla: str, detalle: str = ""):
 def total_contable_sin_recargo(row) -> float:
     """
     Total real para contabilidad/caja/dashboard.
-    El recargo de tarjeta NO se toma como ingreso real.
+    Regla actual:
+    - El POS guarda en total la venta real.
+    - El recargo de tarjeta queda solo como nota informativa.
+    - Por eso NO se debe restar el recargo otra vez.
     """
     try:
+        subtotal = float(limpiar_numero(row.get("subtotal")) or 0)
+        descuento = float(limpiar_numero(row.get("descuento")) or limpiar_numero(row.get("descuento_global")) or 0)
         total = float(limpiar_numero(row.get("total")) or 0)
-        recargo = float(limpiar_numero(row.get("recargo")) or limpiar_numero(row.get("recargo_tarjeta")) or 0)
-        return max(total - recargo, 0)
+
+        # Si existe subtotal, usarlo como base real.
+        if subtotal > 0:
+            return max(subtotal - descuento, 0)
+
+        # Si no existe subtotal, usar total tal como está guardado.
+        return max(total, 0)
     except Exception:
         try:
-            return float(limpiar_numero(row.get("subtotal")) or limpiar_numero(row.get("total")) or 0)
+            return float(limpiar_numero(row.get("total")) or 0)
         except Exception:
             return 0.0
 
 
 def aplicar_total_contable_df(df):
     """
-    Crea una columna total_contable = total - recargo.
-    Debe estar definida antes de cargar_datos().
+    Crea una columna total_contable con la venta real.
+    No resta recargo porque el recargo ya no es financiero.
     """
     try:
         if df is None or df.empty:
             return df
+        out = df.copy()
+        out["total_contable"] = out.apply(total_contable_sin_recargo, axis=1)
+        return out
+    except Exception:
+        return df
+
         out = df.copy()
         out["total_contable"] = out.apply(total_contable_sin_recargo, axis=1)
         return out
@@ -3812,23 +3828,8 @@ elif menu == "Caja":
 
             metodo_col = "metodo" if "metodo" in pagos_ajustados.columns else ("metodo_pago" if "metodo_pago" in pagos_ajustados.columns else None)
 
-            # Si los pagos suman más que la venta real, ese exceso se elimina como recargo.
-            total_pagos = float(pagos_ajustados["monto"].sum())
-            exceso = max(total_pagos - float(total_ventas), 0.0)
-
-            if exceso > 0 and metodo_col:
-                for metodo_prioridad in ["tarjeta", "efectivo", "transferencia", "credito"]:
-                    for idx in list(pagos_ajustados.index):
-                        if exceso <= 0:
-                            break
-                        if normalizar_texto(pagos_ajustados.at[idx, metodo_col]) != metodo_prioridad:
-                            continue
-                        monto_actual = float(pagos_ajustados.at[idx, "monto"])
-                        quitar = min(monto_actual, exceso)
-                        pagos_ajustados.at[idx, "monto"] = monto_actual - quitar
-                        exceso -= quitar
-                    if exceso <= 0:
-                        break
+            # Los pagos se suman como fueron registrados en POS.
+            # El recargo de tarjeta no se registra en ventas_pagos, por eso no se descuenta aquí.
 
         def _sumar_metodo_limpio(df_pagos, metodo_buscar):
             if df_pagos.empty or "monto" not in df_pagos.columns:
