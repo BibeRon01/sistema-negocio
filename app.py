@@ -1991,6 +1991,8 @@ if st.sidebar.button("🚪 Cerrar sesión"):
 
 menu_base = [
     "Dashboard",
+    "Caja",
+    "Dinero Real",
     "POS",
     "Productos",
     "Clientes",
@@ -2016,7 +2018,7 @@ menu_base = [
 ]
 
 if es_admin() or tiene_permiso("puede_configurar"):
-    menu_opciones = ["Dashboard", "Caja"] + [m for m in menu_base if m not in ["Dashboard", "Cierre de Caja"]]
+    menu_opciones = ["Dashboard", "Caja", "Dinero Real"] + [m for m in menu_base if m not in ["Dashboard", "Caja", "Dinero Real", "Cierre de Caja"]]
 else:
     menu_opciones = []
     if tiene_permiso("puede_vender"):
