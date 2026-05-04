@@ -4588,13 +4588,23 @@ elif menu == "POS":
             total_final = total_real_venta
 
             pagos_total = pago_efectivo + pago_transferencia + pago_tarjeta + pago_credito
-            cambio = max(pagos_total - total_real_venta, 0.0)
-            faltante = max(total_real_venta - pagos_total, 0.0)
+            diferencia_pagos = round(pagos_total - total_real_venta, 2)
+            cambio = max(diferencia_pagos, 0.0)
+            faltante = max(-diferencia_pagos, 0.0)
+            pagos_cuadran = abs(diferencia_pagos) < 0.01
 
-            csum1, csum2, csum3 = st.columns(3)
+            csum1, csum2, csum3, csum4 = st.columns(4)
             csum1.metric("Total venta real", f"RD$ {total_real_venta:,.2f}")
             csum2.metric("Pagos registrados", f"RD$ {pagos_total:,.2f}")
-            csum3.metric("Cambio / faltante", f"RD$ {cambio:,.2f}" if cambio > 0 else f"Faltan RD$ {faltante:,.2f}")
+            csum3.metric("Diferencia", f"RD$ {diferencia_pagos:,.2f}")
+            csum4.metric("Estado", "✅ Cuadrado" if pagos_cuadran else "⚠️ Revisar")
+
+            if pagos_cuadran:
+                st.success("Pagos cuadrados con la venta real. Puedes cobrar.")
+            elif diferencia_pagos < 0:
+                st.error(f"Faltan RD$ {abs(diferencia_pagos):,.2f}. Revisa efectivo, transferencia, tarjeta o crédito.")
+            else:
+                st.error(f"Sobran RD$ {diferencia_pagos:,.2f}. Ese sobrante no debe entrar como venta.")
 
             tarjeta_info = float(pago_tarjeta or 0)
             recargo_info = float(recargo or 0)
@@ -4609,9 +4619,9 @@ elif menu == "POS":
             ncf = st.text_input("NCF (opcional)", key="pos_ncf")
             numero_factura_pos = generar_numero_factura_pos()
             st.caption(f"Factura No. {numero_factura_pos}")
-            if st.button("💳 Cobrar", key="btn_pos_cobrar"):
+            if st.button("💳 Cobrar", key="btn_pos_cobrar", disabled=not pagos_cuadran):
                 if faltante > 0.001:
-                    st.error("Los pagos no cubren el total real de la venta.")
+                    st.error("No puedes cobrar hasta que los pagos cuadren con el total real de la venta.")
                 elif pago_credito > 0 and cliente_nombre == "Venta general":
                     st.error("Para vender a crédito debes asignar un cliente.")
                 else:
