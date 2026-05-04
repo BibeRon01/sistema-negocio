@@ -3784,34 +3784,87 @@ elif menu == "Caja":
     def _calcular_resumen_caja(caja):
         ventas_caja = _ventas_de_caja(caja)
         pagos_caja = _pagos_de_caja(caja, ventas_caja)
-        pagos_caja = ajustar_pagos_sin_recargo_tarjeta(pagos_caja, ventas_caja)
 
         fondo_inicial = float(limpiar_numero(caja.get("monto_inicial")) or 0)
 
-        # Fuente principal: ventas_pagos, porque separa los pagos mixtos
-        venta_efectivo = _sumar_pago_metodo(pagos_caja, "efectivo")
-        venta_transferencia = _sumar_pago_metodo(pagos_caja, "transferencia")
-        venta_tarjeta = _sumar_pago_metodo(pagos_caja, "tarjeta")
-        venta_credito = _sumar_pago_metodo(pagos_caja, "credito")
+        # =====================================================
+        # REGLA LIMPIA DE CAJA
+        # =====================================================
+        # 1) Total ventas = suma real de ventas, sin recargo.
+        # 2) Métodos de pago = ventas_pagos reales.
+        # 3) Si ventas_pagos suma más que ventas reales, el exceso es recargo y se descuenta,
+        #    primero de tarjeta, luego de otros métodos si fue digitado mal.
+        # =====================================================
 
-        # Respaldo por ventas para cuando ventas_pagos esté incompleto
-        if venta_efectivo == 0:
-            venta_efectivo = _sumar_ventas_por_metodo_respaldo(ventas_caja, "efectivo")
-        if venta_transferencia == 0:
-            venta_transferencia = _sumar_ventas_por_metodo_respaldo(ventas_caja, "transferencia")
-        if venta_tarjeta == 0:
-            venta_tarjeta = _sumar_ventas_por_metodo_respaldo(ventas_caja, "tarjeta")
-        if venta_credito == 0:
-            venta_credito = _sumar_ventas_por_metodo_respaldo(ventas_caja, "credito")
+        if ventas_caja is None:
+            ventas_caja = pd.DataFrame()
+        if pagos_caja is None:
+            pagos_caja = pd.DataFrame()
 
-        total_col = "total_contable" if "total_contable" in ventas_caja.columns else "total"
-        total_ventas = suma_col(ventas_caja, total_col) if not ventas_caja.empty else (venta_efectivo + venta_transferencia + venta_tarjeta + venta_credito)
+        ventas_caja = aplicar_total_contable_df(ventas_caja) if "aplicar_total_contable_df" in globals() and not ventas_caja.empty else ventas_caja
+
+        total_col = "total_contable" if not ventas_caja.empty and "total_contable" in ventas_caja.columns else "total"
+        total_ventas = suma_col(ventas_caja, total_col) if not ventas_caja.empty and total_col in ventas_caja.columns else 0.0
+
+        pagos_ajustados = pagos_caja.copy()
+        if not pagos_ajustados.empty and "monto" in pagos_ajustados.columns:
+            pagos_ajustados["monto"] = pd.to_numeric(pagos_ajustados["monto"], errors="coerce").fillna(0)
+
+            metodo_col = "metodo" if "metodo" in pagos_ajustados.columns else ("metodo_pago" if "metodo_pago" in pagos_ajustados.columns else None)
+
+            # Si los pagos suman más que la venta real, ese exceso se elimina como recargo.
+            total_pagos = float(pagos_ajustados["monto"].sum())
+            exceso = max(total_pagos - float(total_ventas), 0.0)
+
+            if exceso > 0 and metodo_col:
+                for metodo_prioridad in ["tarjeta", "efectivo", "transferencia", "credito"]:
+                    for idx in list(pagos_ajustados.index):
+                        if exceso <= 0:
+                            break
+                        if normalizar_texto(pagos_ajustados.at[idx, metodo_col]) != metodo_prioridad:
+                            continue
+                        monto_actual = float(pagos_ajustados.at[idx, "monto"])
+                        quitar = min(monto_actual, exceso)
+                        pagos_ajustados.at[idx, "monto"] = monto_actual - quitar
+                        exceso -= quitar
+                    if exceso <= 0:
+                        break
+
+        def _sumar_metodo_limpio(df_pagos, metodo_buscar):
+            if df_pagos.empty or "monto" not in df_pagos.columns:
+                return 0.0
+            metodo_col = "metodo" if "metodo" in df_pagos.columns else ("metodo_pago" if "metodo_pago" in df_pagos.columns else None)
+            if not metodo_col:
+                return 0.0
+            temp = df_pagos[df_pagos[metodo_col].astype(str).apply(normalizar_texto) == metodo_buscar]
+            return float(pd.to_numeric(temp["monto"], errors="coerce").fillna(0).sum())
+
+        venta_efectivo = _sumar_metodo_limpio(pagos_ajustados, "efectivo")
+        venta_transferencia = _sumar_metodo_limpio(pagos_ajustados, "transferencia")
+        venta_tarjeta = _sumar_metodo_limpio(pagos_ajustados, "tarjeta")
+        venta_credito = _sumar_metodo_limpio(pagos_ajustados, "credito")
+
+        # Respaldo para ventas viejas sin ventas_pagos
+        if (venta_efectivo + venta_transferencia + venta_tarjeta + venta_credito) == 0 and not ventas_caja.empty:
+            metodo_col_v = "metodo_pago" if "metodo_pago" in ventas_caja.columns else ("metodo" if "metodo" in ventas_caja.columns else None)
+            if metodo_col_v and total_col in ventas_caja.columns:
+                for metodo in ["efectivo", "transferencia", "tarjeta", "credito"]:
+                    temp = ventas_caja[ventas_caja[metodo_col_v].astype(str).apply(normalizar_texto) == metodo]
+                    monto = float(pd.to_numeric(temp[total_col], errors="coerce").fillna(0).sum())
+                    if metodo == "efectivo":
+                        venta_efectivo = monto
+                    elif metodo == "transferencia":
+                        venta_transferencia = monto
+                    elif metodo == "tarjeta":
+                        venta_tarjeta = monto
+                    elif metodo == "credito":
+                        venta_credito = monto
 
         efectivo_esperado = fondo_inicial + venta_efectivo
 
         return {
             "ventas_df": ventas_caja,
-            "pagos_df": pagos_caja,
+            "pagos_df": pagos_ajustados,
             "fondo_inicial": fondo_inicial,
             "venta_efectivo": venta_efectivo,
             "venta_transferencia": venta_transferencia,
@@ -3820,6 +3873,7 @@ elif menu == "Caja":
             "total_ventas": total_ventas,
             "efectivo_esperado": efectivo_esperado,
         }
+
 
     def _cerrar_caja(caja, efectivo_contado, obs_cierre, usuario_cierre=None):
         usuario_cierre = usuario_cierre or usuario_act
