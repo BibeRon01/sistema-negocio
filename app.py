@@ -1875,6 +1875,103 @@ def mostrar_factura_pos(post_venta: dict):
 
 
 
+
+def cuenta_por_metodo_pago(metodo_pago: str) -> str:
+    metodo = normalizar_texto(metodo_pago)
+    if metodo == "efectivo":
+        return "Efectivo negocio"
+    if metodo in ["transferencia", "tarjeta", "banco"]:
+        return "Banco"
+    return ""
+
+
+def leer_actualizado(tabla: str) -> pd.DataFrame:
+    try:
+        resp = supabase.table(tabla).select("*").execute()
+        return pd.DataFrame(resp.data or [])
+    except Exception:
+        return DATA.get(tabla, pd.DataFrame()).copy()
+
+
+def calcular_dinero_real() -> dict:
+    efectivo = 0.0
+    banco = 0.0
+
+    def sumar(cuenta, monto):
+        nonlocal efectivo, banco
+        cuenta_n = normalizar_texto(cuenta)
+        monto = float(monto or 0)
+        if cuenta_n in ["efectivo negocio", "efectivo", "caja"]:
+            efectivo += monto
+        elif cuenta_n in ["banco", "transferencia", "tarjeta"]:
+            banco += monto
+
+    cuentas = leer_actualizado("cuentas_dinero")
+    if not cuentas.empty:
+        for _, r in cuentas.iterrows():
+            sumar(r.get("nombre", ""), float(limpiar_numero(r.get("saldo_inicial")) or 0))
+
+    pagos = leer_actualizado("ventas_pagos")
+    if not pagos.empty and "monto" in pagos.columns:
+        metodo_col = "metodo" if "metodo" in pagos.columns else ("metodo_pago" if "metodo_pago" in pagos.columns else None)
+        if metodo_col:
+            for _, r in pagos.iterrows():
+                metodo = normalizar_texto(r.get(metodo_col))
+                monto = float(limpiar_numero(r.get("monto")) or 0)
+                if metodo == "efectivo":
+                    sumar("Efectivo negocio", monto)
+                elif metodo in ["transferencia", "tarjeta"]:
+                    sumar("Banco", monto)
+
+    for tabla in ["gastos", "compras", "pagos_empleados", "adelantos_empleados", "gastos_dueno"]:
+        df = leer_actualizado(tabla)
+        if df.empty:
+            continue
+        for _, r in df.iterrows():
+            monto = float(limpiar_numero(r.get("monto")) or limpiar_numero(r.get("total")) or limpiar_numero(r.get("valor")) or 0)
+            metodo = r.get("metodo_pago") or r.get("metodo") or ""
+            cuenta = r.get("cuenta") or cuenta_por_metodo_pago(metodo)
+            if cuenta:
+                sumar(cuenta, -monto)
+
+    movs = leer_actualizado("movimientos_dinero")
+    if not movs.empty:
+        for _, r in movs.iterrows():
+            tipo = normalizar_texto(r.get("tipo"))
+            monto = float(limpiar_numero(r.get("monto")) or 0)
+            cuenta = r.get("cuenta") or cuenta_por_metodo_pago(r.get("metodo_pago"))
+            origen = r.get("cuenta_origen")
+            destino = r.get("cuenta_destino")
+
+            if tipo in ["entrada", "aporte", "ingreso"]:
+                sumar(cuenta, monto)
+            elif tipo in ["salida", "retiro", "gasto"]:
+                sumar(cuenta, -monto)
+            elif tipo in ["transferencia interna", "deposito al banco", "depósito al banco", "retiro del banco"]:
+                sumar(origen, -monto)
+                sumar(destino, monto)
+
+    return {"efectivo": efectivo, "banco": banco, "total": efectivo + banco}
+
+
+def registrar_movimiento_dinero(tipo, monto, descripcion="", metodo_pago="", cuenta="", cuenta_origen="", cuenta_destino="", categoria="manual"):
+    payload = {
+        "fecha": datetime.now().isoformat(),
+        "dia_operativo": str(date.today()),
+        "tipo": tipo,
+        "categoria": categoria,
+        "origen": "manual",
+        "metodo_pago": metodo_pago,
+        "cuenta": cuenta,
+        "cuenta_origen": cuenta_origen,
+        "cuenta_destino": cuenta_destino,
+        "monto": float(monto or 0),
+        "descripcion": descripcion,
+        "usuario": nombre_usuario_actual() if "nombre_usuario_actual" in globals() else "",
+    }
+    return insertar("movimientos_dinero", payload)
+
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -1923,7 +2020,8 @@ if es_admin() or tiene_permiso("puede_configurar"):
 else:
     menu_opciones = []
     if tiene_permiso("puede_vender"):
-        menu_opciones += ["Caja", "POS", "Ventas"]
+        menu_opciones += ["Caja",
+        "Dinero Real", "POS", "Ventas"]
     if tiene_permiso("puede_ver_reportes"):
         menu_opciones += ["Clientes", "Créditos"]
     menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
@@ -4786,6 +4884,95 @@ elif menu == "POS":
                         st.error(f"No se pudo registrar la venta: {exc}")
         else:
             st.info("Carrito vacío.")
+
+
+
+elif menu == "Dinero Real":
+    st.title("💰 Dinero Real")
+    st.caption("Muestra cuánto dinero hay en efectivo, banco y total general. Los depósitos solo mueven dinero de lugar.")
+
+    resumen = calcular_dinero_real()
+    d1, d2, d3 = st.columns(3)
+    d1.metric("💵 Efectivo negocio", f"RD$ {resumen['efectivo']:,.2f}")
+    d2.metric("🏦 Banco", f"RD$ {resumen['banco']:,.2f}")
+    d3.metric("📊 Total dinero real", f"RD$ {resumen['total']:,.2f}")
+
+    st.markdown("---")
+    st.subheader("➕ Movimiento manual")
+
+    tipo_mov = st.selectbox(
+        "Tipo de movimiento",
+        ["entrada", "salida", "transferencia interna", "depósito al banco", "retiro del banco", "aporte", "retiro"],
+        key="dinero_tipo_mov",
+    )
+    monto_mov = st.number_input("Monto", min_value=0.0, step=1.0, key="dinero_monto")
+    descripcion_mov = st.text_input("Descripción", key="dinero_descripcion")
+
+    if tipo_mov in ["transferencia interna", "depósito al banco", "retiro del banco"]:
+        if tipo_mov == "depósito al banco":
+            cuenta_origen = "Efectivo negocio"
+            cuenta_destino = "Banco"
+            st.info("Sale del efectivo del negocio y entra al banco. El total general no cambia.")
+        elif tipo_mov == "retiro del banco":
+            cuenta_origen = "Banco"
+            cuenta_destino = "Efectivo negocio"
+            st.info("Sale del banco y entra al efectivo del negocio. El total general no cambia.")
+        else:
+            ca, cb = st.columns(2)
+            cuenta_origen = ca.selectbox("Cuenta origen", ["Efectivo negocio", "Banco"], key="dinero_origen")
+            cuenta_destino = cb.selectbox("Cuenta destino", ["Banco", "Efectivo negocio"], key="dinero_destino")
+
+        if st.button("Guardar transferencia", key="btn_dinero_transferencia"):
+            if monto_mov <= 0:
+                st.error("El monto debe ser mayor que cero.")
+            elif cuenta_origen == cuenta_destino:
+                st.error("La cuenta origen y destino no pueden ser iguales.")
+            else:
+                ok = registrar_movimiento_dinero(
+                    tipo_mov,
+                    monto_mov,
+                    descripcion_mov,
+                    cuenta_origen=cuenta_origen,
+                    cuenta_destino=cuenta_destino,
+                    categoria="transferencia interna",
+                )
+                if ok:
+                    st.success("Movimiento guardado.")
+                    st.rerun()
+    else:
+        metodo_mov = st.selectbox("Método / cuenta", ["efectivo", "transferencia", "tarjeta", "banco"], key="dinero_metodo")
+        cuenta_mov = cuenta_por_metodo_pago(metodo_mov)
+        st.write(f"Afectará la cuenta: **{cuenta_mov}**")
+
+        if st.button("Guardar movimiento", key="btn_dinero_movimiento"):
+            if monto_mov <= 0:
+                st.error("El monto debe ser mayor que cero.")
+            else:
+                ok = registrar_movimiento_dinero(
+                    tipo_mov,
+                    monto_mov,
+                    descripcion_mov,
+                    metodo_pago=metodo_mov,
+                    cuenta=cuenta_mov,
+                    categoria="manual",
+                )
+                if ok:
+                    st.success("Movimiento guardado.")
+                    st.rerun()
+
+    st.markdown("---")
+    st.subheader("📚 Movimientos registrados")
+    movs = leer_actualizado("movimientos_dinero")
+    if movs.empty:
+        st.info("No hay movimientos registrados.")
+    else:
+        txt = st.text_input("Buscar movimiento", key="buscar_dinero")
+        movs = buscar_df(movs, txt)
+        cols = [c for c in ["fecha", "tipo", "categoria", "metodo_pago", "cuenta", "cuenta_origen", "cuenta_destino", "monto", "descripcion", "usuario"] if c in movs.columns]
+        st.dataframe(movs[cols] if cols else movs, use_container_width=True)
+        descargar_archivos(movs[cols] if cols else movs, "movimientos_dinero")
+
+
 
 # =========================================================
 # CLIENTES
