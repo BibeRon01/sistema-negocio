@@ -3725,6 +3725,16 @@ elif menu == "Gastos Dueño":
         with c1:
             fecha = st.date_input("Fecha", value=date.today(), key="dueno_fecha")
             concepto = st.text_input("Concepto", key="dueno_concepto")
+            metodo_pago = st.selectbox(
+                "Método de pago",
+                ["efectivo", "transferencia", "tarjeta", "mixto"],
+                key="dueno_metodo_pago",
+            )
+            cuenta = cuenta_por_metodo_pago(metodo_pago) if "cuenta_por_metodo_pago" in globals() else ""
+            if metodo_pago == "mixto":
+                st.info("Para control exacto de Dinero Real, si el retiro fue mixto conviene registrarlo en dos partes: una en efectivo y otra en transferencia/tarjeta.")
+            else:
+                st.caption(f"Este retiro afectará: {cuenta}")
         with c2:
             monto = st.number_input("Monto", min_value=0.0, step=1.0, key="dueno_monto")
             detalle = st.text_area("Detalle", key="dueno_detalle")
@@ -3732,7 +3742,15 @@ elif menu == "Gastos Dueño":
         if st.button("Guardar gasto dueño"):
             if insertar(
                 "gastos_dueno",
-                {"fecha": str(fecha), "concepto": concepto, "monto": float(monto), "detalle": detalle},
+                {
+                    "fecha": str(fecha),
+                    "concepto": concepto,
+                    "monto": float(monto),
+                    "detalle": detalle,
+                    "metodo_pago": metodo_pago,
+                    "cuenta": cuenta,
+                    "tipo_movimiento": "retiro_dueño",
+                },
             ):
                 st.success("Gasto del dueño guardado.")
                 st.rerun()
@@ -3743,8 +3761,9 @@ elif menu == "Gastos Dueño":
         df = filtrar_por_fechas(df, d1, d2)
         txt = st.text_input("Buscar gasto dueño", key="buscar_dueno")
         df = buscar_df(df, txt)
-        st.dataframe(df, use_container_width=True)
-        descargar_archivos(df, "gastos_dueno")
+        columnas = [c for c in ["fecha", "concepto", "monto", "metodo_pago", "cuenta", "detalle", "tipo_movimiento"] if c in df.columns]
+        st.dataframe(df[columnas] if columnas else df, use_container_width=True)
+        descargar_archivos(df[columnas] if columnas else df, "gastos_dueno")
         render_crud_generico("gastos_dueno", df, "🛠️ Editar / eliminar gastos del dueño")
     else:
         st.info("No hay gastos del dueño registrados.")
