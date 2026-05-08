@@ -1931,6 +1931,8 @@ def calcular_dinero_real() -> dict:
             monto = float(limpiar_numero(r.get("monto")) or limpiar_numero(r.get("total")) or limpiar_numero(r.get("valor")) or 0)
             metodo = r.get("metodo_pago") or r.get("metodo") or ""
             cuenta = r.get("cuenta") or cuenta_por_metodo_pago(metodo)
+            if normalizar_texto(metodo) == "mixto" and not cuenta:
+                continue
             if cuenta:
                 sumar(cuenta, -monto)
 
@@ -1952,6 +1954,38 @@ def calcular_dinero_real() -> dict:
                 sumar(destino, monto)
 
     return {"efectivo": efectivo, "banco": banco, "total": efectivo + banco}
+
+
+
+def resumen_salidas_automaticas_dinero() -> pd.DataFrame:
+    filas = []
+    tablas = [
+        ("gastos", "Gastos"),
+        ("compras", "Compras"),
+        ("pagos_empleados", "Pagos empleados"),
+        ("adelantos_empleados", "Adelantos empleados"),
+        ("gastos_dueno", "Gastos dueño"),
+    ]
+    for tabla, nombre in tablas:
+        df = leer_actualizado(tabla)
+        if df.empty:
+            continue
+        for _, r in df.iterrows():
+            monto = float(limpiar_numero(r.get("monto")) or limpiar_numero(r.get("total")) or limpiar_numero(r.get("valor")) or 0)
+            metodo = r.get("metodo_pago") or r.get("metodo") or ""
+            cuenta = r.get("cuenta") or cuenta_por_metodo_pago(metodo)
+            concepto = r.get("concepto") or r.get("descripcion") or r.get("detalle") or r.get("producto") or nombre
+            fecha = r.get("fecha") or r.get("created_at") or ""
+            filas.append({
+                "fecha": fecha,
+                "origen": nombre,
+                "concepto": concepto,
+                "monto": monto,
+                "metodo_pago": metodo,
+                "cuenta": cuenta,
+                "afecta_dinero": "sí" if cuenta else "pendiente",
+            })
+    return pd.DataFrame(filas)
 
 
 def registrar_movimiento_dinero(tipo, monto, descripcion="", metodo_pago="", cuenta="", cuenta_origen="", cuenta_destino="", categoria="manual"):
@@ -5001,6 +5035,26 @@ elif menu == "Dinero Real":
         descargar_archivos(movs[cols] if cols else movs, "movimientos_dinero")
 
         st.markdown("---")
+
+    st.markdown("---")
+    st.subheader("📌 Salidas automáticas tomadas del sistema")
+    st.caption("Aquí aparecen gastos, compras, pagos, adelantos y gastos del dueño que Dinero Real descuenta automáticamente.")
+
+    salidas_auto = resumen_salidas_automaticas_dinero()
+    if salidas_auto.empty:
+        st.info("No hay salidas automáticas registradas.")
+    else:
+        buscar_auto = st.text_input("Buscar salida automática", key="buscar_salidas_auto_dinero")
+        salidas_auto = buscar_df(salidas_auto, buscar_auto)
+        st.dataframe(salidas_auto, use_container_width=True)
+        descargar_archivos(salidas_auto, "salidas_automaticas_dinero")
+
+        if "afecta_dinero" in salidas_auto.columns:
+            pendientes = salidas_auto[salidas_auto["afecta_dinero"] == "pendiente"]
+            if not pendientes.empty:
+                st.warning("Hay salidas pendientes porque no tienen método/cuenta. Si fue mixto, regístralo separado para saber cuánto salió de efectivo y cuánto de banco.")
+
+
         st.subheader("✏️ Editar / eliminar movimiento manual")
         st.caption("Usa esta opción solo para corregir movimientos manuales registrados por error.")
 
