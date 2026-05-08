@@ -1876,6 +1876,295 @@ def mostrar_factura_pos(post_venta: dict):
 
 
 
+
+def _monto_de_row(row, campos=("monto", "total", "valor", "importe")) -> float:
+    for c in campos:
+        try:
+            v = limpiar_numero(row.get(c))
+            if v is not None and float(v) != 0:
+                return float(v)
+        except Exception:
+            pass
+    return 0.0
+
+
+def _cuenta_por_metodo_pro(metodo_pago: str, cuenta: str = "") -> str:
+    cuenta_limpia = limpiar_texto(cuenta)
+    if cuenta_limpia:
+        return cuenta_limpia
+    metodo = normalizar_texto(metodo_pago)
+    if metodo == "efectivo":
+        return "Efectivo negocio"
+    if metodo in ["transferencia", "tarjeta", "banco"]:
+        return "Banco"
+    if metodo == "credito":
+        return "Crédito pendiente"
+    return "Pendiente"
+
+
+def _agregar_movimiento(filas, fecha, tipo, origen, concepto, cuenta, entrada=0.0, salida=0.0, metodo_pago="", referencia="", detalle=""):
+    cuenta = cuenta or "Pendiente"
+    filas.append({
+        "fecha": fecha,
+        "tipo": tipo,
+        "origen": origen,
+        "concepto": concepto,
+        "cuenta": cuenta,
+        "metodo_pago": metodo_pago,
+        "entrada": float(entrada or 0),
+        "salida": float(salida or 0),
+        "neto": float(entrada or 0) - float(salida or 0),
+        "referencia": referencia,
+        "detalle": detalle,
+    })
+
+
+def construir_historial_dinero_real() -> pd.DataFrame:
+    filas = []
+
+    # 1) Saldos iniciales de cuentas
+    cuentas = leer_actualizado("cuentas_dinero")
+    if not cuentas.empty:
+        for _, r in cuentas.iterrows():
+            saldo = float(limpiar_numero(r.get("saldo_inicial")) or 0)
+            if saldo != 0:
+                _agregar_movimiento(
+                    filas,
+                    r.get("created_at") or "",
+                    "entrada",
+                    "Saldo inicial",
+                    f"Saldo inicial {r.get('nombre', '')}",
+                    r.get("nombre", ""),
+                    entrada=saldo,
+                    metodo_pago=r.get("tipo", ""),
+                    detalle=r.get("observacion", ""),
+                )
+
+    # 2) Ventas cobradas por ventas_pagos
+    pagos = leer_actualizado("ventas_pagos")
+    if not pagos.empty and "monto" in pagos.columns:
+        metodo_col = "metodo" if "metodo" in pagos.columns else ("metodo_pago" if "metodo_pago" in pagos.columns else None)
+        for _, r in pagos.iterrows():
+            metodo = r.get(metodo_col) if metodo_col else r.get("metodo_pago", "")
+            metodo_n = normalizar_texto(metodo)
+            monto = float(limpiar_numero(r.get("monto")) or 0)
+            if monto <= 0:
+                continue
+            if metodo_n == "credito":
+                cuenta = "Crédito pendiente"
+            else:
+                cuenta = _cuenta_por_metodo_pro(metodo)
+            _agregar_movimiento(
+                filas,
+                r.get("fecha") or r.get("created_at") or r.get("dia_operativo") or "",
+                "entrada",
+                "Venta",
+                f"Venta {r.get('venta_id', '')}".strip(),
+                cuenta,
+                entrada=monto,
+                metodo_pago=metodo,
+                referencia=r.get("venta_id", ""),
+                detalle=f"Caja: {r.get('caja_id', '')}",
+            )
+
+    # 3) Compras
+    compras = leer_actualizado("compras")
+    if not compras.empty:
+        for _, r in compras.iterrows():
+            monto = _monto_de_row(r, ("monto", "total", "valor", "costo_total"))
+            if monto <= 0:
+                continue
+            metodo = r.get("metodo_pago") or r.get("metodo") or ""
+            cuenta = _cuenta_por_metodo_pro(metodo, r.get("cuenta", ""))
+            concepto = r.get("producto") or r.get("descripcion") or r.get("concepto") or "Compra"
+            _agregar_movimiento(
+                filas,
+                r.get("fecha") or r.get("created_at") or "",
+                "salida",
+                "Compra",
+                concepto,
+                cuenta,
+                salida=monto,
+                metodo_pago=metodo,
+                referencia=r.get("id", ""),
+                detalle="Compra de mercancía / inversión",
+            )
+
+    # 4) Gastos fijos y variables
+    gastos = leer_actualizado("gastos")
+    if not gastos.empty:
+        for _, r in gastos.iterrows():
+            monto = _monto_de_row(r, ("monto", "total", "valor"))
+            if monto <= 0:
+                continue
+            metodo = r.get("metodo_pago") or r.get("metodo") or ""
+            cuenta = _cuenta_por_metodo_pro(metodo, r.get("cuenta", ""))
+            tipo_gasto = limpiar_texto(r.get("tipo")) or "gasto"
+            concepto = r.get("nombre") or r.get("concepto") or r.get("categoria") or "Gasto"
+            _agregar_movimiento(
+                filas,
+                r.get("fecha") or r.get("created_at") or "",
+                "salida",
+                f"Gasto {tipo_gasto}",
+                concepto,
+                cuenta,
+                salida=monto,
+                metodo_pago=metodo,
+                referencia=r.get("id", ""),
+                detalle=r.get("detalle") or r.get("descripcion") or "",
+            )
+
+    # 5) Pagos y adelantos empleados
+    for tabla, origen_nombre in [("pagos_empleados", "Pago empleado"), ("adelantos_empleados", "Adelanto empleado")]:
+        df = leer_actualizado(tabla)
+        if df.empty:
+            continue
+        for _, r in df.iterrows():
+            monto = _monto_de_row(r, ("monto", "total", "valor"))
+            if monto <= 0:
+                continue
+            metodo = r.get("metodo_pago") or r.get("metodo") or ""
+            cuenta = _cuenta_por_metodo_pro(metodo, r.get("cuenta", ""))
+            empleado = r.get("empleado") or r.get("empleado_nombre") or r.get("nombre") or origen_nombre
+            _agregar_movimiento(
+                filas,
+                r.get("fecha") or r.get("created_at") or "",
+                "salida",
+                origen_nombre,
+                empleado,
+                cuenta,
+                salida=monto,
+                metodo_pago=metodo,
+                referencia=r.get("id", ""),
+                detalle=r.get("tipo_pago") or r.get("observacion") or "",
+            )
+
+    # 6) Gastos/retiros dueño
+    dueno = leer_actualizado("gastos_dueno")
+    if not dueno.empty:
+        for _, r in dueno.iterrows():
+            monto = _monto_de_row(r, ("monto", "total", "valor"))
+            if monto <= 0:
+                continue
+            metodo = r.get("metodo_pago") or r.get("metodo") or ""
+            cuenta = _cuenta_por_metodo_pro(metodo, r.get("cuenta", ""))
+            concepto = r.get("concepto") or r.get("descripcion") or r.get("detalle") or "Retiro dueño"
+            _agregar_movimiento(
+                filas,
+                r.get("fecha") or r.get("created_at") or "",
+                "salida",
+                "Gasto dueño",
+                concepto,
+                cuenta,
+                salida=monto,
+                metodo_pago=metodo,
+                referencia=r.get("id", ""),
+                detalle=r.get("detalle") or "",
+            )
+
+    # 7) Pérdidas: afectan utilidad, pero no siempre dinero físico. Se muestran como salida operacional.
+    perdidas = leer_actualizado("perdidas")
+    if not perdidas.empty:
+        for _, r in perdidas.iterrows():
+            monto = _monto_de_row(r, ("monto", "total", "valor", "costo_total"))
+            if monto <= 0:
+                continue
+            _agregar_movimiento(
+                filas,
+                r.get("fecha") or r.get("created_at") or "",
+                "salida",
+                "Pérdida mercancía",
+                r.get("producto") or r.get("descripcion") or "Pérdida",
+                "Inventario",
+                salida=monto,
+                metodo_pago="inventario",
+                referencia=r.get("id", ""),
+                detalle=r.get("motivo") or r.get("detalle") or "",
+            )
+
+    # 8) Movimientos manuales
+    movs = leer_actualizado("movimientos_dinero")
+    if not movs.empty:
+        for _, r in movs.iterrows():
+            tipo = normalizar_texto(r.get("tipo"))
+            monto = float(limpiar_numero(r.get("monto")) or 0)
+            if monto <= 0:
+                continue
+            fecha = r.get("fecha") or r.get("created_at") or ""
+            desc = r.get("descripcion") or "Movimiento manual"
+
+            if tipo in ["entrada", "aporte", "ingreso"]:
+                cuenta = _cuenta_por_metodo_pro(r.get("metodo_pago"), r.get("cuenta", ""))
+                _agregar_movimiento(filas, fecha, "entrada", "Manual", desc, cuenta, entrada=monto, metodo_pago=r.get("metodo_pago", ""), referencia=r.get("id", ""))
+            elif tipo in ["salida", "retiro", "gasto"]:
+                cuenta = _cuenta_por_metodo_pro(r.get("metodo_pago"), r.get("cuenta", ""))
+                _agregar_movimiento(filas, fecha, "salida", "Manual", desc, cuenta, salida=monto, metodo_pago=r.get("metodo_pago", ""), referencia=r.get("id", ""))
+            elif tipo in ["transferencia interna", "deposito al banco", "depósito al banco", "retiro del banco"]:
+                origen = r.get("cuenta_origen") or ""
+                destino = r.get("cuenta_destino") or ""
+                _agregar_movimiento(filas, fecha, "transferencia", "Transferencia interna", desc + " (sale)", origen, salida=monto, metodo_pago="interno", referencia=r.get("id", ""))
+                _agregar_movimiento(filas, fecha, "transferencia", "Transferencia interna", desc + " (entra)", destino, entrada=monto, metodo_pago="interno", referencia=r.get("id", ""))
+
+    df = pd.DataFrame(filas)
+    if df.empty:
+        return df
+
+    df["_fecha_dt"] = pd.to_datetime(df["fecha"], errors="coerce")
+    df = df.sort_values(["_fecha_dt", "origen"], ascending=[True, True]).reset_index(drop=True)
+
+    # balances por cuenta
+    df["balance_cuenta"] = 0.0
+    for cuenta in df["cuenta"].fillna("Pendiente").unique():
+        idx = df["cuenta"].fillna("Pendiente") == cuenta
+        df.loc[idx, "balance_cuenta"] = df.loc[idx, "neto"].cumsum()
+
+    df["balance_total"] = df["neto"].cumsum()
+    return df
+
+
+def resumen_dinero_real_pro() -> dict:
+    hist = construir_historial_dinero_real()
+    if hist.empty:
+        efectivo = banco = credito = total = 0.0
+    else:
+        efectivo = float(hist[hist["cuenta"].astype(str).apply(normalizar_texto).isin(["efectivo negocio", "efectivo", "caja"])]["neto"].sum())
+        banco = float(hist[hist["cuenta"].astype(str).apply(normalizar_texto).isin(["banco", "transferencia", "tarjeta"])]["neto"].sum())
+        credito = float(hist[hist["cuenta"].astype(str).apply(normalizar_texto) == "credito pendiente"]["neto"].sum())
+        total = efectivo + banco
+
+    inventario = leer_actualizado("inventario")
+    inv_costo = 0.0
+    inv_venta = 0.0
+    if not inventario.empty:
+        for _, r in inventario.iterrows():
+            stock = float(limpiar_numero(r.get("stock")) or limpiar_numero(r.get("existencia")) or limpiar_numero(r.get("cantidad")) or 0)
+            costo = float(limpiar_numero(r.get("costo_unitario")) or limpiar_numero(r.get("costo")) or limpiar_numero(r.get("precio_compra")) or 0)
+            precio = float(limpiar_numero(r.get("precio_venta")) or limpiar_numero(r.get("precio")) or 0)
+            inv_costo += max(stock, 0) * costo
+            inv_venta += max(stock, 0) * precio
+
+    # utilidad aproximada: dinero disponible + inventario a costo - saldos/aportes iniciales.
+    cuentas = leer_actualizado("cuentas_dinero")
+    saldo_inicial = 0.0
+    if not cuentas.empty:
+        saldo_inicial = sum(float(limpiar_numero(r.get("saldo_inicial")) or 0) for _, r in cuentas.iterrows())
+
+    ganancia_estim = (total + inv_costo) - saldo_inicial
+
+    return {
+        "historial": hist,
+        "efectivo": efectivo,
+        "banco": banco,
+        "credito": credito,
+        "total_disponible": total,
+        "inventario_costo": inv_costo,
+        "inventario_venta": inv_venta,
+        "ganancia_potencial_inventario": inv_venta - inv_costo,
+        "saldo_inicial": saldo_inicial,
+        "ganancia_estimada": ganancia_estim,
+    }
+
+
 def cuenta_por_metodo_pago(metodo_pago: str) -> str:
     metodo = normalizar_texto(metodo_pago)
     if metodo == "efectivo":
@@ -4956,21 +5245,64 @@ elif menu == "POS":
 
 
 
+
 elif menu == "Dinero Real":
-    st.title("💰 Dinero Real")
+    st.title("💰 Dinero Real PRO")
     if not es_admin():
         st.error("No tienes permiso para acceder a Dinero Real.")
         st.stop()
-    st.caption("Muestra cuánto dinero hay en efectivo, banco y total general. Los depósitos solo mueven dinero de lugar.")
 
-    resumen = calcular_dinero_real()
-    d1, d2, d3 = st.columns(3)
-    d1.metric("💵 Efectivo negocio", f"RD$ {resumen['efectivo']:,.2f}")
-    d2.metric("🏦 Banco", f"RD$ {resumen['banco']:,.2f}")
-    d3.metric("📊 Total dinero real", f"RD$ {resumen['total']:,.2f}")
+    st.caption("Estado de cuenta del negocio: entradas, salidas, balance, efectivo, banco, inversión y ganancia estimada.")
+
+    resumen = resumen_dinero_real_pro()
+    hist = resumen["historial"]
+
+    st.markdown("### 📊 Resumen general")
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric("💵 Efectivo negocio", f"RD$ {resumen['efectivo']:,.2f}")
+    r2.metric("🏦 Banco", f"RD$ {resumen['banco']:,.2f}")
+    r3.metric("💰 Total disponible", f"RD$ {resumen['total_disponible']:,.2f}")
+    r4.metric("💳 Crédito pendiente", f"RD$ {resumen['credito']:,.2f}")
+
+    st.markdown("### 📦 Inversión y ganancia")
+    i1, i2, i3, i4 = st.columns(4)
+    i1.metric("📦 Inventario a costo", f"RD$ {resumen['inventario_costo']:,.2f}")
+    i2.metric("🏷️ Inventario a venta", f"RD$ {resumen['inventario_venta']:,.2f}")
+    i3.metric("📈 Ganancia potencial inventario", f"RD$ {resumen['ganancia_potencial_inventario']:,.2f}")
+    i4.metric("🧾 Ganancia estimada", f"RD$ {resumen['ganancia_estimada']:,.2f}")
+
+    st.info(
+        "Lectura rápida: Total disponible es el dinero en efectivo + banco. "
+        "Inventario a costo representa dinero invertido en mercancía. "
+        "Ganancia estimada es una aproximación: dinero disponible + inventario a costo - saldos iniciales/aportes configurados."
+    )
+
+    st.markdown("---")
+    st.subheader("📚 Historial financiero tipo estado de cuenta")
+
+    if hist.empty:
+        st.info("Todavía no hay movimientos para mostrar.")
+    else:
+        c1, c2, c3 = st.columns(3)
+        cuenta_filtro = c1.selectbox("Cuenta", ["Todas"] + sorted(hist["cuenta"].fillna("Pendiente").astype(str).unique().tolist()), key="drp_cuenta")
+        tipo_filtro = c2.selectbox("Tipo", ["Todos"] + sorted(hist["tipo"].fillna("").astype(str).unique().tolist()), key="drp_tipo")
+        texto = c3.text_input("Buscar", key="drp_buscar")
+
+        vista = hist.copy()
+        if cuenta_filtro != "Todas":
+            vista = vista[vista["cuenta"].astype(str) == cuenta_filtro]
+        if tipo_filtro != "Todos":
+            vista = vista[vista["tipo"].astype(str) == tipo_filtro]
+        vista = buscar_df(vista, texto)
+
+        cols = ["fecha", "tipo", "origen", "concepto", "cuenta", "metodo_pago", "entrada", "salida", "neto", "balance_cuenta", "balance_total", "detalle"]
+        cols = [c for c in cols if c in vista.columns]
+        st.dataframe(vista[cols], use_container_width=True)
+        descargar_archivos(vista[cols], "dinero_real_estado_cuenta")
 
     st.markdown("---")
     st.subheader("➕ Movimiento manual")
+    st.caption("Úsalo solo para ajustes, entradas/salidas fuera del sistema o transferencias internas. No lo uses para ventas/gastos/compras ya registrados.")
 
     tipo_mov = st.selectbox(
         "Tipo de movimiento",
@@ -5013,7 +5345,7 @@ elif menu == "Dinero Real":
                     st.rerun()
     else:
         metodo_mov = st.selectbox("Método / cuenta", ["efectivo", "transferencia", "tarjeta", "banco"], key="dinero_metodo")
-        cuenta_mov = cuenta_por_metodo_pago(metodo_mov)
+        cuenta_mov = cuenta_por_metodo_pago(metodo_mov) if "cuenta_por_metodo_pago" in globals() else _cuenta_por_metodo_pro(metodo_mov)
         st.write(f"Afectará la cuenta: **{cuenta_mov}**")
 
         if st.button("Guardar movimiento", key="btn_dinero_movimiento"):
@@ -5033,164 +5365,92 @@ elif menu == "Dinero Real":
                     st.rerun()
 
     st.markdown("---")
-    st.subheader("📚 Movimientos registrados")
-    movs = leer_actualizado("movimientos_dinero")
-    if movs.empty:
-        st.info("No hay movimientos registrados.")
+    st.subheader("✏️ Editar / eliminar movimiento manual")
+    movs_edit = leer_actualizado("movimientos_dinero")
+    if movs_edit.empty:
+        st.info("No hay movimientos manuales para editar.")
     else:
-        txt = st.text_input("Buscar movimiento", key="buscar_dinero")
-        movs = buscar_df(movs, txt)
-        cols = [c for c in ["fecha", "tipo", "categoria", "metodo_pago", "cuenta", "cuenta_origen", "cuenta_destino", "monto", "descripcion", "usuario"] if c in movs.columns]
-        st.dataframe(movs[cols] if cols else movs, use_container_width=True)
-        descargar_archivos(movs[cols] if cols else movs, "movimientos_dinero")
+        if "fecha" in movs_edit.columns:
+            movs_edit["_fecha_dt"] = pd.to_datetime(movs_edit["fecha"], errors="coerce")
+            movs_edit = movs_edit.sort_values("_fecha_dt", ascending=False)
 
-        st.markdown("---")
+        opciones_mov = []
+        mapa_mov = {}
+        for _, r in movs_edit.iterrows():
+            rid = r.get("id")
+            fecha = r.get("fecha", "")
+            tipo = r.get("tipo", "")
+            monto = float(limpiar_numero(r.get("monto")) or 0)
+            desc = limpiar_texto(r.get("descripcion"))
+            etiqueta = f"{fecha} | {tipo} | RD$ {monto:,.2f} | {desc[:40]}"
+            opciones_mov.append(etiqueta)
+            mapa_mov[etiqueta] = r.to_dict()
 
-    st.markdown("---")
-    st.subheader("📌 Salidas automáticas tomadas del sistema")
-    st.caption("Aquí aparecen gastos, compras, pagos, adelantos y gastos del dueño que Dinero Real descuenta automáticamente.")
+        sel_mov = st.selectbox("Selecciona movimiento", opciones_mov, key="dinero_edit_sel")
+        mov = mapa_mov[sel_mov]
+        mov_id = mov.get("id")
 
-    salidas_auto = resumen_salidas_automaticas_dinero()
-    if salidas_auto.empty:
-        st.info("No hay salidas automáticas registradas.")
-    else:
-        buscar_auto = st.text_input("Buscar salida automática", key="buscar_salidas_auto_dinero")
-        salidas_auto = buscar_df(salidas_auto, buscar_auto)
-        st.dataframe(salidas_auto, use_container_width=True)
-        descargar_archivos(salidas_auto, "salidas_automaticas_dinero")
+        e1, e2 = st.columns(2)
+        tipos = ["entrada", "salida", "transferencia interna", "depósito al banco", "retiro del banco", "aporte", "retiro"]
+        tipo_actual = limpiar_texto(mov.get("tipo")) or "entrada"
+        tipo_edit = e1.selectbox("Tipo", tipos, index=tipos.index(tipo_actual) if tipo_actual in tipos else 0, key="dinero_edit_tipo")
+        monto_edit = e2.number_input("Monto", min_value=0.0, step=1.0, value=float(limpiar_numero(mov.get("monto")) or 0), key="dinero_edit_monto")
+        desc_edit = st.text_input("Descripción", value=limpiar_texto(mov.get("descripcion")), key="dinero_edit_desc")
 
-        if "afecta_dinero" in salidas_auto.columns:
-            pendientes = salidas_auto[salidas_auto["afecta_dinero"] == "pendiente"]
-            if not pendientes.empty:
-                st.warning("Hay salidas pendientes porque no tienen método/cuenta. Si fue mixto, regístralo separado para saber cuánto salió de efectivo y cuánto de banco.")
+        metodo_edit = ""
+        cuenta_edit = ""
+        cuenta_origen_edit = ""
+        cuenta_destino_edit = ""
 
-
-        st.subheader("✏️ Editar / eliminar movimiento manual")
-        st.caption("Usa esta opción solo para corregir movimientos manuales registrados por error.")
-
-        movs_edit = leer_actualizado("movimientos_dinero")
-        if movs_edit.empty:
-            st.info("No hay movimientos para editar.")
-        else:
-            # Mostrar los más recientes primero
-            if "fecha" in movs_edit.columns:
-                movs_edit["_fecha_dt"] = pd.to_datetime(movs_edit["fecha"], errors="coerce")
-                movs_edit = movs_edit.sort_values("_fecha_dt", ascending=False)
-
-            opciones_mov = []
-            mapa_mov = {}
-            for _, r in movs_edit.iterrows():
-                rid = r.get("id")
-                fecha = r.get("fecha", "")
-                tipo = r.get("tipo", "")
-                monto = float(limpiar_numero(r.get("monto")) or 0)
-                desc = limpiar_texto(r.get("descripcion"))
-                etiqueta = f"{fecha} | {tipo} | RD$ {monto:,.2f} | {desc[:40]}"
-                opciones_mov.append(etiqueta)
-                mapa_mov[etiqueta] = r.to_dict()
-
-            sel_mov = st.selectbox("Selecciona movimiento", opciones_mov, key="dinero_edit_sel")
-            mov = mapa_mov[sel_mov]
-            mov_id = mov.get("id")
-
-            e1, e2 = st.columns(2)
-            tipo_actual = limpiar_texto(mov.get("tipo")) or "entrada"
-            tipos = ["entrada", "salida", "transferencia interna", "depósito al banco", "retiro del banco", "aporte", "retiro"]
-            tipo_edit = e1.selectbox(
-                "Tipo",
-                tipos,
-                index=tipos.index(tipo_actual) if tipo_actual in tipos else 0,
-                key="dinero_edit_tipo",
-            )
-            monto_edit = e2.number_input(
-                "Monto",
-                min_value=0.0,
-                step=1.0,
-                value=float(limpiar_numero(mov.get("monto")) or 0),
-                key="dinero_edit_monto",
-            )
-
-            desc_edit = st.text_input(
-                "Descripción",
-                value=limpiar_texto(mov.get("descripcion")),
-                key="dinero_edit_desc",
-            )
-
-            metodo_edit = ""
-            cuenta_edit = ""
-            cuenta_origen_edit = ""
-            cuenta_destino_edit = ""
-
-            if tipo_edit in ["transferencia interna", "depósito al banco", "retiro del banco"]:
-                if tipo_edit == "depósito al banco":
-                    cuenta_origen_edit = "Efectivo negocio"
-                    cuenta_destino_edit = "Banco"
-                elif tipo_edit == "retiro del banco":
-                    cuenta_origen_edit = "Banco"
-                    cuenta_destino_edit = "Efectivo negocio"
-                else:
-                    ce1, ce2 = st.columns(2)
-                    origen_actual = limpiar_texto(mov.get("cuenta_origen")) or "Efectivo negocio"
-                    destino_actual = limpiar_texto(mov.get("cuenta_destino")) or "Banco"
-                    cuentas_opts = ["Efectivo negocio", "Banco"]
-                    cuenta_origen_edit = ce1.selectbox(
-                        "Cuenta origen",
-                        cuentas_opts,
-                        index=cuentas_opts.index(origen_actual) if origen_actual in cuentas_opts else 0,
-                        key="dinero_edit_origen",
-                    )
-                    cuenta_destino_edit = ce2.selectbox(
-                        "Cuenta destino",
-                        cuentas_opts,
-                        index=cuentas_opts.index(destino_actual) if destino_actual in cuentas_opts else 1,
-                        key="dinero_edit_destino",
-                    )
+        if tipo_edit in ["transferencia interna", "depósito al banco", "retiro del banco"]:
+            if tipo_edit == "depósito al banco":
+                cuenta_origen_edit = "Efectivo negocio"
+                cuenta_destino_edit = "Banco"
+            elif tipo_edit == "retiro del banco":
+                cuenta_origen_edit = "Banco"
+                cuenta_destino_edit = "Efectivo negocio"
             else:
-                metodo_actual = limpiar_texto(mov.get("metodo_pago")) or "efectivo"
-                metodos = ["efectivo", "transferencia", "tarjeta", "banco"]
-                metodo_edit = st.selectbox(
-                    "Método / cuenta",
-                    metodos,
-                    index=metodos.index(metodo_actual) if metodo_actual in metodos else 0,
-                    key="dinero_edit_metodo",
-                )
-                cuenta_edit = cuenta_por_metodo_pago(metodo_edit)
+                ce1, ce2 = st.columns(2)
+                cuentas_opts = ["Efectivo negocio", "Banco"]
+                origen_actual = limpiar_texto(mov.get("cuenta_origen")) or "Efectivo negocio"
+                destino_actual = limpiar_texto(mov.get("cuenta_destino")) or "Banco"
+                cuenta_origen_edit = ce1.selectbox("Cuenta origen", cuentas_opts, index=cuentas_opts.index(origen_actual) if origen_actual in cuentas_opts else 0, key="dinero_edit_origen")
+                cuenta_destino_edit = ce2.selectbox("Cuenta destino", cuentas_opts, index=cuentas_opts.index(destino_actual) if destino_actual in cuentas_opts else 1, key="dinero_edit_destino")
+        else:
+            metodos = ["efectivo", "transferencia", "tarjeta", "banco"]
+            metodo_actual = limpiar_texto(mov.get("metodo_pago")) or "efectivo"
+            metodo_edit = st.selectbox("Método / cuenta", metodos, index=metodos.index(metodo_actual) if metodo_actual in metodos else 0, key="dinero_edit_metodo")
+            cuenta_edit = cuenta_por_metodo_pago(metodo_edit) if "cuenta_por_metodo_pago" in globals() else _cuenta_por_metodo_pro(metodo_edit)
 
-            b1, b2 = st.columns(2)
-            with b1:
-                if st.button("💾 Guardar corrección", key="btn_dinero_guardar_correccion"):
-                    if monto_edit <= 0:
-                        st.error("El monto debe ser mayor que cero.")
-                    elif tipo_edit in ["transferencia interna", "depósito al banco", "retiro del banco"] and cuenta_origen_edit == cuenta_destino_edit:
-                        st.error("La cuenta origen y destino no pueden ser iguales.")
-                    else:
-                        payload = {
-                            "tipo": tipo_edit,
-                            "monto": float(monto_edit),
-                            "descripcion": desc_edit,
-                            "metodo_pago": metodo_edit,
-                            "cuenta": cuenta_edit,
-                            "cuenta_origen": cuenta_origen_edit,
-                            "cuenta_destino": cuenta_destino_edit,
-                            "categoria": limpiar_texto(mov.get("categoria")) or "manual",
-                            "usuario": nombre_usuario_actual() if "nombre_usuario_actual" in globals() else "",
-                        }
-                        ok = actualizar("movimientos_dinero", mov_id, payload)
-                        if ok:
-                            st.success("Movimiento corregido.")
-                            st.rerun()
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("💾 Guardar corrección", key="btn_dinero_guardar_correccion"):
+                payload = {
+                    "tipo": tipo_edit,
+                    "monto": float(monto_edit),
+                    "descripcion": desc_edit,
+                    "metodo_pago": metodo_edit,
+                    "cuenta": cuenta_edit,
+                    "cuenta_origen": cuenta_origen_edit,
+                    "cuenta_destino": cuenta_destino_edit,
+                    "categoria": limpiar_texto(mov.get("categoria")) or "manual",
+                    "usuario": nombre_usuario_actual() if "nombre_usuario_actual" in globals() else "",
+                }
+                ok = actualizar("movimientos_dinero", mov_id, payload)
+                if ok:
+                    st.success("Movimiento corregido.")
+                    st.rerun()
 
-            with b2:
-                confirmar_delete = st.checkbox("Confirmo eliminar este movimiento", key="dinero_confirmar_delete")
-                if st.button("🗑️ Eliminar movimiento", key="btn_dinero_eliminar_mov"):
-                    if not confirmar_delete:
-                        st.warning("Marca la confirmación antes de eliminar.")
-                    else:
-                        ok = eliminar("movimientos_dinero", mov_id)
-                        if ok:
-                            st.success("Movimiento eliminado.")
-                            st.rerun()
-
+        with b2:
+            confirmar_delete = st.checkbox("Confirmo eliminar este movimiento", key="dinero_confirmar_delete")
+            if st.button("🗑️ Eliminar movimiento", key="btn_dinero_eliminar_mov"):
+                if not confirmar_delete:
+                    st.warning("Marca la confirmación antes de eliminar.")
+                else:
+                    ok = eliminar("movimientos_dinero", mov_id)
+                    if ok:
+                        st.success("Movimiento eliminado.")
+                        st.rerun()
 
 
 # =========================================================
