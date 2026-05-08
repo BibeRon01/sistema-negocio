@@ -2149,6 +2149,12 @@ def resumen_dinero_real_pro() -> dict:
     if not cuentas.empty:
         saldo_inicial = sum(float(limpiar_numero(r.get("saldo_inicial")) or 0) for _, r in cuentas.iterrows())
 
+    # Lectura financiera clara:
+    # - Dinero de inversión: parte del dinero disponible que se considera capital/base del negocio.
+    # - Dinero de ganancia: excedente disponible por encima del saldo inicial/capital.
+    # Nota: el inventario a costo se muestra aparte como inversión en mercancía.
+    dinero_inversion = min(max(total, 0), max(saldo_inicial, 0))
+    dinero_ganancia = max(total - saldo_inicial, 0)
     ganancia_estim = (total + inv_costo) - saldo_inicial
 
     return {
@@ -2157,6 +2163,8 @@ def resumen_dinero_real_pro() -> dict:
         "banco": banco,
         "credito": credito,
         "total_disponible": total,
+        "dinero_inversion": dinero_inversion,
+        "dinero_ganancia": dinero_ganancia,
         "inventario_costo": inv_costo,
         "inventario_venta": inv_venta,
         "ganancia_potencial_inventario": inv_venta - inv_costo,
@@ -5264,17 +5272,24 @@ elif menu == "Dinero Real":
     r3.metric("💰 Total disponible", f"RD$ {resumen['total_disponible']:,.2f}")
     r4.metric("💳 Crédito pendiente", f"RD$ {resumen['credito']:,.2f}")
 
+    st.markdown("### 💵 Distribución del dinero disponible")
+    dd1, dd2, dd3 = st.columns(3)
+    dd1.metric("💼 Dinero de inversión / capital", f"RD$ {resumen['dinero_inversion']:,.2f}")
+    dd2.metric("📈 Dinero de ganancia disponible", f"RD$ {resumen['dinero_ganancia']:,.2f}")
+    dd3.metric("⚖️ Saldo inicial / capital base", f"RD$ {resumen['saldo_inicial']:,.2f}")
+
     st.markdown("### 📦 Inversión y ganancia")
     i1, i2, i3, i4 = st.columns(4)
     i1.metric("📦 Inventario a costo", f"RD$ {resumen['inventario_costo']:,.2f}")
     i2.metric("🏷️ Inventario a venta", f"RD$ {resumen['inventario_venta']:,.2f}")
     i3.metric("📈 Ganancia potencial inventario", f"RD$ {resumen['ganancia_potencial_inventario']:,.2f}")
-    i4.metric("🧾 Ganancia estimada", f"RD$ {resumen['ganancia_estimada']:,.2f}")
+    i4.metric("🧾 Ganancia estimada total", f"RD$ {resumen['ganancia_estimada']:,.2f}")
 
     st.info(
-        "Lectura rápida: Total disponible es el dinero en efectivo + banco. "
-        "Inventario a costo representa dinero invertido en mercancía. "
-        "Ganancia estimada es una aproximación: dinero disponible + inventario a costo - saldos iniciales/aportes configurados."
+        "Lectura rápida: Total disponible es efectivo + banco. "
+        "Dinero de inversión/capital es la parte del dinero disponible que corresponde al capital base configurado. "
+        "Dinero de ganancia disponible es el excedente por encima de ese capital. "
+        "Inventario a costo se muestra aparte porque es inversión en mercancía, no dinero líquido."
     )
 
     st.markdown("---")
@@ -5283,12 +5298,15 @@ elif menu == "Dinero Real":
     if hist.empty:
         st.info("Todavía no hay movimientos para mostrar.")
     else:
+        f1, f2 = rango_fechas_ui("dinero_real_pro")
         c1, c2, c3 = st.columns(3)
         cuenta_filtro = c1.selectbox("Cuenta", ["Todas"] + sorted(hist["cuenta"].fillna("Pendiente").astype(str).unique().tolist()), key="drp_cuenta")
         tipo_filtro = c2.selectbox("Tipo", ["Todos"] + sorted(hist["tipo"].fillna("").astype(str).unique().tolist()), key="drp_tipo")
         texto = c3.text_input("Buscar", key="drp_buscar")
 
         vista = hist.copy()
+        if "_fecha_dt" in vista.columns:
+            vista = vista[(vista["_fecha_dt"].dt.date >= f1) & (vista["_fecha_dt"].dt.date <= f2)]
         if cuenta_filtro != "Todas":
             vista = vista[vista["cuenta"].astype(str) == cuenta_filtro]
         if tipo_filtro != "Todos":
