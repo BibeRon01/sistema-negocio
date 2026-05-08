@@ -1974,11 +1974,12 @@ def resumen_salidas_automaticas_dinero() -> pd.DataFrame:
             monto = float(limpiar_numero(r.get("monto")) or limpiar_numero(r.get("total")) or limpiar_numero(r.get("valor")) or 0)
             metodo = r.get("metodo_pago") or r.get("metodo") or ""
             cuenta = r.get("cuenta") or cuenta_por_metodo_pago(metodo)
-            concepto = r.get("concepto") or r.get("descripcion") or r.get("detalle") or r.get("producto") or nombre
+            concepto = r.get("nombre") or r.get("concepto") or r.get("descripcion") or r.get("detalle") or r.get("producto") or nombre
             fecha = r.get("fecha") or r.get("created_at") or ""
             filas.append({
                 "fecha": fecha,
                 "origen": nombre,
+                "tipo_gasto": r.get("tipo") or "",
                 "concepto": concepto,
                 "monto": monto,
                 "metodo_pago": metodo,
@@ -3354,46 +3355,54 @@ elif menu == "Gastos":
                 if metodo_cat in ["efectivo", "transferencia", "tarjeta"]:
                     default_metodo = metodo_cat
             metodo_pago = st.selectbox("Método de pago", ["efectivo", "transferencia", "tarjeta"], index=["efectivo", "transferencia", "tarjeta"].index(default_metodo), key="g_metodo")
+            cuenta = cuenta_por_metodo_pago(metodo_pago) if "cuenta_por_metodo_pago" in globals() else ""
+            st.caption(f"Este gasto afectará: {cuenta}")
             impuesto = st.number_input("Impuesto", min_value=0.0, step=1.0, value=float(limpiar_numero(gasto_catalogo.get("impuesto_default")) or 0) if gasto_catalogo is not None else 0.0, key="g_impuesto")
             detalle = st.text_area("Detalle", value=str(gasto_catalogo.get("descripcion_default", "")) if gasto_catalogo is not None else "", key="g_detalle")
 
         guardar_catalogo_nuevo = st.checkbox("Guardar este gasto nuevo también en el catálogo", value=False, key="g_guardar_cat")
 
         if st.button("Guardar gasto"):
-            ok = insertar(
-                "gastos",
-                {
-                    "fecha": str(fecha),
-                    "nombre": nombre,
-                    "tipo": tipo,
-                    "categoria": categoria,
-                    "monto": float(monto),
-                    "metodo_pago": metodo_pago,
-                    "impuesto": float(impuesto),
-                    "detalle": detalle,
-                    "responsable": responsable,
-                },
-            )
-            if ok and guardar_catalogo_nuevo and nombre:
-                existe = False
-                if not DATA["catalogo_gastos"].empty and "nombre" in DATA["catalogo_gastos"].columns:
-                    existe = normalizar_texto(nombre) in DATA["catalogo_gastos"]["nombre"].astype(str).apply(normalizar_texto).tolist()
-                if not existe:
-                    insertar(
-                        "catalogo_gastos",
-                        {
-                            "nombre": nombre,
-                            "tipo": tipo,
-                            "categoria": categoria,
-                            "activo": True,
-                            "metodo_pago_default": metodo_pago,
-                            "impuesto_default": float(impuesto),
-                            "descripcion_default": detalle,
-                        },
-                    )
-            if ok:
-                st.success("Gasto guardado.")
-                st.rerun()
+            if monto <= 0:
+                st.error("No puedes guardar un gasto con monto 0.")
+            elif not nombre:
+                st.error("Debes indicar el nombre del gasto.")
+            else:
+                ok = insertar(
+                    "gastos",
+                    {
+                        "fecha": str(fecha),
+                        "nombre": nombre,
+                        "tipo": tipo,
+                        "categoria": categoria,
+                        "monto": float(monto),
+                        "metodo_pago": metodo_pago,
+                        "cuenta": cuenta,
+                        "impuesto": float(impuesto),
+                        "detalle": detalle,
+                        "responsable": responsable,
+                    },
+                )
+                if ok and guardar_catalogo_nuevo and nombre:
+                    existe = False
+                    if not DATA["catalogo_gastos"].empty and "nombre" in DATA["catalogo_gastos"].columns:
+                        existe = normalizar_texto(nombre) in DATA["catalogo_gastos"]["nombre"].astype(str).apply(normalizar_texto).tolist()
+                    if not existe:
+                        insertar(
+                            "catalogo_gastos",
+                            {
+                                "nombre": nombre,
+                                "tipo": tipo,
+                                "categoria": categoria,
+                                "activo": True,
+                                "metodo_pago_default": metodo_pago,
+                                "impuesto_default": float(impuesto),
+                                "descripcion_default": detalle,
+                            },
+                        )
+                if ok:
+                    st.success("Gasto guardado.")
+                    st.rerun()
 
     df = DATA["gastos"].copy()
     if not df.empty:
@@ -3401,8 +3410,9 @@ elif menu == "Gastos":
         df = filtrar_por_fechas(df, d1, d2)
         txt = st.text_input("Buscar gasto", key="buscar_gastos")
         df = buscar_df(df, txt)
-        st.dataframe(df, use_container_width=True)
-        descargar_archivos(df, "gastos")
+        columnas_gastos = [c for c in ["fecha", "nombre", "tipo", "categoria", "monto", "metodo_pago", "cuenta", "detalle", "responsable"] if c in df.columns]
+        st.dataframe(df[columnas_gastos] if columnas_gastos else df, use_container_width=True)
+        descargar_archivos(df[columnas_gastos] if columnas_gastos else df, "gastos")
         render_crud_generico("gastos", df, "🛠️ Editar / eliminar gastos")
     else:
         st.info("No hay gastos registrados.")
