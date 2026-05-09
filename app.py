@@ -1954,6 +1954,50 @@ def usuario_id_actual():
     return user.get("id")
 
 
+
+def crear_cliente_rapido_pos(nombre, telefono="", documento="", direccion="", email=""):
+    """Crea un cliente desde el POS usando la tabla clientes existente."""
+    nombre = limpiar_texto(nombre)
+    if not nombre:
+        return None
+
+    intentos = [
+        {
+            "nombre": nombre,
+            "telefono": limpiar_texto(telefono),
+            "documento": limpiar_texto(documento),
+            "direccion": limpiar_texto(direccion),
+            "email": limpiar_texto(email),
+            "activo": True,
+        },
+        {
+            "nombre": nombre,
+            "telefono": limpiar_texto(telefono),
+            "documento": limpiar_texto(documento),
+            "direccion": limpiar_texto(direccion),
+        },
+        {
+            "nombre": nombre,
+            "telefono": limpiar_texto(telefono),
+        },
+        {
+            "nombre": nombre,
+        },
+    ]
+
+    for payload in intentos:
+        try:
+            resp = supabase.table("clientes").insert(payload).execute()
+            data = resp.data or []
+            if data:
+                return data[0]
+        except Exception:
+            continue
+
+    st.error("No se pudo crear el cliente. Revisa las columnas de la tabla clientes en Supabase.")
+    return None
+
+
 def obtener_caja_abierta():
     usuario_id = usuario_id_actual()
     if not usuario_id:
@@ -5479,13 +5523,59 @@ elif menu == "POS":
             cliente_df = DATA.get("clientes", pd.DataFrame()).copy()
             cliente_nombre = "Venta general"
             cliente_id = None
+
+            if "pos_cliente_creado_id" not in st.session_state:
+                st.session_state["pos_cliente_creado_id"] = None
+            if "pos_cliente_creado_nombre" not in st.session_state:
+                st.session_state["pos_cliente_creado_nombre"] = None
+
             usar_cliente = st.checkbox("Asignar cliente", value=False, key="pos_usar_cliente")
-            if usar_cliente and not cliente_df.empty:
-                cli_opt = ["Venta general"] + cliente_df["nombre"].astype(str).tolist()
-                cliente_nombre = st.selectbox("Cliente", cli_opt, key="pos_cliente_sel")
-                if cliente_nombre != "Venta general":
-                    cli_row = cliente_df[cliente_df["nombre"].astype(str) == cliente_nombre].iloc[0]
-                    cliente_id = cli_row["id"]
+            if usar_cliente:
+                st.markdown("#### 👤 Cliente")
+                tab_cli_existente, tab_cli_nuevo = st.tabs(["Buscar cliente", "Crear cliente rápido"])
+
+                with tab_cli_existente:
+                    if not cliente_df.empty and "nombre" in cliente_df.columns:
+                        buscar_cli = st.text_input("Buscar cliente por nombre/teléfono/documento", key="pos_buscar_cliente")
+                        cli_temp = cliente_df.copy()
+                        if buscar_cli:
+                            cli_temp = buscar_df(cli_temp, buscar_cli)
+                        cli_opt = ["Venta general"] + cli_temp["nombre"].astype(str).tolist()
+                        cliente_nombre = st.selectbox("Cliente", cli_opt, key="pos_cliente_sel")
+                        if cliente_nombre != "Venta general":
+                            cli_row = cli_temp[cli_temp["nombre"].astype(str) == cliente_nombre].iloc[0]
+                            cliente_id = cli_row.get("id")
+                            st.session_state["pos_cliente_creado_id"] = None
+                            st.session_state["pos_cliente_creado_nombre"] = None
+                    else:
+                        st.info("No hay clientes registrados. Puedes crear uno rápido en la pestaña siguiente.")
+
+                with tab_cli_nuevo:
+                    cn1, cn2 = st.columns(2)
+                    with cn1:
+                        nuevo_cliente_nombre = st.text_input("Nombre del cliente", key="pos_nuevo_cliente_nombre")
+                        nuevo_cliente_tel = st.text_input("Teléfono", key="pos_nuevo_cliente_tel")
+                    with cn2:
+                        nuevo_cliente_doc = st.text_input("Cédula/RNC opcional", key="pos_nuevo_cliente_doc")
+                        nuevo_cliente_dir = st.text_input("Dirección opcional", key="pos_nuevo_cliente_dir")
+
+                    if st.button("➕ Guardar cliente y asignar", key="btn_pos_crear_cliente_rapido"):
+                        creado = crear_cliente_rapido_pos(
+                            nuevo_cliente_nombre,
+                            telefono=nuevo_cliente_tel,
+                            documento=nuevo_cliente_doc,
+                            direccion=nuevo_cliente_dir,
+                        )
+                        if creado:
+                            st.session_state["pos_cliente_creado_id"] = creado.get("id")
+                            st.session_state["pos_cliente_creado_nombre"] = creado.get("nombre") or nuevo_cliente_nombre
+                            st.success(f"Cliente creado y asignado: {st.session_state['pos_cliente_creado_nombre']}")
+                            st.rerun()
+
+                if st.session_state.get("pos_cliente_creado_id"):
+                    cliente_id = st.session_state.get("pos_cliente_creado_id")
+                    cliente_nombre = st.session_state.get("pos_cliente_creado_nombre") or "Venta general"
+                    st.success(f"Cliente asignado: {cliente_nombre}")
             cpa1, cpa2, cpa3, cpa4 = st.columns(4)
             with cpa1:
                 pago_efectivo = st.number_input("Efectivo", min_value=0.0, step=1.0, key="pos_pag_ef")
