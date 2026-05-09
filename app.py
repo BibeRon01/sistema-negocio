@@ -2744,137 +2744,121 @@ elif menu == "Productos":
     st.caption("Catálogo maestro de productos con código, precios múltiples y control de inventario.")
 
     with st.expander("📥 Subir Excel / CSV de productos", expanded=False):
-        st.write("Acepta columnas como producto/nombre, código, costo, precio, cantidad, fecha. No duplica productos existentes.")
-        modo_carga = st.selectbox("Cómo tratar productos existentes", ["Actualizar costo/precio y sumar cantidad", "Actualizar costo/precio y reemplazar cantidad", "Solo actualizar datos sin mover cantidad"], key="prod_modo_carga")
+        st.write("Formato recomendado: Codigo | Nombre | Categoria | Stock | Costo | PrecioVenta")
+        modo_carga = st.selectbox(
+            "Cómo tratar productos existentes",
+            ["Actualizar costo/precio y sumar cantidad", "Actualizar costo/precio y reemplazar cantidad", "Solo actualizar datos sin mover cantidad"],
+            key="prod_modo_carga"
+        )
         archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv", "txt"], key="up_productos")
-        if archivo is not None and st.button("Cargar productos", key="btn_cargar_productos_pro"):
-            df = preparar_import_productos(leer_archivo_subido(archivo))
-            st.caption("Vista previa de columnas detectadas automáticamente")
-            st.dataframe(df.head(10), use_container_width=True)
-            if "nombre" not in df.columns:
-                st.error("El archivo debe traer al menos una columna nombre o producto.")
-            else:
+
+        if archivo is not None:
+            df_preview = preparar_import_productos(leer_archivo_subido(archivo))
+            st.caption("Vista previa de lo que se va a cargar")
+            cols_prev = [c for c in ["codigo", "nombre", "categoria", "stock", "costo", "precio_venta", "precio_especial", "total_costo_inventario", "total_valor_venta", "ganancia_potencial"] if c in df_preview.columns]
+            st.dataframe(df_preview[cols_prev].head(20) if cols_prev else df_preview.head(20), use_container_width=True)
+
+            if df_preview.empty or "nombre" not in df_preview.columns:
+                st.error("El archivo no tiene productos válidos. Debe traer al menos Nombre.")
+            elif st.button("✅ Confirmar y guardar productos", key="btn_confirmar_productos_pro"):
+                barra = st.progress(0)
+                estado = st.empty()
                 procesados = 0
-                for _, row in df.iterrows():
-                    nombre = limpiar_texto(row.get("nombre"))
-                    if not nombre:
-                        continue
-                    codigo = limpiar_texto(row.get("codigo"))
-                    costo = limpiar_numero(row.get("costo")) or 0
-                    precio = limpiar_numero(row.get("precio")) or 0
-                    cantidad = limpiar_numero(row.get("cantidad")) or 0
-                    fecha_row = parsear_fecha(row.get("fecha")) or ahora_str()
-                    existente = get_producto_por_codigo(codigo) if codigo else None
-                    if existente is None:
-                        existente = get_producto_por_nombre(nombre)
-                    if existente is not None:
-                        actual = obtener_existencia_producto(existente)
-                        nueva_cant = actual
-                        if modo_carga == "Actualizar costo/precio y sumar cantidad":
-                            nueva_cant = actual + cantidad
-                        elif modo_carga == "Actualizar costo/precio y reemplazar cantidad":
-                            nueva_cant = cantidad
-                        payload = {
-                            "fecha": fecha_row,
-                            "codigo": codigo or existente.get("codigo"),
-                            "nombre": nombre,
-                            "costo": float(costo or limpiar_numero(existente.get("costo")) or 0),
-                            "precio": float(precio or limpiar_numero(existente.get("precio")) or 0),
-                            "precio_descuento": float(limpiar_numero(row.get("precio_descuento")) or limpiar_numero(existente.get("precio_descuento")) or 0),
-                            "precio_especial": float(limpiar_numero(row.get("precio_especial")) or limpiar_numero(existente.get("precio_especial")) or 0),
-                            "activo": bool(row.get("activo", existente.get("activo", True))),
-                            "usa_inventario": bool(row.get("usa_inventario", existente.get("usa_inventario", True))),
-                        }
-                        if modo_carga != "Solo actualizar datos sin mover cantidad":
-                            payload["cantidad"] = float(nueva_cant)
-                            if "stock" in existente.index:
+                errores = 0
+
+                for i, row in df_preview.iterrows():
+                    try:
+                        nombre = limpiar_texto(row.get("nombre"))
+                        if not nombre:
+                            continue
+
+                        codigo = limpiar_texto(row.get("codigo"))
+                        categoria = limpiar_texto(row.get("categoria"))
+                        stock = float(limpiar_numero(row.get("stock")) or 0)
+                        costo = float(limpiar_numero(row.get("costo")) or 0)
+                        precio_venta = float(limpiar_numero(row.get("precio_venta")) or 0)
+                        precio_especial = float(limpiar_numero(row.get("precio_especial")) or 0)
+                        activo = bool(row.get("activo", True))
+
+                        existente = get_producto_por_codigo(codigo) if codigo else None
+                        if existente is None:
+                            existente = get_producto_por_nombre(nombre)
+
+                        if existente is not None:
+                            actual = obtener_existencia_producto(existente)
+                            nueva_cant = actual
+                            if modo_carga == "Actualizar costo/precio y sumar cantidad":
+                                nueva_cant = actual + stock
+                            elif modo_carga == "Actualizar costo/precio y reemplazar cantidad":
+                                nueva_cant = stock
+
+                            payload = {
+                                "fecha": str(date.today()),
+                                "codigo": codigo or existente.get("codigo"),
+                                "codigo_barra": codigo or existente.get("codigo_barra") or existente.get("codigo"),
+                                "nombre": nombre,
+                                "producto": nombre,
+                                "categoria": categoria,
+                                "costo": costo,
+                                "costo_unitario": costo,
+                                "costo_promedio": costo,
+                                "precio": precio_venta,
+                                "precio_venta": precio_venta,
+                                "precio_especial": precio_especial,
+                                "activo": activo,
+                                "usar_en_inventario": True,
+                                "updated_at": ahora_str(),
+                            }
+
+                            if modo_carga != "Solo actualizar datos sin mover cantidad":
+                                payload["cantidad"] = float(nueva_cant)
                                 payload["stock"] = float(nueva_cant)
-                        actualizar("productos", existente["id"], payload)
-                        prod_sync = refrescar_producto_por_id(existente["id"])
-                        if prod_sync is None:
-                            prod_sync = existente
-                        sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
-                    else:
-                        payload = {
-                            "fecha": fecha_row,
-                            "codigo": codigo,
-                            "nombre": nombre,
-                            "costo": float(costo),
-                            "precio": float(precio),
-                            "precio_descuento": float(limpiar_numero(row.get("precio_descuento")) or 0),
-                            "precio_especial": float(limpiar_numero(row.get("precio_especial")) or 0),
-                            "cantidad": float(cantidad),
-                            "activo": True if pd.isna(row.get("activo")) else bool(row.get("activo")),
-                            "usa_inventario": True if pd.isna(row.get("usa_inventario")) else bool(row.get("usa_inventario")),
-                        }
-                        if "stock" in DATA["productos"].columns:
-                            payload["stock"] = float(cantidad)
-                        insertar("productos", payload)
-                        prod_sync = get_producto_por_codigo(codigo) if codigo else get_producto_por_nombre(nombre)
-                        if prod_sync is not None:
-                            sincronizar_producto_inventario(prod_sync, fecha_row, "Sincronizado desde carga de productos")
-                    procesados += 1
-                st.success(f"Se procesaron {procesados} productos.")
+                                payload["existencia"] = float(nueva_cant)
+
+                            ok = actualizar("productos", existente["id"], payload)
+                            prod_id = existente["id"]
+                        else:
+                            payload = {
+                                "fecha": str(date.today()),
+                                "codigo": codigo,
+                                "codigo_barra": codigo,
+                                "nombre": nombre,
+                                "producto": nombre,
+                                "categoria": categoria,
+                                "costo": costo,
+                                "costo_unitario": costo,
+                                "costo_promedio": costo,
+                                "precio": precio_venta,
+                                "precio_venta": precio_venta,
+                                "precio_especial": precio_especial,
+                                "cantidad": stock,
+                                "stock": stock,
+                                "existencia": stock,
+                                "activo": activo,
+                                "usar_en_inventario": True,
+                                "fecha_agregado": ahora_str(),
+                                "created_at": ahora_str(),
+                                "updated_at": ahora_str(),
+                            }
+                            ok = insertar("productos", payload)
+                            nuevo = get_producto_por_codigo(codigo) if codigo else get_producto_por_nombre(nombre)
+                            prod_id = nuevo.get("id") if nuevo is not None else None
+
+                        # Sincronizar inventario actual con la misma información limpia
+                        upsert_inventario_actual(nombre, costo, precio_venta, stock if modo_carga != "Solo actualizar datos sin mover cantidad" else obtener_existencia_producto(get_producto_por_nombre(nombre)), date.today(), "Sincronizado desde carga de productos")
+
+                        procesados += 1
+                    except Exception as e:
+                        errores += 1
+                        st.warning(f"No se pudo cargar fila {i + 1}: {e}")
+
+                    if len(df_preview) > 0:
+                        barra.progress(min((i + 1) / len(df_preview), 1.0))
+                        estado.caption(f"Procesando {i + 1} de {len(df_preview)}...")
+
+                limpiar_cache_datos()
+                st.success(f"Productos cargados/actualizados: {procesados}. Errores: {errores}.")
                 st.rerun()
-
-    with st.expander("➕ Agregar / actualizar producto manual", expanded=True):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            fecha = st.date_input("Fecha", value=date.today(), key="prod_fecha")
-            codigo = st.text_input("Código (lector o manual)", key="prod_codigo")
-            nombre = st.text_input("Nombre", key="prod_nombre")
-            categoria = st.text_input("Categoría", key="prod_categoria")
-        with c2:
-            costo = st.number_input("Costo", min_value=0.0, step=1.0, key="prod_costo")
-            precio = st.number_input("Precio normal", min_value=0.0, step=1.0, key="prod_precio")
-            precio_descuento = st.number_input("Precio descuento", min_value=0.0, step=1.0, key="prod_precio_desc")
-            precio_especial = st.number_input("Precio especial", min_value=0.0, step=1.0, key="prod_precio_esp")
-        with c3:
-            usa_inventario = st.checkbox("Usa inventario", value=True, key="prod_usa_inv")
-            activo = st.checkbox("Activo", value=True, key="prod_activo")
-            cantidad = st.number_input("Cantidad inicial", min_value=0.0, step=1.0, key="prod_cantidad")
-            observacion = st.text_area("Observación", key="prod_obs")
-
-        if st.button("Guardar producto", key="btn_guardar_producto_pro"):
-            if not limpiar_texto(nombre):
-                st.error("Debes escribir el nombre del producto.")
-            else:
-                existente = get_producto_por_codigo(codigo) if codigo else None
-                if existente is None:
-                    existente = get_producto_por_nombre(nombre)
-                payload = {
-                    "fecha": str(fecha),
-                    "codigo": limpiar_texto(codigo),
-                    "nombre": limpiar_texto(nombre),
-                    "categoria": limpiar_texto(categoria),
-                    "costo": float(costo),
-                    "precio": float(precio),
-                    "precio_descuento": float(precio_descuento),
-                    "precio_especial": float(precio_especial),
-                    "cantidad": float(cantidad) if usa_inventario else 0.0,
-                    "activo": activo,
-                    "usa_inventario": usa_inventario,
-                    "observacion": observacion,
-                }
-                if "stock" in DATA["productos"].columns:
-                    payload["stock"] = float(cantidad) if usa_inventario else 0.0
-                if existente is not None:
-                    ok = actualizar("productos", existente["id"], payload)
-                    if ok:
-                        prod_sync = refrescar_producto_por_id(existente["id"])
-                        if prod_sync is None:
-                            prod_sync = existente
-                        sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
-                        st.success("Producto actualizado sin duplicarse.")
-                        st.rerun()
-                else:
-                    ok = insertar("productos", payload)
-                    if ok:
-                        prod_sync = get_producto_por_codigo(limpiar_texto(codigo)) if limpiar_texto(codigo) else get_producto_por_nombre(limpiar_texto(nombre))
-                        if prod_sync is not None:
-                            sincronizar_producto_inventario(prod_sync, fecha, "Sincronizado desde producto manual")
-                        st.success("Producto creado.")
-                        st.rerun()
 
     st.subheader("📋 Listado")
     df = DATA["productos"].copy()
@@ -2907,7 +2891,7 @@ elif menu == "Inventario Actual":
             df = preparar_import_productos(leer_archivo_subido(archivo))
             st.caption("Vista previa de columnas detectadas automáticamente")
             st.dataframe(df.head(10), use_container_width=True)
-            df = df.rename(columns={"nombre": "producto", "cantidad": "existencia_sistema"})
+            df = df.rename(columns={"nombre": "producto", "stock": "existencia_sistema", "cantidad": "existencia_sistema", "precio_venta": "precio"})
             faltan = [c for c in ["producto", "existencia_sistema"] if c not in df.columns]
             if faltan:
                 st.error(f"Faltan columnas: {faltan}")
@@ -2922,7 +2906,7 @@ elif menu == "Inventario Actual":
 
                     if fila_prod is not None:
                         costo = limpiar_numero(row["costo"]) if "costo" in df.columns else limpiar_numero(fila_prod.get("costo")) or 0
-                        precio = limpiar_numero(row["precio"]) if "precio" in df.columns else limpiar_numero(fila_prod.get("precio")) or 0
+                        precio = limpiar_numero(row["precio"]) if "precio" in df.columns else limpiar_numero(row.get("precio_venta")) or limpiar_numero(fila_prod.get("precio")) or 0
                         actualizar(
                             "productos",
                             fila_prod["id"],
@@ -2936,7 +2920,7 @@ elif menu == "Inventario Actual":
                         upsert_inventario_actual(producto, costo, precio, existencia, fecha_inv, "Carga inventario actual")
                     else:
                         costo = limpiar_numero(row["costo"]) if "costo" in df.columns else 0
-                        precio = limpiar_numero(row["precio"]) if "precio" in df.columns else 0
+                        precio = limpiar_numero(row["precio"]) if "precio" in df.columns else limpiar_numero(row.get("precio_venta")) or 0
                         insertar(
                             "productos",
                             {
