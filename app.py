@@ -366,29 +366,120 @@ def parsear_fecha(valor: Any) -> str | None:
 
 
 
+
+def limpiar_codigo_import(valor: Any) -> str:
+    """Limpia códigos/barcodes para evitar que Excel los deje como 74621774.0."""
+    if pd.isna(valor) or valor == "":
+        return ""
+    txt = str(valor).strip()
+    if txt.lower() in ["nan", "none", "null"]:
+        return ""
+    if txt.endswith(".0"):
+        txt = txt[:-2]
+    return txt.strip()
+
+
+def _clave_columna(col: Any) -> str:
+    return normalizar_texto(str(col)).replace("_", " ").replace("-", " ").strip()
+
+
+def _alias_match(col_norm: str, aliases: list[str]) -> bool:
+    col_norm = _clave_columna(col_norm)
+    aliases_norm = [_clave_columna(a) for a in aliases]
+    if col_norm in aliases_norm:
+        return True
+    # lectura flexible: "precio de venta", "precio venta normal", "stock actual", etc.
+    for a in aliases_norm:
+        if a and (col_norm == a or col_norm.startswith(a + " ") or a in col_norm):
+            return True
+    return False
+
+
 def mapear_columnas(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Mapea columnas por NOMBRE, no por posición.
+    Acepta diferentes encabezados: producto/nombre/descripción, stock/cantidad/existencia,
+    costo/precio compra, precio venta/precio normal, precio especial, activo, categoría, etc.
+    """
     mapa = {
-        "nombre": ["producto", "nombre", "item", "descripcion", "descripción"],
-        "codigo": ["codigo", "código", "codigo_barra", "barcode", "sku", "referencia"],
-        "costo": ["costo", "cost", "precio_compra", "precio compra"],
-        "precio": ["precio", "venta", "precio_venta", "precio venta"],
-        "cantidad": ["cantidad", "stock", "existencia", "existencia_sistema"],
-        "fecha": ["fecha", "date"],
-        "proveedor": ["proveedor", "suplidor"],
-        "descripcion": ["descripcion", "descripción", "detalle"],
-        "numero": ["numero", "número", "factura", "documento"],
-        "metodo": ["metodo", "método", "metodo_pago", "forma_pago"],
+        "id_externo": ["id", "uuid", "id producto", "id_producto"],
+        "nombre": ["producto", "nombre", "nombre producto", "item", "articulo", "artículo", "descripcion", "descripción", "descripcion producto"],
+        "categoria": ["categoria", "categoría", "category", "departamento", "familia", "grupo"],
+        "codigo": ["codigo", "código", "codigo barra", "codigo de barra", "código de barra", "codigo barras", "barcode", "bar code", "ean", "upc", "sku", "referencia"],
+        "costo": ["costo", "cost", "precio compra", "precio_compra", "costo unitario", "costo_unitario", "precio costo", "ultimo costo", "último costo"],
+        "precio": ["precio", "precio venta", "precio_venta", "precio de venta", "venta", "precio normal", "precio publico", "precio público", "pvp"],
+        "precio_descuento": ["precio descuento", "precio_descuento", "precio oferta", "oferta", "precio minimo", "precio mínimo", "precio 2"],
+        "precio_especial": ["precio especial", "precio_especial", "especial", "precio 3", "precio mayorista", "precio mayoreo"],
+        "cantidad": ["cantidad", "stock", "stock actual", "existencia", "existencias", "existencia sistema", "existencia_sistema", "inventario", "inventario actual", "qty", "quantity"],
+        "fecha": ["fecha", "date", "fecha agregado", "fecha agregada", "fecha creacion", "fecha creación", "created_at", "creado"],
+        "activo": ["activo", "estado", "estatus", "status", "habilitado", "disponible"],
+        "usa_inventario": ["usa inventario", "usa_inventario", "inventariable", "control inventario", "control_inventario"],
+        "proveedor": ["proveedor", "suplidor", "supplier"],
+        "descripcion": ["detalle", "observacion", "observación", "nota", "notas"],
+        "numero": ["numero", "número", "factura", "documento", "no factura"],
+        "metodo": ["metodo", "método", "metodo pago", "metodo_pago", "forma pago", "forma_pago"],
     }
     ren = {}
+    usados = set()
     for col in df.columns:
-        norm = normalizar_texto(col)
+        norm = _clave_columna(col)
         for destino, aliases in mapa.items():
-            if norm in [normalizar_texto(a) for a in aliases]:
+            if destino in usados:
+                continue
+            if _alias_match(norm, aliases):
                 ren[col] = destino
+                usados.add(destino)
                 break
     return df.rename(columns=ren)
 
 
+def detectar_formato_productos_sin_encabezado(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Respaldo para exportaciones sin encabezado como el archivo viejo:
+    ID | NOMBRE | COSTO | PRECIO | STOCK | ... | STOCK_2 | CODIGO | ACTIVO...
+    Solo se usa si después del mapeo no aparece nombre/cantidad.
+    """
+    out = df.copy()
+    # Si ya trae encabezados reconocidos, no tocar.
+    if "nombre" in out.columns and ("cantidad" in out.columns or "stock" in out.columns):
+        return out
+
+    # Convertir columnas a posiciones si no reconoció encabezados.
+    if out.shape[1] >= 10:
+        temp = pd.DataFrame()
+        temp["id_externo"] = out.iloc[:, 0]
+        temp["nombre"] = out.iloc[:, 1]
+        temp["costo"] = out.iloc[:, 2]
+        temp["precio"] = out.iloc[:, 3]
+        # En tu exportación hay dos columnas que pueden reflejar stock; tomamos la mayor para no bajar inventario por error.
+        stock1 = pd.to_numeric(out.iloc[:, 4], errors="coerce").fillna(0)
+        stock2 = pd.to_numeric(out.iloc[:, 8], errors="coerce").fillna(0) if out.shape[1] > 8 else stock1
+        temp["cantidad"] = stock1.where(stock1.abs() >= stock2.abs(), stock2)
+        temp["fecha"] = out.iloc[:, 6] if out.shape[1] > 6 else ""
+        temp["codigo"] = out.iloc[:, 9].apply(limpiar_codigo_import) if out.shape[1] > 9 else ""
+        temp["activo"] = out.iloc[:, 10] if out.shape[1] > 10 else True
+        temp["usa_inventario"] = out.iloc[:, 11] if out.shape[1] > 11 else True
+        return temp
+    return out
+
+
+def preparar_import_productos(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza y prepara un archivo de productos/inventario para importación segura."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    out = normalizar_columnas(df)
+    out = mapear_columnas(out)
+    out = detectar_formato_productos_sin_encabezado(out)
+    out = mapear_columnas(out)
+
+    if "codigo" in out.columns:
+        out["codigo"] = out["codigo"].apply(limpiar_codigo_import)
+    if "nombre" in out.columns:
+        out["nombre"] = out["nombre"].astype(str).str.strip()
+    for c in ["costo", "precio", "precio_descuento", "precio_especial", "cantidad"]:
+        if c in out.columns:
+            out[c] = out[c].apply(lambda x: limpiar_numero(x) if limpiar_numero(x) is not None else 0)
+    return out
 
 def get_producto_por_codigo(codigo: str):
     codigo_n = normalizar_texto(codigo)
@@ -611,15 +702,20 @@ def aplicar_consumo_fifo(movimientos: list[dict]):
         except Exception:
             pass
 
+
 def leer_archivo_subido(archivo) -> pd.DataFrame:
     try:
         nombre = archivo.name.lower()
-        if nombre.endswith(".csv"):
+        if nombre.endswith((".csv", ".txt")):
             try:
-                df = pd.read_csv(archivo)
+                df = pd.read_csv(archivo, sep=None, engine="python")
             except Exception:
                 archivo.seek(0)
-                df = pd.read_csv(archivo, encoding="latin-1")
+                try:
+                    df = pd.read_csv(archivo, sep=None, engine="python", encoding="latin-1")
+                except Exception:
+                    archivo.seek(0)
+                    df = pd.read_csv(archivo, sep="\t", encoding="latin-1")
         else:
             df = pd.read_excel(archivo)
         df = normalizar_columnas(df)
@@ -628,8 +724,6 @@ def leer_archivo_subido(archivo) -> pd.DataFrame:
     except Exception as exc:
         st.error(f"No se pudo leer el archivo: {exc}")
         return pd.DataFrame()
-
-
 
 def filtrar_por_fechas(df: pd.DataFrame, desde, hasta) -> pd.DataFrame:
     if df.empty or "fecha" not in df.columns:
@@ -2470,9 +2564,11 @@ elif menu == "Productos":
     with st.expander("📥 Subir Excel / CSV de productos", expanded=False):
         st.write("Acepta columnas como producto/nombre, código, costo, precio, cantidad, fecha. No duplica productos existentes.")
         modo_carga = st.selectbox("Cómo tratar productos existentes", ["Actualizar costo/precio y sumar cantidad", "Actualizar costo/precio y reemplazar cantidad", "Solo actualizar datos sin mover cantidad"], key="prod_modo_carga")
-        archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_productos")
+        archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv", "txt"], key="up_productos")
         if archivo is not None and st.button("Cargar productos", key="btn_cargar_productos_pro"):
-            df = leer_archivo_subido(archivo)
+            df = preparar_import_productos(leer_archivo_subido(archivo))
+            st.caption("Vista previa de columnas detectadas automáticamente")
+            st.dataframe(df.head(10), use_container_width=True)
             if "nombre" not in df.columns:
                 st.error("El archivo debe traer al menos una columna nombre o producto.")
             else:
@@ -2622,11 +2718,13 @@ elif menu == "Inventario Actual":
 
     with st.expander("📥 Subir Excel / CSV de inventario actual", expanded=True):
         st.write("Columnas esperadas: nombre o producto, cantidad o existencia_sistema. Costo y precio opcionales.")
-        archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv"], key="up_inventario")
+        archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv", "txt"], key="up_inventario")
         fecha_inv = st.date_input("Fecha del inventario", value=date.today(), key="fecha_inv_actual")
 
         if archivo is not None and st.button("Cargar inventario actual"):
-            df = leer_archivo_subido(archivo)
+            df = preparar_import_productos(leer_archivo_subido(archivo))
+            st.caption("Vista previa de columnas detectadas automáticamente")
+            st.dataframe(df.head(10), use_container_width=True)
             df = df.rename(columns={"nombre": "producto", "cantidad": "existencia_sistema"})
             faltan = [c for c in ["producto", "existencia_sistema"] if c not in df.columns]
             if faltan:
