@@ -4696,6 +4696,14 @@ elif menu == "Caja":
             ventas = DATA.get("ventas", pd.DataFrame()).copy()
             return aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() else ventas
 
+    def _leer_abonos_credito_actualizados():
+        try:
+            resp = supabase.table("abonos_credito").select("*").execute()
+            return pd.DataFrame(resp.data or [])
+        except Exception:
+            return DATA.get("abonos_credito", pd.DataFrame()).copy()
+
+
     def _obtener_caja_abierta_usuario(usuario_nombre=None):
         usuario_nombre = usuario_nombre or usuario_act
         try:
@@ -4793,6 +4801,37 @@ elif menu == "Caja":
 
         return pagos
 
+    def _abonos_de_caja(caja):
+        abonos = _leer_abonos_credito_actualizados()
+        if abonos.empty:
+            return abonos
+
+        caja_id = caja.get("id")
+        fecha_apertura = caja.get("fecha_apertura")
+        fecha_cierre = caja.get("fecha_cierre")
+        usuario_caja = caja.get("usuario") or usuario_act
+
+        # 1) Si el abono tiene caja_id, usar la caja exacta
+        if "caja_id" in abonos.columns and caja_id:
+            abonos_caja = abonos[abonos["caja_id"].astype(str) == str(caja_id)].copy()
+            if not abonos_caja.empty:
+                return abonos_caja
+
+        # 2) Respaldo por usuario y rango de fecha
+        if "usuario" in abonos.columns:
+            abonos = abonos[abonos["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario_caja)]
+
+        fecha_col = "fecha" if "fecha" in abonos.columns else ("created_at" if "created_at" in abonos.columns else None)
+        if fecha_col and fecha_apertura:
+            abonos["_fecha_dt"] = pd.to_datetime(abonos[fecha_col], errors="coerce")
+            apertura_dt = pd.to_datetime(fecha_apertura, errors="coerce")
+            abonos = abonos[abonos["_fecha_dt"] >= apertura_dt]
+            if fecha_cierre:
+                cierre_dt = pd.to_datetime(fecha_cierre, errors="coerce")
+                abonos = abonos[abonos["_fecha_dt"] <= cierre_dt]
+
+        return abonos
+
     def _sumar_pago_metodo(pagos, metodo_buscar):
         if pagos.empty:
             return 0.0
@@ -4815,6 +4854,7 @@ elif menu == "Caja":
     def _calcular_resumen_caja(caja):
         ventas_caja = _ventas_de_caja(caja)
         pagos_caja = _pagos_de_caja(caja, ventas_caja)
+        abonos_caja = _abonos_de_caja(caja)
 
         fondo_inicial = float(limpiar_numero(caja.get("monto_inicial")) or 0)
 
@@ -4860,6 +4900,17 @@ elif menu == "Caja":
         venta_tarjeta = _sumar_metodo_limpio(pagos_ajustados, "tarjeta")
         venta_credito = _sumar_metodo_limpio(pagos_ajustados, "credito")
 
+        # Abonos de crédito: NO son ventas nuevas, pero SÍ son dinero recibido en caja.
+        abono_efectivo = _sumar_metodo_limpio(abonos_caja, "efectivo")
+        abono_transferencia = _sumar_metodo_limpio(abonos_caja, "transferencia")
+        abono_tarjeta = _sumar_metodo_limpio(abonos_caja, "tarjeta")
+
+        efectivo_caja = venta_efectivo + abono_efectivo
+        transferencia_caja = venta_transferencia + abono_transferencia
+        tarjeta_caja = venta_tarjeta + abono_tarjeta
+        total_abonos = abono_efectivo + abono_transferencia + abono_tarjeta
+        total_ingresos_caja = venta_efectivo + venta_transferencia + venta_tarjeta + total_abonos
+
         # Respaldo para ventas viejas sin ventas_pagos
         if (venta_efectivo + venta_transferencia + venta_tarjeta + venta_credito) == 0 and not ventas_caja.empty:
             metodo_col_v = "metodo_pago" if "metodo_pago" in ventas_caja.columns else ("metodo" if "metodo" in ventas_caja.columns else None)
@@ -4876,17 +4927,34 @@ elif menu == "Caja":
                     elif metodo == "credito":
                         venta_credito = monto
 
-        efectivo_esperado = fondo_inicial + venta_efectivo
+        # Efectivo esperado = fondo inicial + efectivo de ventas + abonos en efectivo.
+        efectivo_esperado = fondo_inicial + efectivo_caja
 
         return {
             "ventas_df": ventas_caja,
             "pagos_df": pagos_ajustados,
+            "abonos_df": abonos_caja,
             "fondo_inicial": fondo_inicial,
+
+            # ventas reales
             "venta_efectivo": venta_efectivo,
             "venta_transferencia": venta_transferencia,
             "venta_tarjeta": venta_tarjeta,
             "venta_credito": venta_credito,
             "total_ventas": total_ventas,
+
+            # abonos de crédito recibidos
+            "abono_efectivo": abono_efectivo,
+            "abono_transferencia": abono_transferencia,
+            "abono_tarjeta": abono_tarjeta,
+            "total_abonos": total_abonos,
+
+            # dinero real que entra al cierre de caja por método
+            "efectivo_caja": efectivo_caja,
+            "transferencia_caja": transferencia_caja,
+            "tarjeta_caja": tarjeta_caja,
+            "total_ingresos_caja": total_ingresos_caja,
+
             "efectivo_esperado": efectivo_esperado,
         }
 
@@ -4904,9 +4972,9 @@ elif menu == "Caja":
             "estado": "cerrada",
             "efectivo_contado": float(efectivo_contado),
             "efectivo_esperado": float(resumen["efectivo_esperado"]),
-            "total_efectivo": float(resumen["venta_efectivo"]),
-            "total_transferencia": float(resumen["venta_transferencia"]),
-            "total_tarjeta": float(resumen["venta_tarjeta"]),
+            "total_efectivo": float(resumen.get("efectivo_caja", resumen["venta_efectivo"])),
+            "total_transferencia": float(resumen.get("transferencia_caja", resumen["venta_transferencia"])),
+            "total_tarjeta": float(resumen.get("tarjeta_caja", resumen["venta_tarjeta"])),
             "total_credito": float(resumen["venta_credito"]),
             "total_ventas": float(resumen["total_ventas"]),
             "faltante": float(faltante),
@@ -4925,9 +4993,9 @@ elif menu == "Caja":
             "monto_inicial": float(resumen["fondo_inicial"]),
             "efectivo_contado": float(efectivo_contado),
             "efectivo_esperado": float(resumen["efectivo_esperado"]),
-            "total_efectivo": float(resumen["venta_efectivo"]),
-            "total_transferencia": float(resumen["venta_transferencia"]),
-            "total_tarjeta": float(resumen["venta_tarjeta"]),
+            "total_efectivo": float(resumen.get("efectivo_caja", resumen["venta_efectivo"])),
+            "total_transferencia": float(resumen.get("transferencia_caja", resumen["venta_transferencia"])),
+            "total_tarjeta": float(resumen.get("tarjeta_caja", resumen["venta_tarjeta"])),
             "total_credito": float(resumen["venta_credito"]),
             "total_ventas": float(resumen["total_ventas"]),
             "faltante": float(faltante),
@@ -5001,10 +5069,14 @@ elif menu == "Caja":
                 <table>
                     <tr><td>Caja inicial</td><td>RD$ {resumen["fondo_inicial"]:,.2f}</td></tr>
                     <tr><td>Ventas efectivo</td><td>RD$ {resumen["venta_efectivo"]:,.2f}</td></tr>
-                    <tr><td>Transferencia</td><td>RD$ {resumen["venta_transferencia"]:,.2f}</td></tr>
-                    <tr><td>Tarjeta</td><td>RD$ {resumen["venta_tarjeta"]:,.2f}</td></tr>
-                    <tr><td>Crédito</td><td>RD$ {resumen["venta_credito"]:,.2f}</td></tr>
+                    <tr><td>Abonos efectivo</td><td>RD$ {resumen.get("abono_efectivo", 0):,.2f}</td></tr>
+                    <tr><td>Efectivo recibido</td><td>RD$ {resumen.get("efectivo_caja", resumen["venta_efectivo"]):,.2f}</td></tr>
+                    <tr><td>Transferencia recibida</td><td>RD$ {resumen.get("transferencia_caja", resumen["venta_transferencia"]):,.2f}</td></tr>
+                    <tr><td>Tarjeta recibida</td><td>RD$ {resumen.get("tarjeta_caja", resumen["venta_tarjeta"]):,.2f}</td></tr>
+                    <tr><td>Crédito vendido</td><td>RD$ {resumen["venta_credito"]:,.2f}</td></tr>
                     <tr><td>Total ventas</td><td>RD$ {resumen["total_ventas"]:,.2f}</td></tr>
+                    <tr><td>Total abonos</td><td>RD$ {resumen.get("total_abonos", 0):,.2f}</td></tr>
+                    <tr><td>Total ingresos caja</td><td>RD$ {resumen.get("total_ingresos_caja", 0):,.2f}</td></tr>
                     <tr><td>Efectivo esperado</td><td>RD$ {resumen["efectivo_esperado"]:,.2f}</td></tr>
                     <tr><td>Efectivo contado</td><td>RD$ {efectivo_contado:,.2f}</td></tr>
                     <tr><td>Diferencia</td><td>RD$ {diferencia:,.2f}</td></tr>
@@ -5048,18 +5120,27 @@ elif menu == "Caja":
         resumen = _calcular_resumen_caja(caja_abierta)
         ventas_caja = resumen["ventas_df"]
         pagos_caja = resumen["pagos_df"]
+        abonos_caja = resumen.get("abonos_df", pd.DataFrame())
 
         st.markdown("### 📌 Resumen de caja")
         r1, r2, r3, r4 = st.columns(4)
         r1.metric("Caja inicial", f"RD$ {resumen['fondo_inicial']:,.2f}")
-        r2.metric("Ventas efectivo", f"RD$ {resumen['venta_efectivo']:,.2f}")
+        r2.metric("Efectivo recibido", f"RD$ {resumen.get('efectivo_caja', resumen['venta_efectivo']):,.2f}")
         r3.metric("Efectivo esperado", f"RD$ {resumen['efectivo_esperado']:,.2f}")
         r4.metric("Total ventas", f"RD$ {resumen['total_ventas']:,.2f}")
 
-        r5, r6, r7 = st.columns(3)
-        r5.metric("Transferencia", f"RD$ {resumen['venta_transferencia']:,.2f}")
-        r6.metric("Tarjeta", f"RD$ {resumen['venta_tarjeta']:,.2f}")
-        r7.metric("Crédito", f"RD$ {resumen['venta_credito']:,.2f}")
+        r5, r6, r7, r8 = st.columns(4)
+        r5.metric("Ventas efectivo", f"RD$ {resumen['venta_efectivo']:,.2f}")
+        r6.metric("Abonos efectivo", f"RD$ {resumen.get('abono_efectivo', 0):,.2f}")
+        r7.metric("Transferencia recibida", f"RD$ {resumen.get('transferencia_caja', resumen['venta_transferencia']):,.2f}")
+        r8.metric("Tarjeta recibida", f"RD$ {resumen.get('tarjeta_caja', resumen['venta_tarjeta']):,.2f}")
+
+        r9, r10, r11 = st.columns(3)
+        r9.metric("Crédito vendido", f"RD$ {resumen['venta_credito']:,.2f}")
+        r10.metric("Total abonos", f"RD$ {resumen.get('total_abonos', 0):,.2f}")
+        r11.metric("Total ingresos caja", f"RD$ {resumen.get('total_ingresos_caja', 0):,.2f}")
+
+        st.caption("Nota: los abonos de crédito entran a caja y dinero real, pero no aumentan el total de ventas.")
 
         html_cuadre_pre = _html_cuadre_caja(caja_abierta, resumen)
         with st.expander("🖨️ Imprimir cuadre de caja para contar", expanded=False):
@@ -5079,12 +5160,19 @@ elif menu == "Caja":
             else:
                 cols = [c for c in ["numero_factura", "fecha", "total", "total_contable", "recargo", "metodo_pago", "metodo", "usuario", "caja_id"] if c in ventas_caja.columns]
                 st.dataframe(ventas_caja[cols] if cols else ventas_caja, use_container_width=True)
-            st.write("Pagos tomados:")
+            st.write("Pagos de ventas tomados:")
             if pagos_caja.empty:
                 st.info("No hay pagos separados para esta caja.")
             else:
                 cols_p = [c for c in ["venta_id", "metodo", "metodo_pago", "monto", "usuario", "caja_id", "dia_operativo"] if c in pagos_caja.columns]
                 st.dataframe(pagos_caja[cols_p] if cols_p else pagos_caja, use_container_width=True)
+
+            st.write("Abonos de crédito tomados:")
+            if abonos_caja.empty:
+                st.info("No hay abonos de crédito registrados para esta caja.")
+            else:
+                cols_a = [c for c in ["fecha", "cliente_nombre", "monto", "metodo_pago", "usuario", "caja_id", "cuenta_id", "observacion"] if c in abonos_caja.columns]
+                st.dataframe(abonos_caja[cols_a] if cols_a else abonos_caja, use_container_width=True)
 
         st.markdown("---")
         st.subheader("🔐 Cierre de caja")
