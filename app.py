@@ -34,17 +34,68 @@ def normalizar_item_carrito(item: dict) -> dict:
     return item
 
 
-def nombre_item(item):
-    """Devuelve el nombre del producto sin romper si el diccionario usa nombre o producto."""
+
+
+def carrito_limpio() -> list:
+    """Devuelve el carrito normalizado para mostrar/facturar."""
     try:
-        if isinstance(item, dict):
-            return nombre_item(item) or item.get("nombre") or item.get("descripcion") or ""
-        return nombre_item(item) if "producto" in item else item.get("nombre", "")
+        car = carrito_limpio()
     except Exception:
-        try:
-            return item.get("nombre", "")
-        except Exception:
-            return ""
+        car = []
+    return [normalizar_item_carrito(dict(x)) for x in car if isinstance(x, dict)]
+
+
+def buscar_nombre_producto_por_item(item: dict) -> str:
+    """Busca el nombre del producto desde el item del carrito usando nombre, producto, producto_id o código."""
+    if not isinstance(item, dict):
+        return ""
+    nombre = item.get("producto") or item.get("nombre") or item.get("descripcion")
+    if nombre:
+        return str(nombre)
+
+    prod_id = item.get("producto_id") or item.get("id")
+    codigo = item.get("codigo") or item.get("codigo_barra")
+
+    try:
+        prods = DATA.get("productos", pd.DataFrame()).copy()
+    except Exception:
+        prods = pd.DataFrame()
+
+    if not prods.empty:
+        if prod_id and "id" in prods.columns:
+            fila = prods[prods["id"].astype(str) == str(prod_id)]
+            if not fila.empty:
+                return str(fila.iloc[0].get("nombre") or fila.iloc[0].get("producto") or "")
+        if codigo:
+            for col in ["codigo", "codigo_barra", "sku"]:
+                if col in prods.columns:
+                    fila = prods[prods[col].astype(str) == str(codigo)]
+                    if not fila.empty:
+                        return str(fila.iloc[0].get("nombre") or fila.iloc[0].get("producto") or "")
+
+    return ""
+
+
+def normalizar_item_carrito(item: dict) -> dict:
+    """Asegura que cada item del carrito tenga nombre/producto visibles."""
+    if not isinstance(item, dict):
+        return {}
+    nom = buscar_nombre_producto_por_item(item)
+    if nom:
+        item["producto"] = nom
+        item["nombre"] = nom
+    else:
+        item["producto"] = item.get("producto") or item.get("nombre") or ""
+        item["nombre"] = item.get("nombre") or item.get("producto") or ""
+    return item
+
+
+def nombre_item(item):
+    """Devuelve el nombre visible del producto."""
+    try:
+        return buscar_nombre_producto_por_item(item) or item.get("nombre") or item.get("producto") or ""
+    except Exception:
+        return ""
 
 
 def limpiar_cache_datos():
