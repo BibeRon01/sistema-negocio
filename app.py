@@ -1,3 +1,4 @@
+# VERSION IMPORTADOR PRODUCTOS PRO - stock/costo/precio por encabezado normalizado
 import base64
 import io
 import re
@@ -464,11 +465,47 @@ def detectar_formato_productos_sin_encabezado(df: pd.DataFrame) -> pd.DataFrame:
 
 
 
+
+
+def payload_producto_importado(row: dict) -> dict:
+    """Arma el payload limpio para productos/inventario desde preparar_import_productos."""
+    nombre = limpiar_texto(row.get("nombre"))
+    codigo = limpiar_texto(row.get("codigo"))
+    categoria = limpiar_texto(row.get("categoria"))
+    stock = float(limpiar_numero(row.get("stock")) or 0)
+    costo = float(limpiar_numero(row.get("costo")) or 0)
+    precio_venta = float(limpiar_numero(row.get("precio_venta")) or 0)
+    precio_especial = float(limpiar_numero(row.get("precio_especial")) or 0)
+    activo = bool(row.get("activo", True))
+
+    return {
+        "nombre": nombre,
+        "producto": nombre,
+        "codigo": codigo,
+        "codigo_barra": codigo,
+        "categoria": categoria,
+        "stock": stock,
+        "cantidad": stock,
+        "existencia": stock,
+        "costo": costo,
+        "costo_unitario": costo,
+        "costo_promedio": costo,
+        "precio": precio_venta,
+        "precio_venta": precio_venta,
+        "precio_especial": precio_especial,
+        "activo": activo,
+        "usar_en_inventario": True,
+        "fecha_agregado": str(date.today()) if "date" in globals() else None,
+    }
+
+
 def preparar_import_productos(df_raw: pd.DataFrame) -> pd.DataFrame:
     """
-    Importador inteligente de productos.
-    Lee por encabezados, acepta sinónimos y evita errores por columnas duplicadas.
-    Si el archivo viene sin encabezado, intenta usar el formato exportado del sistema viejo.
+    Importador PRO de productos.
+    Lee por encabezados normalizados, no por posición.
+    Devuelve columnas limpias:
+    codigo, nombre, categoria, stock, costo, precio_venta, precio_especial, activo,
+    total_costo_inventario, total_valor_venta, ganancia_potencial.
     """
     if df_raw is None or df_raw.empty:
         return pd.DataFrame()
@@ -477,69 +514,14 @@ def preparar_import_productos(df_raw: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(axis=1, how="all")
     df = df.loc[:, ~pd.Index(df.columns).duplicated()]
 
-    def _norm_col(c):
-        return normalizar_texto(str(c)).replace(".", "").replace("_", " ").strip()
+    def _norm(txt):
+        t = normalizar_texto(txt)
+        t = t.replace(".", " ").replace("_", " ").replace("-", " ").replace("/", " ")
+        t = " ".join(t.split())
+        return t
 
-    cols_norm = {_norm_col(c): c for c in df.columns}
-
-    def _buscar_col(*nombres):
-        opciones = [normalizar_texto(n).replace(".", "").replace("_", " ").strip() for n in nombres]
-        for op in opciones:
-            if op in cols_norm:
-                return cols_norm[op]
-        for norm, original in cols_norm.items():
-            for op in opciones:
-                if op and (op in norm or norm in op):
-                    return original
-        return None
-
-    encabezados_utiles = any(
-        _buscar_col(*grupo) is not None for grupo in [
-            ("nombre", "producto", "descripcion", "descripción"),
-            ("stock", "cantidad", "existencia"),
-            ("costo", "costo unitario", "precio compra"),
-            ("precio v", "precio venta", "precio de venta", "precio"),
-            ("codigo", "código", "codigo barra", "barcode", "sku"),
-        ]
-    )
-
-    if not encabezados_utiles:
-        temp = df.copy()
-        temp = temp.loc[:, ~pd.Index(temp.columns).duplicated()]
-        out = pd.DataFrame()
-        out["codigo"] = temp.iloc[:, 9] if temp.shape[1] > 9 else ""
-        out["nombre"] = temp.iloc[:, 1] if temp.shape[1] > 1 else ""
-        out["categoria"] = ""
-        out["costo"] = temp.iloc[:, 2] if temp.shape[1] > 2 else 0
-        out["precio_venta"] = temp.iloc[:, 3] if temp.shape[1] > 3 else 0
-        stock_a = temp.iloc[:, 4] if temp.shape[1] > 4 else pd.Series([0] * len(temp))
-        stock_b = temp.iloc[:, 8] if temp.shape[1] > 8 else pd.Series([0] * len(temp))
-        sa = pd.to_numeric(stock_a.apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0)
-        sb = pd.to_numeric(stock_b.apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0)
-        out["stock"] = pd.concat([sa, sb], axis=1).max(axis=1)
-        out["precio_especial"] = 0
-        out["activo"] = True
-    else:
-        col_codigo = _buscar_col("codigo", "código", "codigo barra", "código barra", "barcode", "sku")
-        col_nombre = _buscar_col("nombre", "producto", "descripcion", "descripción")
-        col_categoria = _buscar_col("categoria", "categoría", "familia", "grupo")
-        col_stock = _buscar_col("stock", "cantidad", "existencia", "inventario", "inventario actual")
-        col_costo = _buscar_col("costo", "costo unitario", "precio compra", "precio costo")
-        col_precio = _buscar_col("precio v", "precio venta", "precio de venta", "precio")
-        col_especial = _buscar_col("precio especial", "precio descuento", "precio oferta", "oferta")
-        col_activo = _buscar_col("activo", "estado", "estatus")
-
-        out = pd.DataFrame(index=df.index)
-        out["codigo"] = df[col_codigo] if col_codigo in df.columns else ""
-        out["nombre"] = df[col_nombre] if col_nombre in df.columns else ""
-        out["categoria"] = df[col_categoria] if col_categoria in df.columns else ""
-        out["stock"] = df[col_stock] if col_stock in df.columns else 0
-        out["costo"] = df[col_costo] if col_costo in df.columns else 0
-        out["precio_venta"] = df[col_precio] if col_precio in df.columns else 0
-        out["precio_especial"] = df[col_especial] if col_especial in df.columns else 0
-        out["activo"] = df[col_activo] if col_activo in df.columns else True
-
-    out = out.loc[:, ~pd.Index(out.columns).duplicated()]
+    def _compact(txt):
+        return _norm(txt).replace(" ", "")
 
     def _num_safe(x):
         try:
@@ -547,12 +529,6 @@ def preparar_import_productos(df_raw: pd.DataFrame) -> pd.DataFrame:
             return float(v) if v is not None else 0.0
         except Exception:
             return 0.0
-
-    for c in ["stock", "costo", "precio_venta", "precio_especial"]:
-        if c not in out.columns:
-            out[c] = 0.0
-        serie = out[c].iloc[:, 0] if isinstance(out[c], pd.DataFrame) else out[c]
-        out[c] = serie.apply(_num_safe)
 
     def _codigo_safe(x):
         try:
@@ -565,19 +541,122 @@ def preparar_import_productos(df_raw: pd.DataFrame) -> pd.DataFrame:
             txt = txt[:-2]
         return txt
 
-    out["codigo"] = out["codigo"].apply(_codigo_safe) if "codigo" in out.columns else ""
-    out["nombre"] = out["nombre"].fillna("").astype(str).str.strip()
-    out["categoria"] = out["categoria"].fillna("").astype(str).str.strip() if "categoria" in out.columns else ""
-
     def _activo_safe(x):
-        t = normalizar_texto(x)
-        if t in ["false", "falso", "0", "no", "inactivo"]:
+        t = _norm(x)
+        if t in ["false", "falso", "0", "no", "inactivo", "inactiva"]:
             return False
         return True
 
+    # Detectar y eliminar fila basura si el archivo trae encabezado repetido como primera fila
+    first_row_text = " ".join([str(v) for v in df.iloc[0].tolist()]) if len(df) else ""
+    if "Nombre" in first_row_text and ("Stock" in first_row_text or "Costo" in first_row_text):
+        # Si pandas leyó columnas incorrectas y la primera fila realmente era encabezado
+        df.columns = [str(v).strip() for v in df.iloc[0].tolist()]
+        df = df.iloc[1:].reset_index(drop=True)
+        df = df.loc[:, ~pd.Index(df.columns).duplicated()]
+
+    col_norm = {c: _norm(c) for c in df.columns}
+    col_comp = {c: _compact(c) for c in df.columns}
+
+    def pick_col(candidates, must_not=None):
+        must_not = must_not or []
+        cand_norm = [_norm(x) for x in candidates]
+        cand_comp = [_compact(x) for x in candidates]
+        bad_norm = [_norm(x) for x in must_not]
+        bad_comp = [_compact(x) for x in must_not]
+
+        # exact compact
+        for c in df.columns:
+            cc = col_comp[c]
+            if cc in cand_comp and all(b not in cc for b in bad_comp):
+                return c
+
+        # exact norm
+        for c in df.columns:
+            cn = col_norm[c]
+            if cn in cand_norm and all(b not in cn for b in bad_norm):
+                return c
+
+        # contains compact
+        for c in df.columns:
+            cc = col_comp[c]
+            if all(b not in cc for b in bad_comp):
+                for cand in cand_comp:
+                    if cand and (cand in cc or cc in cand):
+                        return c
+
+        return None
+
+    col_codigo = pick_col([
+        "Codigo", "Código", "Codigo Barra", "Código Barra", "Barcode", "Bar Code", "SKU", "Referencia"
+    ])
+    col_nombre = pick_col([
+        "Nombre", "Producto", "Descripcion", "Descripción", "Nombre Producto", "Producto Nombre"
+    ])
+    col_categoria = pick_col([
+        "Categoria", "Categoría", "Familia", "Grupo", "Departamento"
+    ])
+    col_stock = pick_col([
+        "Stock", "Cantidad", "Existencia", "Inventario", "Inventario Actual", "Disponible", "Cantidad Disponible"
+    ], must_not=["precio", "costo", "total"])
+    col_costo = pick_col([
+        "Costo", "Costo Unitario", "Precio Compra", "Precio Costo", "Costo Promedio", "Costo Prom."
+    ], must_not=["total"])
+    col_precio = pick_col([
+        "PrecioVenta", "Precio Venta", "Precio V", "Precio V.", "Precio de Venta",
+        "Precio", "Precio Normal", "Precio Publico", "Precio Público", "PVP", "Venta"
+    ], must_not=["especial", "descuento", "oferta", "costo", "compra", "total"])
+    col_especial = pick_col([
+        "Precio Especial", "Precio Descuento", "Precio Oferta", "Oferta", "Especial", "Descuento"
+    ])
+
+    # Si no encuentra encabezados, intenta formato anterior por posición:
+    # Codigo | Nombre | Categoria | Stock | Costo | PrecioVenta
+    out = pd.DataFrame(index=df.index)
+    if col_nombre is None and df.shape[1] >= 6:
+        out["codigo"] = df.iloc[:, 0]
+        out["nombre"] = df.iloc[:, 1]
+        out["categoria"] = df.iloc[:, 2]
+        out["stock"] = df.iloc[:, 3]
+        out["costo"] = df.iloc[:, 4]
+        out["precio_venta"] = df.iloc[:, 5]
+        out["precio_especial"] = 0
+        out["activo"] = True
+    else:
+        out["codigo"] = df[col_codigo] if col_codigo in df.columns else ""
+        out["nombre"] = df[col_nombre] if col_nombre in df.columns else ""
+        out["categoria"] = df[col_categoria] if col_categoria in df.columns else ""
+
+        # stock/costo/precio por nombre
+        out["stock"] = df[col_stock] if col_stock in df.columns else 0
+        out["costo"] = df[col_costo] if col_costo in df.columns else 0
+        out["precio_venta"] = df[col_precio] if col_precio in df.columns else 0
+        out["precio_especial"] = df[col_especial] if col_especial in df.columns else 0
+
+        col_activo = pick_col(["Activo", "Estado", "Estatus"])
+        out["activo"] = df[col_activo] if col_activo in df.columns else True
+
+    # Limpieza final
+    out = out.loc[:, ~pd.Index(out.columns).duplicated()]
+
+    for c in ["stock", "costo", "precio_venta", "precio_especial"]:
+        if c not in out.columns:
+            out[c] = 0.0
+        serie = out[c].iloc[:, 0] if isinstance(out[c], pd.DataFrame) else out[c]
+        out[c] = serie.apply(_num_safe)
+
+    out["codigo"] = out["codigo"].apply(_codigo_safe) if "codigo" in out.columns else ""
+    out["nombre"] = out["nombre"].fillna("").astype(str).str.strip()
+    out["categoria"] = out["categoria"].fillna("").astype(str).str.strip() if "categoria" in out.columns else ""
     out["activo"] = out["activo"].apply(_activo_safe) if "activo" in out.columns else True
+
+    # Si precio_venta quedó en 0 pero precio_especial tiene valor, usar precio_especial como precio venta
+    out.loc[(out["precio_venta"] <= 0) & (out["precio_especial"] > 0), "precio_venta"] = out["precio_especial"]
+
+    # Evitar filas sin nombre
     out = out[out["nombre"].astype(str).str.strip() != ""].copy()
 
+    # Validaciones visibles
     out["total_costo_inventario"] = out["stock"] * out["costo"]
     out["total_valor_venta"] = out["stock"] * out["precio_venta"]
     out["ganancia_potencial"] = out["total_valor_venta"] - out["total_costo_inventario"]
