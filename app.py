@@ -2758,6 +2758,102 @@ def registrar_movimiento_dinero(tipo, monto, descripcion="", metodo_pago="", cue
     return insertar("movimientos_dinero", payload)
 
 
+
+def registrar_abono_credito_seguro(fila, monto, metodo_pago, observacion=""):
+    """Registra un abono a crédito y lo mete como entrada de caja/dinero por el método elegido."""
+    monto = float(limpiar_numero(monto) or 0)
+    if monto <= 0:
+        st.error("El monto del abono debe ser mayor que cero.")
+        return False
+
+    caja_activa = obtener_caja_abierta()
+    if caja_activa is None:
+        st.error("Debes tener una caja abierta para registrar abonos de crédito.")
+        return False
+
+    cuenta_id = json_safe_value(fila.get("id"))
+    cliente_id = json_safe_value(fila.get("cliente_id"))
+    cliente_nombre = limpiar_texto(fila.get("cliente_nombre")) or limpiar_texto(fila.get("cliente")) or "Cliente"
+    monto_original = float(limpiar_numero(fila.get("monto_original")) or limpiar_numero(fila.get("total")) or 0)
+    monto_abonado_anterior = float(limpiar_numero(fila.get("monto_abonado")) or 0)
+    saldo_anterior = float(limpiar_numero(fila.get("saldo_pendiente")) or max(monto_original - monto_abonado_anterior, 0))
+    monto_real = min(monto, saldo_anterior) if saldo_anterior > 0 else monto
+    nuevo_abonado = monto_abonado_anterior + monto_real
+    nuevo_saldo = max(monto_original - nuevo_abonado, 0.0)
+    nuevo_estado = "saldada" if nuevo_saldo <= 0 else "pendiente"
+
+    payload_abono = json_safe_payload({
+        "cuenta_id": cuenta_id,
+        "cliente_id": cliente_id,
+        "cliente_nombre": cliente_nombre,
+        "monto": monto_real,
+        "metodo_pago": metodo_pago,
+        "fecha": ahora_str(),
+        "usuario": nombre_usuario_actual(),
+        "caja_id": json_safe_value(caja_activa.get("id")),
+        "observacion": observacion,
+    })
+
+    # Guardar abono. Si alguna columna no existe, intentar con payload mínimo.
+    try:
+        supabase.table("abonos_credito").insert(payload_abono).execute()
+    except Exception:
+        try:
+            supabase.table("abonos_credito").insert(json_safe_payload({
+                "cuenta_id": cuenta_id,
+                "cliente_id": cliente_id,
+                "cliente_nombre": cliente_nombre,
+                "monto": monto_real,
+                "metodo_pago": metodo_pago,
+                "usuario": nombre_usuario_actual(),
+            })).execute()
+        except Exception as e:
+            st.error(f"No se pudo guardar el abono: {e}")
+            return False
+
+    # Actualizar cuenta por cobrar
+    ok_cuenta = actualizar("cuentas_por_cobrar", cuenta_id, {
+        "monto_abonado": float(nuevo_abonado),
+        "saldo_pendiente": float(nuevo_saldo),
+        "estado": nuevo_estado,
+    })
+
+    # Registrar entrada para caja
+    mov_payload = json_safe_payload({
+        "fecha": datetime.now().isoformat(),
+        "dia_operativo": str(date.today()),
+        "tipo_movimiento": "entrada",
+        "origen": "abono_credito",
+        "referencia_id": str(cuenta_id),
+        "metodo_pago": metodo_pago,
+        "monto": float(monto_real),
+        "descripcion": f"Abono crédito {cliente_nombre}",
+        "usuario": nombre_usuario_actual(),
+        "caja_id": json_safe_value(caja_activa.get("id")),
+    })
+    try:
+        supabase.table("movimientos_caja").insert(mov_payload).execute()
+    except Exception:
+        pass
+
+    # Registrar en movimientos_dinero para Dinero Real, si existe la tabla/columnas
+    cuenta_dinero = cuenta_por_metodo_pago(metodo_pago) if "cuenta_por_metodo_pago" in globals() else ("Efectivo negocio" if metodo_pago == "efectivo" else "Banco")
+    try:
+        registrar_movimiento_dinero(
+            "entrada",
+            float(monto_real),
+            f"Abono crédito {cliente_nombre}",
+            metodo_pago=metodo_pago,
+            cuenta=cuenta_dinero,
+            categoria="abono_credito",
+        )
+    except Exception:
+        pass
+
+    st.success(f"Abono registrado: RD$ {monto_real:,.2f}. Saldo pendiente: RD$ {nuevo_saldo:,.2f}.")
+    return True
+
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -2808,7 +2904,7 @@ if es_admin() or tiene_permiso("puede_configurar"):
 else:
     menu_opciones = []
     if tiene_permiso("puede_vender"):
-        menu_opciones += ["Caja", "POS", "Ventas"]
+        menu_opciones += ["Caja", "POS", "Ventas", "Créditos"]
     if tiene_permiso("puede_ver_reportes"):
         menu_opciones += ["Clientes", "Créditos"]
     menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
@@ -6054,32 +6150,87 @@ elif menu == "Proveedores":
 # =========================================================
 elif menu == "Créditos":
     st.title("💳 Créditos y cuentas por cobrar")
+
+    puede_abonar_credito = es_admin() or tiene_permiso("puede_vender") or tiene_permiso("puede_ver_reportes")
+    puede_editar_credito = es_admin() or tiene_permiso("puede_editar_todo")
+
     cxc = DATA.get("cuentas_por_cobrar", pd.DataFrame()).copy()
-    if not cxc.empty:
-        st.dataframe(cxc, use_container_width=True)
-        descargar_archivos(cxc, "cuentas_por_cobrar")
-        cuentas = cxc[cxc["estado"].astype(str).str.lower() != "saldada"] if "estado" in cxc.columns else cxc
-        if not cuentas.empty:
-            st.subheader("Registrar abono")
-            opciones = [f"{row['id']} | {row.get('cliente_nombre','')} | Saldo {limpiar_numero(row.get('saldo_pendiente')) or 0:,.2f}" for _, row in cuentas.iterrows()]
-            elegido = st.selectbox("Cuenta", opciones, key="abono_cuenta")
-            cuenta_id = elegido.split("|")[0].strip()
-            monto = st.number_input("Monto abonado", min_value=0.0, step=1.0, key="abono_monto")
-            metodo = st.selectbox("Método de pago", ["efectivo", "transferencia", "tarjeta"], key="abono_metodo")
-            if st.button("Guardar abono", key="btn_guardar_abono"):
-                fila = cuentas[cuentas["id"].astype(str) == cuenta_id].iloc[0]
-                abonado = (limpiar_numero(fila.get("monto_abonado")) or 0) + float(monto)
-                saldo = max((limpiar_numero(fila.get("monto_original")) or 0) - abonado, 0.0)
-                insertar("abonos_credito", {"cuenta_id": int(fila["id"]), "cliente_id": fila.get("cliente_id"), "cliente_nombre": fila.get("cliente_nombre"), "monto": float(monto), "metodo_pago": metodo, "usuario": nombre_usuario_actual()})
-                actualizar("cuentas_por_cobrar", fila["id"], {"monto_abonado": abonado, "saldo_pendiente": saldo, "estado": "saldada" if saldo <= 0 else "pendiente"})
-                try:
-                    supabase.table("movimientos_caja").insert({"fecha": datetime.now().isoformat(), "dia_operativo": ahora_str(), "tipo_movimiento": "entrada", "origen": "abono_credito", "referencia_id": str(fila["id"]), "metodo_pago": metodo, "monto": float(monto), "descripcion": f"Abono crédito {fila['cliente_nombre']}", "usuario": nombre_usuario_actual()}).execute()
-                except Exception:
-                    pass
-                st.success("Abono guardado.")
-                st.rerun()
-    else:
+    if cxc.empty:
         st.info("No hay cuentas por cobrar registradas.")
+    else:
+        # Vista limpia
+        st.subheader("📋 Cuentas por cobrar")
+        buscar_credito = st.text_input("Buscar cliente / venta / estado", key="buscar_creditos")
+        vista_cxc = buscar_df(cxc, buscar_credito)
+        columnas = [c for c in ["id", "fecha", "cliente_nombre", "monto_original", "monto_abonado", "saldo_pendiente", "estado", "venta_id"] if c in vista_cxc.columns]
+        st.dataframe(vista_cxc[columnas] if columnas else vista_cxc, use_container_width=True)
+        if not es_cajera():
+            descargar_archivos(vista_cxc[columnas] if columnas else vista_cxc, "cuentas_por_cobrar")
+
+        cuentas = cxc[cxc["estado"].astype(str).str.lower() != "saldada"] if "estado" in cxc.columns else cxc
+
+        if puede_abonar_credito and not cuentas.empty:
+            st.markdown("---")
+            st.subheader("💵 Registrar abono / saldar crédito")
+            st.caption("La cajera solo registra dinero recibido. No edita ni elimina la deuda.")
+
+            opciones = []
+            mapa = {}
+            for _, row in cuentas.iterrows():
+                saldo = float(limpiar_numero(row.get("saldo_pendiente")) or 0)
+                monto_original = float(limpiar_numero(row.get("monto_original")) or limpiar_numero(row.get("total")) or 0)
+                abonado = float(limpiar_numero(row.get("monto_abonado")) or 0)
+                if saldo <= 0 and monto_original > 0:
+                    saldo = max(monto_original - abonado, 0)
+                etiqueta = f"{row.get('id')} | {row.get('cliente_nombre','Cliente')} | Saldo RD$ {saldo:,.2f}"
+                opciones.append(etiqueta)
+                mapa[etiqueta] = row
+
+            elegido = st.selectbox("Cuenta / cliente", opciones, key="abono_cuenta")
+            fila = mapa[elegido]
+            saldo_actual = float(limpiar_numero(fila.get("saldo_pendiente")) or 0)
+            monto_original = float(limpiar_numero(fila.get("monto_original")) or limpiar_numero(fila.get("total")) or 0)
+            abonado_actual = float(limpiar_numero(fila.get("monto_abonado")) or 0)
+            if saldo_actual <= 0 and monto_original > 0:
+                saldo_actual = max(monto_original - abonado_actual, 0)
+
+            ca1, ca2, ca3 = st.columns(3)
+            ca1.metric("Monto original", f"RD$ {monto_original:,.2f}")
+            ca2.metric("Abonado", f"RD$ {abonado_actual:,.2f}")
+            ca3.metric("Saldo pendiente", f"RD$ {saldo_actual:,.2f}")
+
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                monto = st.number_input("Monto abonado", min_value=0.0, step=1.0, max_value=float(saldo_actual) if saldo_actual > 0 else None, key="abono_monto")
+            with m2:
+                metodo = st.selectbox("Método de pago", ["efectivo", "transferencia", "tarjeta"], key="abono_metodo")
+            with m3:
+                saldar = st.checkbox("Saldar completo", key="abono_saldar_completo")
+                if saldar:
+                    monto = float(saldo_actual)
+
+            observacion = st.text_input("Observación opcional", key="abono_obs")
+
+            caja_activa = obtener_caja_abierta()
+            if caja_activa is None:
+                st.warning("Para registrar un abono debe haber una caja abierta.")
+            else:
+                st.info(f"Este abono entrará a la caja abierta de {nombre_usuario_actual()} por método: {metodo}.")
+
+            if st.button("💾 Guardar abono", key="btn_guardar_abono"):
+                if caja_activa is None:
+                    st.error("Abre caja antes de registrar abonos.")
+                elif monto <= 0:
+                    st.error("El monto debe ser mayor que cero.")
+                else:
+                    if registrar_abono_credito_seguro(fila.to_dict(), monto, metodo, observacion):
+                        st.rerun()
+
+        if puede_editar_credito:
+            st.markdown("---")
+            with st.expander("🛠️ Corrección administrativa de créditos", expanded=False):
+                st.warning("Solo administración: usa esto para corregir errores, no para registrar pagos normales.")
+                render_crud_generico("cuentas_por_cobrar", cxc, "Editar / eliminar cuentas por cobrar")
 
 # =========================================================
 # USUARIOS
