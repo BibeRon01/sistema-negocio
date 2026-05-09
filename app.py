@@ -463,23 +463,126 @@ def detectar_formato_productos_sin_encabezado(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def preparar_import_productos(df: pd.DataFrame) -> pd.DataFrame:
-    """Normaliza y prepara un archivo de productos/inventario para importación segura."""
-    if df is None or df.empty:
-        return pd.DataFrame()
-    out = normalizar_columnas(df)
-    out = mapear_columnas(out)
-    out = detectar_formato_productos_sin_encabezado(out)
-    out = mapear_columnas(out)
 
-    if "codigo" in out.columns:
-        out["codigo"] = out["codigo"].apply(limpiar_codigo_import)
-    if "nombre" in out.columns:
-        out["nombre"] = out["nombre"].astype(str).str.strip()
-    for c in ["costo", "precio", "precio_descuento", "precio_especial", "cantidad"]:
-        if c in out.columns:
-            out[c] = out[c].apply(lambda x: limpiar_numero(x) if limpiar_numero(x) is not None else 0)
-    return out
+def preparar_import_productos(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Importador inteligente de productos.
+    Lee por encabezados, acepta sinónimos y evita errores por columnas duplicadas.
+    Si el archivo viene sin encabezado, intenta usar el formato exportado del sistema viejo.
+    """
+    if df_raw is None or df_raw.empty:
+        return pd.DataFrame()
+
+    df = df_raw.copy()
+    df = df.dropna(axis=1, how="all")
+    df = df.loc[:, ~pd.Index(df.columns).duplicated()]
+
+    def _norm_col(c):
+        return normalizar_texto(str(c)).replace(".", "").replace("_", " ").strip()
+
+    cols_norm = {_norm_col(c): c for c in df.columns}
+
+    def _buscar_col(*nombres):
+        opciones = [normalizar_texto(n).replace(".", "").replace("_", " ").strip() for n in nombres]
+        for op in opciones:
+            if op in cols_norm:
+                return cols_norm[op]
+        for norm, original in cols_norm.items():
+            for op in opciones:
+                if op and (op in norm or norm in op):
+                    return original
+        return None
+
+    encabezados_utiles = any(
+        _buscar_col(*grupo) is not None for grupo in [
+            ("nombre", "producto", "descripcion", "descripción"),
+            ("stock", "cantidad", "existencia"),
+            ("costo", "costo unitario", "precio compra"),
+            ("precio v", "precio venta", "precio de venta", "precio"),
+            ("codigo", "código", "codigo barra", "barcode", "sku"),
+        ]
+    )
+
+    if not encabezados_utiles:
+        temp = df.copy()
+        temp = temp.loc[:, ~pd.Index(temp.columns).duplicated()]
+        out = pd.DataFrame()
+        out["codigo"] = temp.iloc[:, 9] if temp.shape[1] > 9 else ""
+        out["nombre"] = temp.iloc[:, 1] if temp.shape[1] > 1 else ""
+        out["categoria"] = ""
+        out["costo"] = temp.iloc[:, 2] if temp.shape[1] > 2 else 0
+        out["precio_venta"] = temp.iloc[:, 3] if temp.shape[1] > 3 else 0
+        stock_a = temp.iloc[:, 4] if temp.shape[1] > 4 else pd.Series([0] * len(temp))
+        stock_b = temp.iloc[:, 8] if temp.shape[1] > 8 else pd.Series([0] * len(temp))
+        sa = pd.to_numeric(stock_a.apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0)
+        sb = pd.to_numeric(stock_b.apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0)
+        out["stock"] = pd.concat([sa, sb], axis=1).max(axis=1)
+        out["precio_especial"] = 0
+        out["activo"] = True
+    else:
+        col_codigo = _buscar_col("codigo", "código", "codigo barra", "código barra", "barcode", "sku")
+        col_nombre = _buscar_col("nombre", "producto", "descripcion", "descripción")
+        col_categoria = _buscar_col("categoria", "categoría", "familia", "grupo")
+        col_stock = _buscar_col("stock", "cantidad", "existencia", "inventario", "inventario actual")
+        col_costo = _buscar_col("costo", "costo unitario", "precio compra", "precio costo")
+        col_precio = _buscar_col("precio v", "precio venta", "precio de venta", "precio")
+        col_especial = _buscar_col("precio especial", "precio descuento", "precio oferta", "oferta")
+        col_activo = _buscar_col("activo", "estado", "estatus")
+
+        out = pd.DataFrame(index=df.index)
+        out["codigo"] = df[col_codigo] if col_codigo in df.columns else ""
+        out["nombre"] = df[col_nombre] if col_nombre in df.columns else ""
+        out["categoria"] = df[col_categoria] if col_categoria in df.columns else ""
+        out["stock"] = df[col_stock] if col_stock in df.columns else 0
+        out["costo"] = df[col_costo] if col_costo in df.columns else 0
+        out["precio_venta"] = df[col_precio] if col_precio in df.columns else 0
+        out["precio_especial"] = df[col_especial] if col_especial in df.columns else 0
+        out["activo"] = df[col_activo] if col_activo in df.columns else True
+
+    out = out.loc[:, ~pd.Index(out.columns).duplicated()]
+
+    def _num_safe(x):
+        try:
+            v = limpiar_numero(x)
+            return float(v) if v is not None else 0.0
+        except Exception:
+            return 0.0
+
+    for c in ["stock", "costo", "precio_venta", "precio_especial"]:
+        if c not in out.columns:
+            out[c] = 0.0
+        serie = out[c].iloc[:, 0] if isinstance(out[c], pd.DataFrame) else out[c]
+        out[c] = serie.apply(_num_safe)
+
+    def _codigo_safe(x):
+        try:
+            if pd.isna(x):
+                return ""
+        except Exception:
+            pass
+        txt = str(x).strip()
+        if txt.endswith(".0"):
+            txt = txt[:-2]
+        return txt
+
+    out["codigo"] = out["codigo"].apply(_codigo_safe) if "codigo" in out.columns else ""
+    out["nombre"] = out["nombre"].fillna("").astype(str).str.strip()
+    out["categoria"] = out["categoria"].fillna("").astype(str).str.strip() if "categoria" in out.columns else ""
+
+    def _activo_safe(x):
+        t = normalizar_texto(x)
+        if t in ["false", "falso", "0", "no", "inactivo"]:
+            return False
+        return True
+
+    out["activo"] = out["activo"].apply(_activo_safe) if "activo" in out.columns else True
+    out = out[out["nombre"].astype(str).str.strip() != ""].copy()
+
+    out["total_costo_inventario"] = out["stock"] * out["costo"]
+    out["total_valor_venta"] = out["stock"] * out["precio_venta"]
+    out["ganancia_potencial"] = out["total_valor_venta"] - out["total_costo_inventario"]
+
+    return out.reset_index(drop=True)
 
 def get_producto_por_codigo(codigo: str):
     codigo_n = normalizar_texto(codigo)
