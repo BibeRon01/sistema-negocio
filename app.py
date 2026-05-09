@@ -21,6 +21,19 @@ st.set_page_config(page_title="Sistema de Negocio PRO", layout="wide")
 # =========================================================
 # SECRETS / CONEXIÓN
 # =========================================================
+
+def limpiar_cache_datos():
+    """Limpia caché de Streamlit si existe, sin romper si no hay caché."""
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+
+
 def obtener_secreto(nombre: str, default: str = "") -> str:
     try:
         return st.secrets.get(nombre, default)
