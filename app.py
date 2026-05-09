@@ -22,6 +22,31 @@ st.set_page_config(page_title="Sistema de Negocio PRO", layout="wide")
 # SECRETS / CONEXIÓN
 # =========================================================
 
+
+
+def normalizar_item_carrito(item: dict) -> dict:
+    """Asegura que cada item del carrito tenga producto y nombre."""
+    if not isinstance(item, dict):
+        return {}
+    nom = item.get("producto") or item.get("nombre") or item.get("descripcion") or ""
+    item["producto"] = nom
+    item["nombre"] = nom
+    return item
+
+
+def nombre_item(item):
+    """Devuelve el nombre del producto sin romper si el diccionario usa nombre o producto."""
+    try:
+        if isinstance(item, dict):
+            return nombre_item(item) or item.get("nombre") or item.get("descripcion") or ""
+        return nombre_item(item) if "producto" in item else item.get("nombre", "")
+    except Exception:
+        try:
+            return item.get("nombre", "")
+        except Exception:
+            return ""
+
+
 def limpiar_cache_datos():
     """Limpia caché de Streamlit si existe, sin romper si no hay caché."""
     try:
@@ -1954,7 +1979,7 @@ def construir_html_impresion(post_venta: dict, tipo: str = "factura") -> str:
     for item in items:
         filas += f"""
         <tr>
-            <td>{html_escape(item.get('producto'))}</td>
+            <td>{html_escape(nombre_item(item))}</td>
             <td style='text-align:center'>{float(item.get('cantidad', 0)):.0f}</td>
             <td style='text-align:right'>RD$ {float(item.get('precio_unitario', 0)):,.2f}</td>
             <td style='text-align:right'>RD$ {float(item.get('total_linea', 0)):,.2f}</td>
@@ -5337,7 +5362,7 @@ elif menu == "POS":
             for i, item in enumerate(list(carrito)):
                 col_q1, col_q2, col_q3, col_q4 = st.columns([4, 2, 2, 1])
                 with col_q1:
-                    st.write(item["producto"])
+                    st.write(nombre_item(item))
                 with col_q2:
                     st.write(f"Cant. {float(item['cantidad']):,.0f}")
                 with col_q3:
@@ -5446,7 +5471,7 @@ elif menu == "POS":
                                 "venta_id": str(venta_id),
 "producto_id": str(prod["id"]),
                                 "codigo": item["codigo"],
-                                "producto": item["producto"],
+                                "producto": nombre_item(item),
                                 "cantidad": float(item["cantidad"]),
                                 "precio_unitario": float(item["precio_unitario"]),
                                 "costo_unitario": float(costo_unit),
