@@ -1853,39 +1853,86 @@ def rango_periodo(tipo_periodo: str):
 
 
 
-def calcular_total_dinero_inventario() -> float:
-    """
-    Calcula el valor total del inventario:
-    existencia actual x costo.
-    Usa inventario_actual como fuente principal.
-    """
-    try:
-        inv = DATA.get("inventario_actual", pd.DataFrame()).copy()
-        if inv.empty:
-            return 0.0
 
-        col_exist = None
-        for c in ["existencia_sistema", "cantidad", "stock", "existencias"]:
-            if c in inv.columns:
-                col_exist = c
+def calcular_valores_inventario_pro():
+    """
+    Calcula inventario a costo, inventario a venta y ganancia potencial.
+    Fuente principal: inventario_actual.
+    Respaldo: productos.
+    """
+    fuentes = []
+    try:
+        fuentes.append(("inventario_actual", leer_actualizado("inventario_actual")))
+    except Exception:
+        fuentes.append(("inventario_actual", DATA.get("inventario_actual", pd.DataFrame()).copy()))
+    try:
+        fuentes.append(("productos", leer_actualizado("productos")))
+    except Exception:
+        fuentes.append(("productos", DATA.get("productos", pd.DataFrame()).copy()))
+
+    for nombre_fuente, df in fuentes:
+        if df is None or df.empty:
+            continue
+
+        col_stock = None
+        for c in ["existencia_sistema", "stock", "cantidad", "existencia", "existencias"]:
+            if c in df.columns:
+                col_stock = c
                 break
 
         col_costo = None
         for c in ["costo", "costo_unitario", "costo_promedio", "precio_compra", "ultimo_costo"]:
-            if c in inv.columns:
+            if c in df.columns:
                 col_costo = c
                 break
 
-        if not col_exist or not col_costo:
-            return 0.0
+        col_precio = None
+        for c in ["precio", "precio_venta", "precio_normal", "precio_publico", "precio_v", "precioespecial", "precio_especial"]:
+            if c in df.columns:
+                col_precio = c
+                break
 
-        inv[col_exist] = pd.to_numeric(inv[col_exist], errors="coerce").fillna(0)
-        inv[col_costo] = pd.to_numeric(inv[col_costo], errors="coerce").fillna(0)
+        if not col_stock:
+            continue
 
-        return float((inv[col_exist] * inv[col_costo]).sum())
+        temp = df.copy()
+        temp["_stock"] = pd.to_numeric(temp[col_stock].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0)
+        temp["_costo"] = pd.to_numeric(temp[col_costo].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0) if col_costo else 0
+        temp["_precio"] = pd.to_numeric(temp[col_precio].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0) if col_precio else 0
+
+        # No sumar inventario negativo al valor de inventario
+        temp["_stock_valor"] = temp["_stock"].clip(lower=0)
+
+        inv_costo = float((temp["_stock_valor"] * temp["_costo"]).sum())
+        inv_venta = float((temp["_stock_valor"] * temp["_precio"]).sum())
+        ganancia_potencial = inv_venta - inv_costo
+
+        # Usar la primera fuente que tenga valor real
+        if inv_costo != 0 or inv_venta != 0:
+            return {
+                "fuente": nombre_fuente,
+                "inventario_costo": inv_costo,
+                "inventario_venta": inv_venta,
+                "ganancia_potencial_inventario": ganancia_potencial,
+            }
+
+    return {
+        "fuente": "",
+        "inventario_costo": 0.0,
+        "inventario_venta": 0.0,
+        "ganancia_potencial_inventario": 0.0,
+    }
+
+
+def calcular_total_dinero_inventario() -> float:
+    """
+    Calcula el valor total del inventario a costo.
+    Usa inventario_actual y, si está vacío o no tiene valores, usa productos.
+    """
+    try:
+        return float(calcular_valores_inventario_pro().get("inventario_costo", 0.0))
     except Exception:
         return 0.0
-
 
 def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0) -> dict[str, float]:
     ventas_df = obtener_ventas_periodo_actualizadas(desde, hasta)
@@ -2586,16 +2633,11 @@ def resumen_dinero_real_pro() -> dict:
         credito = float(hist[hist["cuenta"].astype(str).apply(normalizar_texto) == "credito pendiente"]["neto"].sum())
         total = efectivo + banco
 
-    inventario = leer_actualizado("inventario")
-    inv_costo = 0.0
-    inv_venta = 0.0
-    if not inventario.empty:
-        for _, r in inventario.iterrows():
-            stock = float(limpiar_numero(r.get("stock")) or limpiar_numero(r.get("existencia")) or limpiar_numero(r.get("cantidad")) or 0)
-            costo = float(limpiar_numero(r.get("costo_unitario")) or limpiar_numero(r.get("costo")) or limpiar_numero(r.get("precio_compra")) or 0)
-            precio = float(limpiar_numero(r.get("precio_venta")) or limpiar_numero(r.get("precio")) or 0)
-            inv_costo += max(stock, 0) * costo
-            inv_venta += max(stock, 0) * precio
+    # Inventario financiero: usar inventario_actual y, si no hay valores, productos.
+    inv_vals = calcular_valores_inventario_pro() if "calcular_valores_inventario_pro" in globals() else {}
+    inv_costo = float(inv_vals.get("inventario_costo", 0.0) or 0.0)
+    inv_venta = float(inv_vals.get("inventario_venta", 0.0) or 0.0)
+    fuente_inventario = inv_vals.get("fuente", "")
 
     # utilidad aproximada: dinero disponible + inventario a costo - saldos/aportes iniciales.
     cuentas = leer_actualizado("cuentas_dinero")
@@ -2622,6 +2664,7 @@ def resumen_dinero_real_pro() -> dict:
         "inventario_costo": inv_costo,
         "inventario_venta": inv_venta,
         "ganancia_potencial_inventario": inv_venta - inv_costo,
+        "fuente_inventario": fuente_inventario,
         "saldo_inicial": saldo_inicial,
         "ganancia_estimada": ganancia_estim,
     }
@@ -5992,6 +6035,8 @@ elif menu == "Dinero Real":
     i2.metric("🏷️ Inventario a venta", f"RD$ {resumen['inventario_venta']:,.2f}")
     i3.metric("📈 Ganancia potencial inventario", f"RD$ {resumen['ganancia_potencial_inventario']:,.2f}")
     i4.metric("🧾 Ganancia estimada total", f"RD$ {resumen['ganancia_estimada']:,.2f}")
+    if resumen.get("fuente_inventario"):
+        st.caption(f"Inventario calculado desde: {resumen.get('fuente_inventario')}")
 
     st.info(
         "Lectura rápida: Total disponible es efectivo + banco. "
