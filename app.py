@@ -2485,6 +2485,45 @@ def construir_historial_dinero_real() -> pd.DataFrame:
                 detalle=f"Caja: {r.get('caja_id', '')}",
             )
 
+
+    # 2B) Abonos de crédito
+    # Regla: el abono entra al método elegido (efectivo/banco) y baja Crédito pendiente.
+    abonos = leer_actualizado("abonos_credito")
+    if not abonos.empty and "monto" in abonos.columns:
+        for _, r in abonos.iterrows():
+            monto = float(limpiar_numero(r.get("monto")) or 0)
+            if monto <= 0:
+                continue
+            metodo = r.get("metodo_pago") or r.get("metodo") or ""
+            cuenta_entrada = _cuenta_por_metodo_pro(metodo)
+            fecha_abono = r.get("fecha") or r.get("created_at") or ""
+
+            _agregar_movimiento(
+                filas,
+                fecha_abono,
+                "entrada",
+                "Abono crédito",
+                f"Abono crédito {r.get('cliente_nombre', '')}".strip(),
+                cuenta_entrada,
+                entrada=monto,
+                metodo_pago=metodo,
+                referencia=r.get("cuenta_id", ""),
+                detalle="Dinero recibido por cuenta por cobrar",
+            )
+
+            _agregar_movimiento(
+                filas,
+                fecha_abono,
+                "salida",
+                "Abono crédito",
+                f"Disminuye crédito pendiente {r.get('cliente_nombre', '')}".strip(),
+                "Crédito pendiente",
+                salida=monto,
+                metodo_pago=metodo,
+                referencia=r.get("cuenta_id", ""),
+                detalle="Abono aplicado a crédito pendiente",
+            )
+
     # 3) Compras
     compras = leer_actualizado("compras")
     if not compras.empty:
@@ -2656,19 +2695,22 @@ def resumen_dinero_real_pro() -> dict:
     inv_venta = float(inv_vals.get("inventario_venta", 0.0) or 0.0)
     fuente_inventario = inv_vals.get("fuente", "")
 
-    # utilidad aproximada: dinero disponible + inventario a costo - saldos/aportes iniciales.
+    # Capital base configurado por la administración.
     cuentas = leer_actualizado("cuentas_dinero")
     saldo_inicial = 0.0
     if not cuentas.empty:
         saldo_inicial = sum(float(limpiar_numero(r.get("saldo_inicial")) or 0) for _, r in cuentas.iterrows())
 
-    # Lectura financiera clara:
-    # - Dinero de inversión: parte del dinero disponible que se considera capital/base del negocio.
-    # - Dinero de ganancia: excedente disponible por encima del saldo inicial/capital.
-    # Nota: el inventario a costo se muestra aparte como inversión en mercancía.
+    # Lectura financiera correcta:
+    # - Inventario a costo NO es ganancia; es mercancía/inversión.
+    # - Inventario a venta NO es dinero disponible; es una proyección si todo se vendiera.
+    # - Ganancia disponible = dinero líquido por encima del capital base.
     dinero_inversion = min(max(total, 0), max(saldo_inicial, 0))
     dinero_ganancia = max(total - saldo_inicial, 0)
-    ganancia_estim = (total + inv_costo) - saldo_inicial
+
+    # Antes se sumaba total + inventario a costo, eso inflaba la "ganancia".
+    # Ahora la ganancia estimada líquida se mantiene como dinero disponible por encima del capital base.
+    ganancia_estim = dinero_ganancia
 
     return {
         "historial": hist,
@@ -6051,7 +6093,7 @@ elif menu == "Dinero Real":
     i1.metric("📦 Inventario a costo", f"RD$ {resumen['inventario_costo']:,.2f}")
     i2.metric("🏷️ Inventario a venta", f"RD$ {resumen['inventario_venta']:,.2f}")
     i3.metric("📈 Ganancia potencial inventario", f"RD$ {resumen['ganancia_potencial_inventario']:,.2f}")
-    i4.metric("🧾 Ganancia estimada total", f"RD$ {resumen['ganancia_estimada']:,.2f}")
+    i4.metric("🧾 Ganancia líquida estimada", f"RD$ {resumen['ganancia_estimada']:,.2f}")
     if resumen.get("fuente_inventario"):
         st.caption(f"Inventario calculado desde: {resumen.get('fuente_inventario')}")
     with st.expander("🔎 Revisar columnas usadas para inventario", expanded=False):
@@ -6065,9 +6107,9 @@ elif menu == "Dinero Real":
 
     st.info(
         "Lectura rápida: Total disponible es efectivo + banco. "
-        "Dinero de inversión/capital es la parte del dinero disponible que corresponde al capital base configurado. "
-        "Dinero de ganancia disponible es el excedente por encima de ese capital. "
-        "Inventario a costo se muestra aparte porque es inversión en mercancía, no dinero líquido."
+        "El crédito pendiente sube cuando vendes fiado y baja cuando registras un abono. "
+        "Inventario a costo es mercancía comprada; inventario a venta es una proyección si se vende todo. "
+        "La ganancia líquida estimada NO suma el inventario, para no inflar la ganancia."
     )
 
     st.markdown("---")
