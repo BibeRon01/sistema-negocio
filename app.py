@@ -36,6 +36,17 @@ def normalizar_item_carrito(item: dict) -> dict:
 
 
 
+
+def recalcular_item_carrito(item: dict) -> dict:
+    item = normalizar_item_carrito(dict(item))
+    cantidad = float(limpiar_numero(item.get("cantidad")) or 0)
+    precio = float(limpiar_numero(item.get("precio_unitario")) or limpiar_numero(item.get("precio")) or 0)
+    item["cantidad"] = cantidad
+    item["precio_unitario"] = precio
+    item["total_linea"] = cantidad * precio
+    return item
+
+
 def carrito_limpio() -> list:
     """Devuelve el carrito normalizado para mostrar/facturar."""
     try:
@@ -5406,24 +5417,48 @@ elif menu == "POS":
             st.markdown("---")
 
         if carrito:
-            df_carrito = pd.DataFrame(carrito)
-            st.data_editor(df_carrito, use_container_width=True, disabled=["producto_id", "codigo", "producto"], key="editor_carrito")
+            st.caption("Si te equivocas antes de cobrar, cambia la cantidad aquí mismo o elimina la línea.")
+            nuevo_carrito = []
+            eliminar_idx = None
 
-            st.caption("Si te equivocas antes de cobrar, quita el producto aquí mismo.")
             for i, item in enumerate(list(carrito)):
-                col_q1, col_q2, col_q3, col_q4 = st.columns([4, 2, 2, 1])
-                with col_q1:
-                    st.write(nombre_item(item))
-                with col_q2:
-                    st.write(f"Cant. {float(item['cantidad']):,.0f}")
-                with col_q3:
-                    st.write(f"RD$ {float(item['total_linea']):,.2f}")
-                with col_q4:
-                    if st.button("❌", key=f"quitar_pos_{i}"):
-                        carrito.pop(i)
-                        st.rerun()
+                item = recalcular_item_carrito(item)
+                producto_nombre = nombre_item(item)
+                precio_unitario = float(limpiar_numero(item.get("precio_unitario")) or 0)
 
-            subtotal = float(df_carrito["total_linea"].sum())
+                col_q1, col_q2, col_q3, col_q4 = st.columns([5, 2, 2, 1])
+                with col_q1:
+                    st.markdown(f"**{producto_nombre}**")
+                with col_q2:
+                    nueva_cant = st.number_input(
+                        "Cantidad",
+                        min_value=0.0,
+                        step=1.0,
+                        value=float(item.get("cantidad", 0)),
+                        key=f"pos_carrito_cant_{i}_{item.get('producto_id','')}_{item.get('codigo','')}",
+                        label_visibility="collapsed",
+                    )
+                item["cantidad"] = float(nueva_cant)
+                item["total_linea"] = float(nueva_cant) * precio_unitario
+
+                with col_q3:
+                    st.markdown(f"**RD$ {item['total_linea']:,.2f}**")
+                with col_q4:
+                    if st.button("❌", key=f"quitar_pos_{i}_{item.get('producto_id','')}_{item.get('codigo','')}"):
+                        eliminar_idx = i
+
+                if item["cantidad"] > 0:
+                    nuevo_carrito.append(item)
+
+            if eliminar_idx is not None:
+                nuevo_carrito = [x for idx_x, x in enumerate(nuevo_carrito) if idx_x != eliminar_idx]
+                st.session_state["pos_carrito"] = nuevo_carrito
+                st.rerun()
+
+            st.session_state["pos_carrito"] = nuevo_carrito
+            carrito = st.session_state["pos_carrito"]
+            subtotal = float(sum(float(limpiar_numero(x.get("total_linea")) or 0) for x in carrito))
+            st.markdown(f"### Total carrito: RD$ {subtotal:,.2f}")
 
             descuento_global = st.number_input("Descuento global", min_value=0.0, step=1.0, key="pos_desc_global")
             cliente_df = DATA.get("clientes", pd.DataFrame()).copy()
