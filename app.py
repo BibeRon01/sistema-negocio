@@ -322,7 +322,7 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("💾 Guardar cambios", key=f"crud_save_{nombre_tabla}_{fila_id}"):
+            if st.button("💾 Guardar datos generales", key=f"crud_save_{nombre_tabla}_{fila_id}"):
                 if actualizar(nombre_tabla, fila_id, nuevos_datos):
                     st.success("Registro actualizado.")
                     st.rerun()
@@ -3555,56 +3555,60 @@ elif menu == "Ventas":
                     productos_df = DATA["productos"].copy()
                     productos_lista = productos_df["nombre"].astype(str).tolist() if not productos_df.empty and "nombre" in productos_df.columns else []
 
-                    st.write("### Detalle actual de la venta")
+                    st.write("### 🧾 Editar productos de la venta")
+                    st.caption("Aquí puedes cambiar cantidad, quitar productos o agregar uno nuevo antes de guardar la edición.")
                     nuevos_items = []
 
                     for i, item in detalle_df.iterrows():
-                        st.markdown(f"**Línea {i + 1}**")
-                        c1, c2, c3, c4, c5, c6 = st.columns([3, 1, 1, 1, 1, 1])
+                        producto_actual = str(item.get("producto") or item.get("nombre") or "")
+                        precio_original = float(limpiar_numero(item.get("precio_unitario") or item.get("precio")) or 0)
+                        costo_original = float(limpiar_numero(item.get("costo_unitario") or item.get("costo")) or 0)
+                        desc_original = float(limpiar_numero(item.get("descuento")) or 0)
+                        cant_original = float(limpiar_numero(item.get("cantidad")) or 0)
 
+                        c1, c2, c3, c4 = st.columns([5, 2, 2, 1])
                         with c1:
-                            producto_actual = st.text_input(
-                                f"Producto {i}",
-                                value=str(item.get("producto", "")),
-                                key=f"edit_producto_{i}"
-                            )
+                            st.markdown(f"**{producto_actual}**")
                         with c2:
                             cantidad_nueva = st.number_input(
-                                f"Cantidad {i}",
+                                "Cantidad",
                                 min_value=0.0,
                                 step=1.0,
-                                value=float(limpiar_numero(item.get("cantidad")) or 0),
-                                key=f"edit_cantidad_{i}"
+                                value=cant_original,
+                                key=f"edit_cantidad_{i}",
+                                label_visibility="collapsed",
                             )
+                        linea_total_vista = max((float(cantidad_nueva) * precio_original) - desc_original, 0)
                         with c3:
+                            st.markdown(f"**RD$ {linea_total_vista:,.2f}**")
+                        with c4:
+                            eliminar_linea = st.checkbox("Quitar", value=False, key=f"edit_eliminar_{i}")
+
+                        with st.expander(f"⚙️ Opciones avanzadas de {producto_actual}", expanded=False):
                             precio_nuevo = st.number_input(
-                                f"Precio {i}",
+                                "Precio unitario",
                                 min_value=0.0,
                                 step=1.0,
-                                value=float(limpiar_numero(item.get("precio_unitario") or item.get("precio")) or 0),
+                                value=precio_original,
                                 key=f"edit_precio_{i}"
                             )
-                        with c4:
                             costo_nuevo = st.number_input(
-                                f"Costo {i}",
+                                "Costo unitario",
                                 min_value=0.0,
                                 step=1.0,
-                                value=float(limpiar_numero(item.get("costo_unitario") or item.get("costo")) or 0),
+                                value=costo_original,
                                 key=f"edit_costo_{i}"
                             )
-                        with c5:
                             descuento_nuevo = st.number_input(
-                                f"Desc. {i}",
+                                "Descuento de esta línea",
                                 min_value=0.0,
                                 step=1.0,
-                                value=float(limpiar_numero(item.get("descuento")) or 0),
+                                value=desc_original,
                                 key=f"edit_desc_{i}"
                             )
-                        with c6:
-                            eliminar_linea = st.checkbox("❌", value=False, key=f"edit_eliminar_{i}")
 
                         if not eliminar_linea and cantidad_nueva > 0:
-                            linea_total = (cantidad_nueva * precio_nuevo) - descuento_nuevo
+                            linea_total = max((cantidad_nueva * precio_nuevo) - descuento_nuevo, 0)
                             ganancia_linea = (precio_nuevo - costo_nuevo) * cantidad_nueva - descuento_nuevo
 
                             nuevos_items.append({
@@ -3624,15 +3628,23 @@ elif menu == "Ventas":
                                 "motivo_anulacion": "",
                             })
 
+                    st.markdown("---")
                     st.write("### ➕ Agregar producto nuevo a esta venta")
                     if productos_lista:
-                        cna1, cna2, cna3 = st.columns(3)
+                        cna1, cna2, cna3, cna4 = st.columns([4, 2, 2, 1])
                         with cna1:
                             prod_nuevo_nombre = st.selectbox("Producto nuevo", [""] + productos_lista, key="venta_nuevo_producto")
                         with cna2:
-                            prod_nueva_cantidad = st.number_input("Cantidad nueva", min_value=0.0, step=1.0, value=0.0, key="venta_nueva_cantidad")
+                            prod_nueva_cantidad = st.number_input("Cantidad", min_value=0.0, step=1.0, value=0.0, key="venta_nueva_cantidad")
+                        precio_preview = 0.0
                         with cna3:
-                            agregar_nuevo = st.checkbox("Agregar a la venta", key="venta_agregar_nuevo")
+                            if prod_nuevo_nombre:
+                                prod_tmp = get_producto_por_nombre(prod_nuevo_nombre)
+                                if prod_tmp is not None:
+                                    precio_preview = float(limpiar_numero(prod_tmp.get("precio")) or 0)
+                            st.markdown(f"**RD$ {float(prod_nueva_cantidad or 0) * precio_preview:,.2f}**")
+                        with cna4:
+                            agregar_nuevo = st.checkbox("Agregar", key="venta_agregar_nuevo")
 
                         if agregar_nuevo and prod_nuevo_nombre and prod_nueva_cantidad > 0:
                             prod_row = get_producto_por_nombre(prod_nuevo_nombre)
@@ -3658,6 +3670,9 @@ elif menu == "Ventas":
                                     "anulado": False,
                                     "motivo_anulacion": "",
                                 })
+
+                    total_preview_edit = sum(float(x.get("linea_total") or 0) for x in nuevos_items)
+                    st.markdown(f"### Total editado: RD$ {total_preview_edit:,.2f}")
 
                     st.write("### Método de pago")
                     metodo_pago_nuevo = st.selectbox(
@@ -3734,7 +3749,7 @@ elif menu == "Ventas":
 
 
         if puede_gestionar_ventas:
-            with st.expander("🛠️ Editar / eliminar ventas", expanded=False):
+            with st.expander("🛠️ Control rápido / anular ventas", expanded=False):
                 opciones = []
                 mapa_ids = {}
                 for _, row in df_show.iterrows():
@@ -3756,7 +3771,7 @@ elif menu == "Ventas":
                     obs_edit = st.text_input("Observación edición", value=limpiar_texto(venta_row.get("observacion")), key="venta_edit_obs")
                     cl1, cl2, cl3 = st.columns(3)
                     with cl1:
-                        if (es_admin() or tiene_permiso("puede_editar_ventas")) and st.button("💾 Guardar cambios", key="btn_guardar_cambios_venta"):
+                        if (es_admin() or tiene_permiso("puede_editar_ventas")) and st.button("💾 Guardar datos generales", key="btn_guardar_cambios_venta"):
                             ok = actualizar("ventas", venta_id, {
                                 "fecha": str(fecha_edit),
                                 "total": float(total_edit),
