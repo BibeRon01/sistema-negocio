@@ -3620,7 +3620,7 @@ elif menu == "Ventas":
                                 "costo_unitario": float(costo_nuevo),
                                 "descuento": float(descuento_nuevo),
                                 "recargo": float(limpiar_numero(item.get("recargo")) or 0),
-                                "linea_total": float(linea_total),
+                                "total_linea": float(linea_total),
                                 "ganancia_linea": float(ganancia_linea),
                                 "usuario": nombre_usuario_actual(),
                                 "fecha": ahora_str(),
@@ -3663,7 +3663,7 @@ elif menu == "Ventas":
                                     "costo_unitario": float(costo_nuevo),
                                     "descuento": 0.0,
                                     "recargo": 0.0,
-                                    "linea_total": float(linea_total),
+                                    "total_linea": float(linea_total),
                                     "ganancia_linea": float(ganancia_linea),
                                     "usuario": nombre_usuario_actual(),
                                     "fecha": ahora_str(),
@@ -3671,7 +3671,7 @@ elif menu == "Ventas":
                                     "motivo_anulacion": "",
                                 })
 
-                    total_preview_edit = sum(float(x.get("linea_total") or 0) for x in nuevos_items)
+                    total_preview_edit = sum(float(x.get("total_linea") or x.get("linea_total") or 0) for x in nuevos_items)
                     st.markdown(f"### Total editado: RD$ {total_preview_edit:,.2f}")
 
                     st.write("### Método de pago")
@@ -3713,7 +3713,7 @@ elif menu == "Ventas":
 
                                 prod_id = item.get("producto_id")
                                 cant_new = float(item.get("cantidad") or 0)
-                                nuevo_total += float(item.get("linea_total") or 0)
+                                nuevo_total += float(item.get("total_linea") or item.get("total_linea") or item.get("linea_total") or 0)
                                 nueva_ganancia += float(item.get("ganancia_linea") or 0)
 
                                 if prod_id:
