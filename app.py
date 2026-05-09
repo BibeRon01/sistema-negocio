@@ -480,7 +480,6 @@ def payload_producto_importado(row: dict) -> dict:
 
     return {
         "nombre": nombre,
-        "producto": nombre,
         "codigo": codigo,
         "codigo_barra": codigo,
         "categoria": categoria,
@@ -2797,7 +2796,6 @@ elif menu == "Productos":
                                 "codigo": codigo or existente.get("codigo"),
                                 "codigo_barra": codigo or existente.get("codigo_barra") or existente.get("codigo"),
                                 "nombre": nombre,
-                                "producto": nombre,
                                 "categoria": categoria,
                                 "costo": costo,
                                 "costo_unitario": costo,
@@ -2823,7 +2821,6 @@ elif menu == "Productos":
                                 "codigo": codigo,
                                 "codigo_barra": codigo,
                                 "nombre": nombre,
-                                "producto": nombre,
                                 "categoria": categoria,
                                 "costo": costo,
                                 "costo_unitario": costo,
@@ -5251,8 +5248,7 @@ elif menu == "POS":
             carrito.append({
                 "producto_id": str(prod_row["id"]),
                 "codigo": limpiar_texto(prod_row.get("codigo")),
-                "producto": nombre,
-                "cantidad": float(cantidad),
+                        "cantidad": float(cantidad),
                 "precio_unitario": float(precio_base),
                 "total_linea": float(cantidad) * float(precio_base),
             })
