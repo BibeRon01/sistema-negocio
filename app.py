@@ -1857,71 +1857,88 @@ def rango_periodo(tipo_periodo: str):
 def calcular_valores_inventario_pro():
     """
     Calcula inventario a costo, inventario a venta y ganancia potencial.
-    Fuente principal: inventario_actual.
-    Respaldo: productos.
+    No se queda con la primera columna que exista; elige la columna con valores reales.
+    Fuente principal: productos. Respaldo: inventario_actual.
     """
     fuentes = []
-    try:
-        fuentes.append(("inventario_actual", leer_actualizado("inventario_actual")))
-    except Exception:
-        fuentes.append(("inventario_actual", DATA.get("inventario_actual", pd.DataFrame()).copy()))
     try:
         fuentes.append(("productos", leer_actualizado("productos")))
     except Exception:
         fuentes.append(("productos", DATA.get("productos", pd.DataFrame()).copy()))
+    try:
+        fuentes.append(("inventario_actual", leer_actualizado("inventario_actual")))
+    except Exception:
+        fuentes.append(("inventario_actual", DATA.get("inventario_actual", pd.DataFrame()).copy()))
+
+    def _serie_num(df, col):
+        try:
+            return pd.to_numeric(df[col].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0)
+        except Exception:
+            return pd.Series([0] * len(df))
+
+    def _mejor_columna(df, candidatos):
+        mejores = []
+        for c in candidatos:
+            if c in df.columns:
+                s = _serie_num(df, c)
+                suma_pos = float(s.clip(lower=0).sum())
+                cant_pos = int((s > 0).sum())
+                maximo = float(s.max()) if len(s) else 0
+                mejores.append((c, suma_pos, cant_pos, maximo))
+        if not mejores:
+            return None
+        # Elegir columna con más valores positivos y mayor suma real
+        mejores = sorted(mejores, key=lambda x: (x[2], x[1], x[3]), reverse=True)
+        col = mejores[0][0]
+        # Si la mejor está totalmente en cero, devolverla solo como último recurso
+        return col
 
     for nombre_fuente, df in fuentes:
         if df is None or df.empty:
             continue
 
-        col_stock = None
-        for c in ["existencia_sistema", "stock", "cantidad", "existencia", "existencias"]:
-            if c in df.columns:
-                col_stock = c
-                break
-
-        col_costo = None
-        for c in ["costo", "costo_unitario", "costo_promedio", "precio_compra", "ultimo_costo"]:
-            if c in df.columns:
-                col_costo = c
-                break
-
-        col_precio = None
-        for c in ["precio", "precio_venta", "precio_normal", "precio_publico", "precio_v", "precioespecial", "precio_especial"]:
-            if c in df.columns:
-                col_precio = c
-                break
+        col_stock = _mejor_columna(df, [
+            "stock", "cantidad", "existencia", "existencia_sistema", "existencias",
+            "inventario", "inventario_actual", "disponible"
+        ])
+        col_costo = _mejor_columna(df, [
+            "costo", "costo_unitario", "costo_promedio", "precio_compra",
+            "precio_costo", "ultimo_costo", "costo_producto"
+        ])
+        col_precio = _mejor_columna(df, [
+            "precio_venta", "precio", "precio_normal", "precio_publico",
+            "precio_v", "precioespecial", "precio_especial", "venta", "pvp"
+        ])
 
         if not col_stock:
             continue
 
         temp = df.copy()
-        temp["_stock"] = pd.to_numeric(temp[col_stock].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0)
-        temp["_costo"] = pd.to_numeric(temp[col_costo].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0) if col_costo else 0
-        temp["_precio"] = pd.to_numeric(temp[col_precio].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0) if col_precio else 0
+        temp["_stock"] = _serie_num(temp, col_stock)
+        temp["_costo"] = _serie_num(temp, col_costo) if col_costo else pd.Series([0] * len(temp))
+        temp["_precio"] = _serie_num(temp, col_precio) if col_precio else pd.Series([0] * len(temp))
 
-        # No sumar inventario negativo al valor de inventario
         temp["_stock_valor"] = temp["_stock"].clip(lower=0)
 
         inv_costo = float((temp["_stock_valor"] * temp["_costo"]).sum())
         inv_venta = float((temp["_stock_valor"] * temp["_precio"]).sum())
         ganancia_potencial = inv_venta - inv_costo
 
-        # Usar la primera fuente que tenga valor real
-        if inv_costo != 0 or inv_venta != 0:
+        if inv_costo > 0 or inv_venta > 0:
             return {
-                "fuente": nombre_fuente,
+                "fuente": f"{nombre_fuente} | stock={col_stock} | costo={col_costo or 'no encontrado'} | precio={col_precio or 'no encontrado'}",
                 "inventario_costo": inv_costo,
                 "inventario_venta": inv_venta,
                 "ganancia_potencial_inventario": ganancia_potencial,
             }
 
     return {
-        "fuente": "",
+        "fuente": "No se encontraron columnas con valores de stock/costo/precio",
         "inventario_costo": 0.0,
         "inventario_venta": 0.0,
         "ganancia_potencial_inventario": 0.0,
     }
+
 
 
 def calcular_total_dinero_inventario() -> float:
@@ -2663,7 +2680,7 @@ def resumen_dinero_real_pro() -> dict:
         "dinero_ganancia": dinero_ganancia,
         "inventario_costo": inv_costo,
         "inventario_venta": inv_venta,
-        "ganancia_potencial_inventario": inv_venta - inv_costo,
+        "ganancia_potencial_inventario": float(inv_vals.get("ganancia_potencial_inventario", inv_venta - inv_costo) or 0.0),
         "fuente_inventario": fuente_inventario,
         "saldo_inicial": saldo_inicial,
         "ganancia_estimada": ganancia_estim,
@@ -6037,6 +6054,14 @@ elif menu == "Dinero Real":
     i4.metric("🧾 Ganancia estimada total", f"RD$ {resumen['ganancia_estimada']:,.2f}")
     if resumen.get("fuente_inventario"):
         st.caption(f"Inventario calculado desde: {resumen.get('fuente_inventario')}")
+    with st.expander("🔎 Revisar columnas usadas para inventario", expanded=False):
+        st.write("El sistema toma la columna de stock, costo y precio que tenga valores reales. Si aquí sale cero, revisa que productos tenga cantidad/stock, costo y precio_venta/precio.")
+        try:
+            prod_debug = leer_actualizado("productos")
+            cols_debug = [c for c in ["nombre", "codigo", "stock", "cantidad", "existencia", "costo", "costo_unitario", "costo_promedio", "precio", "precio_venta", "precio_especial"] if c in prod_debug.columns]
+            st.dataframe(prod_debug[cols_debug].head(20) if cols_debug else prod_debug.head(20), use_container_width=True)
+        except Exception as e:
+            st.warning(f"No se pudo mostrar productos: {e}")
 
     st.info(
         "Lectura rápida: Total disponible es efectivo + banco. "
