@@ -1955,6 +1955,41 @@ def usuario_id_actual():
 
 
 
+
+def json_safe_value(valor):
+    """Convierte valores numpy/pandas a tipos JSON normales para Supabase."""
+    try:
+        import numpy as np
+        if isinstance(valor, (np.integer,)):
+            return int(valor)
+        if isinstance(valor, (np.floating,)):
+            return float(valor)
+        if isinstance(valor, (np.bool_,)):
+            return bool(valor)
+    except Exception:
+        pass
+
+    try:
+        if pd.isna(valor):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(valor, dict):
+        return {str(k): json_safe_value(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [json_safe_value(v) for v in valor]
+    if isinstance(valor, tuple):
+        return [json_safe_value(v) for v in valor]
+
+    return valor
+
+
+def json_safe_payload(payload: dict) -> dict:
+    """Limpia un diccionario antes de enviarlo a Supabase."""
+    return {str(k): json_safe_value(v) for k, v in payload.items()}
+
+
 def crear_cliente_rapido_pos(nombre, telefono="", documento="", direccion="", email=""):
     """Crea un cliente desde el POS usando la tabla clientes existente."""
     nombre = limpiar_texto(nombre)
@@ -3753,7 +3788,7 @@ elif menu == "Ventas":
                             for item in nuevos_items:
                                 item_insert = item.copy()
                                 item_insert["venta_id"] = str(venta_id)
-                                supabase.table("detalle_venta").insert(item_insert).execute()
+                                supabase.table("detalle_venta").insert(json_safe_payload(item_insert)).execute()
 
                                 prod_id = item.get("producto_id")
                                 cant_new = float(item.get("cantidad") or 0)
@@ -3768,12 +3803,12 @@ elif menu == "Ventas":
                                         actualizar_existencia_producto(prod_row, stock_actual - cant_new)
 
                             # 4. actualizar venta
-                            supabase.table("ventas").update({
+                            supabase.table("ventas").update(json_safe_payload({
                                 "total": float(nuevo_total),
                                 "subtotal": float(nuevo_total),
                                 "metodo_pago": metodo_pago_nuevo,
                                 "ganancia_bruta": float(nueva_ganancia),
-                            }).eq("id", str(venta_id)).execute()
+                            })).eq("id", str(venta_id)).execute()
 
                             # 5. actualizar pagos si existe registro
                             try:
@@ -5544,7 +5579,7 @@ elif menu == "POS":
                         cliente_nombre = st.selectbox("Cliente", cli_opt, key="pos_cliente_sel")
                         if cliente_nombre != "Venta general":
                             cli_row = cli_temp[cli_temp["nombre"].astype(str) == cliente_nombre].iloc[0]
-                            cliente_id = cli_row.get("id")
+                            cliente_id = json_safe_value(cli_row.get("id"))
                             st.session_state["pos_cliente_creado_id"] = None
                             st.session_state["pos_cliente_creado_nombre"] = None
                     else:
@@ -5573,7 +5608,7 @@ elif menu == "POS":
                             st.rerun()
 
                 if st.session_state.get("pos_cliente_creado_id"):
-                    cliente_id = st.session_state.get("pos_cliente_creado_id")
+                    cliente_id = json_safe_value(st.session_state.get("pos_cliente_creado_id"))
                     cliente_nombre = st.session_state.get("pos_cliente_creado_nombre") or "Venta general"
                     st.success(f"Cliente asignado: {cliente_nombre}")
             cpa1, cpa2, cpa3, cpa4 = st.columns(4)
@@ -5634,7 +5669,7 @@ elif menu == "POS":
                     st.error("Para vender a crédito debes asignar un cliente.")
                 else:
                     try:
-                        venta_resp = supabase.table("ventas").insert({
+                        venta_resp = supabase.table("ventas").insert(json_safe_payload({
                             "fecha": datetime.now().isoformat(),
                             "subtotal": float(subtotal),
                             "descuento": float(descuento_global),
@@ -5651,7 +5686,7 @@ elif menu == "POS":
 "tipo_venta": "POS",
                             "estado": "completada",
                             "anulado": False,
-                        }).execute()
+                        })).execute()
                         venta = (venta_resp.data or [{}])[0]
                         venta_id = venta.get("id")
                         for item in carrito:
@@ -5686,14 +5721,14 @@ elif menu == "POS":
                         for metodo, monto in pagos.items():
                             if monto > 0:
                                 monto_contable_pago = float(monto)
-                                supabase.table("ventas_pagos").insert({
+                                supabase.table("ventas_pagos").insert(json_safe_payload({
                                     "venta_id": str(venta_id),
                                     "metodo": metodo,
                                     "monto": float(monto),
                                     "usuario": nombre_usuario_actual(),
                                     "caja_id": str(caja_activa.get("id")),
                                     "dia_operativo": ahora_str(),
-                                }).execute()
+                                })).execute()
                                 if metodo != "credito":
                                     try:
                                         supabase.table("movimientos_caja").insert({
