@@ -3068,6 +3068,95 @@ def obtener_config_financiera():
         return {"nombre_negocio": "BIBE RON 01", "porcentaje_isr": 0, "incluir_isr": False, "incluir_depreciacion": True, "moneda": "RD$"}
     return cfg.iloc[0].to_dict()
 
+
+def calcular_costo_ventas_real(desde, hasta, ventas_df=None) -> float:
+    """
+    Calcula costo de ventas real desde detalle_venta.
+    Prioridad:
+    1) detalle_venta.total_costo / costo_total / costo_venta
+    2) detalle_venta.costo_unitario * cantidad
+    3) buscar costo del producto en productos por producto_id/codigo/nombre
+    """
+    detalle = _filtrar_periodo_df(_df_actual("detalle_venta"), desde, hasta)
+
+    # Si detalle_venta no tiene fecha, cruzar por venta_id contra las ventas del periodo.
+    if detalle.empty or ("fecha" not in detalle.columns and "created_at" not in detalle.columns):
+        detalle = _df_actual("detalle_venta")
+        if ventas_df is not None and not ventas_df.empty and not detalle.empty and "venta_id" in detalle.columns:
+            venta_ids = set()
+            for c in ["id", "venta_id"]:
+                if c in ventas_df.columns:
+                    venta_ids.update(ventas_df[c].dropna().astype(str).tolist())
+            if venta_ids:
+                detalle = detalle[detalle["venta_id"].astype(str).isin(venta_ids)].copy()
+
+    if detalle is None or detalle.empty:
+        # Respaldo: sumar costo_venta guardado en ventas si existe
+        if ventas_df is not None and not ventas_df.empty:
+            cv = _sum_any(ventas_df, ["costo_venta", "costo_total", "costo"])
+            return float(cv)
+        return 0.0
+
+    # Quitar anulados si existe columna
+    for col_anulado in ["anulado", "cancelado"]:
+        if col_anulado in detalle.columns:
+            try:
+                detalle = detalle[~detalle[col_anulado].fillna(False).astype(bool)].copy()
+            except Exception:
+                pass
+
+    directo = _sum_any(detalle, ["total_costo", "costo_total", "costo_venta"])
+    if directo > 0:
+        return float(directo)
+
+    total = 0.0
+    productos = _df_actual("productos")
+
+    def _buscar_costo_producto(row):
+        # por id
+        try:
+            pid = row.get("producto_id")
+            if pid and not productos.empty and "id" in productos.columns:
+                m = productos[productos["id"].astype(str) == str(pid)]
+                if not m.empty:
+                    return _num(m.iloc[0].get("costo") or m.iloc[0].get("costo_unitario") or m.iloc[0].get("costo_promedio"))
+        except Exception:
+            pass
+        # por código
+        try:
+            codigo = row.get("codigo") or row.get("codigo_barra")
+            if codigo and not productos.empty:
+                for c in ["codigo", "codigo_barra"]:
+                    if c in productos.columns:
+                        m = productos[productos[c].astype(str) == str(codigo)]
+                        if not m.empty:
+                            return _num(m.iloc[0].get("costo") or m.iloc[0].get("costo_unitario") or m.iloc[0].get("costo_promedio"))
+        except Exception:
+            pass
+        # por nombre
+        try:
+            nombre = row.get("producto") or row.get("nombre")
+            if nombre and not productos.empty and "nombre" in productos.columns:
+                nn = normalizar_texto(nombre)
+                tmp = productos.copy()
+                tmp["_n"] = tmp["nombre"].astype(str).apply(normalizar_texto)
+                m = tmp[tmp["_n"] == nn]
+                if not m.empty:
+                    return _num(m.iloc[0].get("costo") or m.iloc[0].get("costo_unitario") or m.iloc[0].get("costo_promedio"))
+        except Exception:
+            pass
+        return 0.0
+
+    for _, r in detalle.iterrows():
+        cant = _num(r.get("cantidad") or r.get("qty") or 0)
+        costo_unit = _num(r.get("costo_unitario") or r.get("costo") or r.get("costo_promedio"))
+        if costo_unit <= 0:
+            costo_unit = _buscar_costo_producto(r)
+        total += max(cant, 0) * max(costo_unit, 0)
+
+    return float(total)
+
+
 def calcular_estado_resultados_pro(desde, hasta) -> dict:
     cfg = obtener_config_financiera()
 
@@ -3102,8 +3191,17 @@ def calcular_estado_resultados_pro(desde, hasta) -> dict:
                 ajustes_negativos += monto
 
     inv_final = obtener_inventario_a_costo_fecha(hasta)
-    inventario_inicial = max(inv_final - compras_periodo - fletes - ajustes_positivos + ajustes_negativos, 0)
-    costo_ventas = max(inventario_inicial + compras_periodo + fletes + ajustes_positivos - inv_final, 0)
+
+    # Costo de ventas real: mercancía vendida, no compras del periodo.
+    costo_ventas_real = calcular_costo_ventas_real(desde, hasta, ventas)
+
+    # Para presentación, si no hay snapshot de inventario inicial, se calcula estimado
+    # para cuadrar con: Inventario inicial + Compras + Fletes + Ajustes - Inventario final = Costo de ventas.
+    inventario_inicial = max(costo_ventas_real + inv_final - compras_periodo - fletes - ajustes_positivos + ajustes_negativos, 0)
+    costo_ventas_formula = max(inventario_inicial + compras_periodo + fletes + ajustes_positivos - inv_final, 0)
+
+    # Si detalle_venta trae costo real, usarlo como fuente principal.
+    costo_ventas = costo_ventas_real if costo_ventas_real > 0 else costo_ventas_formula
 
     utilidad_bruta = ventas_netas - costo_ventas
     margen_bruto = (utilidad_bruta / ventas_netas * 100) if ventas_netas else 0
@@ -3177,6 +3275,8 @@ def calcular_estado_resultados_pro(desde, hasta) -> dict:
         "ajustes_positivos": ajustes_positivos,
         "inventario_final": inv_final,
         "costo_ventas": costo_ventas,
+        "costo_ventas_real": costo_ventas_real,
+        "costo_ventas_formula": costo_ventas_formula,
         "utilidad_bruta": utilidad_bruta,
         "margen_bruto": margen_bruto,
         "personal": personal,
@@ -3387,7 +3487,9 @@ def render_estado_resultados_pro(desde, hasta):
 
     st.markdown("### 🚦 Alertas financieras")
     alertas = []
-    if er["ventas_netas"] > 0 and er["margen_bruto"] < 20:
+    if er["ventas_netas"] > 0 and er["costo_ventas"] <= 0:
+        alertas.append("🔴 Costo de ventas en cero: revisar costo_unitario en detalle_venta o costo en productos.")
+    elif er["ventas_netas"] > 0 and er["margen_bruto"] < 20:
         alertas.append("🔴 Margen bruto bajo: revisar precios, costos o descuentos.")
     elif er["ventas_netas"] > 0:
         alertas.append("🟢 Margen bruto en seguimiento.")
