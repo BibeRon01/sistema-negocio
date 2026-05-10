@@ -3217,27 +3217,27 @@ def _estado_tabla(items):
 # =========================================================
 
 def calcular_distribucion_beneficios(desde, hasta, porc_duena=65.0, porc_gerente=35.0) -> dict:
-    """Calcula la distribución mensual: gerente 35%, dueña 65%, gastos dueña contra el 65%."""
+    """Calcula la distribución mensual: gerente 35%, dueño 65%, gastos dueño contra el 65%."""
     er = calcular_estado_resultados_pro(desde, hasta) if "calcular_estado_resultados_pro" in globals() else {}
     utilidad_neta = float(er.get("utilidad_neta", 0) or 0)
 
-    monto_duena = utilidad_neta * (float(porc_duena) / 100)
+    monto_dueno = utilidad_neta * (float(porc_duena) / 100)
     monto_gerente = utilidad_neta * (float(porc_gerente) / 100)
 
     dueno = _filtrar_periodo_df(_df_actual("gastos_dueno"), desde, hasta)
     if not dueno.empty and "afecta_distribucion" in dueno.columns:
         dueno = dueno[(dueno["afecta_distribucion"] == True) | (dueno["afecta_distribucion"].isna())]
-    gastos_duena = _sum_any(dueno, ["monto", "total", "valor"])
+    gastos_dueno = _sum_any(dueno, ["monto", "total", "valor"])
 
-    disponible_duena = monto_duena - gastos_duena
+    disponible_duena = monto_dueno - gastos_dueno
 
     return {
         "utilidad_neta": utilidad_neta,
         "porcentaje_duena": float(porc_duena),
         "porcentaje_gerente": float(porc_gerente),
-        "monto_duena_calculado": monto_duena,
+        "monto_duena_calculado": monto_dueno,
         "monto_gerente_calculado": monto_gerente,
-        "gastos_duena_periodo": gastos_duena,
+        "gastos_duena_periodo": gastos_dueno,
         "disponible_duena": disponible_duena,
         "estado_resultados": er,
     }
@@ -3281,10 +3281,10 @@ def guardar_distribucion_beneficios(desde, hasta, calc, pago_duena, reinversion_
         if float(pago_duena or 0) > 0:
             cuenta = cuenta_por_metodo_pago(metodo_duena) if "cuenta_por_metodo_pago" in globals() else ("Efectivo negocio" if metodo_duena == "efectivo" else "Banco")
             try:
-                registrar_movimiento_dinero("salida", float(pago_duena), "Pago beneficio dueña", metodo_pago=metodo_duena, cuenta=cuenta, categoria="distribucion_beneficios")
+                registrar_movimiento_dinero("salida", float(pago_duena), "Pago beneficio dueño", metodo_pago=metodo_duena, cuenta=cuenta, categoria="distribucion_beneficios")
             except Exception:
                 pass
-            registrar_movimiento_contable("distribucion_beneficios", dist_id, "3003", "Retiros del dueño", "capital", debito=float(pago_duena), descripcion="Pago beneficio dueña")
+            registrar_movimiento_contable("distribucion_beneficios", dist_id, "3003", "Retiros del dueño", "capital", debito=float(pago_duena), descripcion="Pago beneficio dueño")
 
         if float(pago_gerente or 0) > 0:
             cuenta = cuenta_por_metodo_pago(metodo_gerente) if "cuenta_por_metodo_pago" in globals() else ("Efectivo negocio" if metodo_gerente == "efectivo" else "Banco")
@@ -3295,10 +3295,10 @@ def guardar_distribucion_beneficios(desde, hasta, calc, pago_duena, reinversion_
             registrar_movimiento_contable("distribucion_beneficios", dist_id, "6009", "Beneficio gerente", "gasto", debito=float(pago_gerente), descripcion="Pago beneficio gerente")
 
         if float(reinversion_duena or 0) > 0:
-            registrar_movimiento_contable("distribucion_beneficios", dist_id, "3006", "Reinversión de utilidades", "capital", credito=float(reinversion_duena), descripcion="Utilidad dueña reinvertida")
+            registrar_movimiento_contable("distribucion_beneficios", dist_id, "3006", "Reinversión de utilidades", "capital", credito=float(reinversion_duena), descripcion="Utilidad dueño reinvertida")
 
         if float(pendiente_duena or 0) > 0:
-            registrar_movimiento_contable("distribucion_beneficios", dist_id, "3004", "Beneficio pendiente dueña", "capital", credito=float(pendiente_duena), descripcion="Beneficio pendiente por pagar a dueña")
+            registrar_movimiento_contable("distribucion_beneficios", dist_id, "3004", "Beneficio pendiente dueño", "capital", credito=float(pendiente_duena), descripcion="Beneficio pendiente por pagar a dueño")
 
         if float(pendiente_gerente or 0) > 0:
             registrar_movimiento_contable("distribucion_beneficios", dist_id, "3005", "Beneficio pendiente gerente", "pasivo", credito=float(pendiente_gerente), descripcion="Beneficio pendiente por pagar a gerente")
@@ -3541,7 +3541,7 @@ if menu == "Dashboard":
 
     st.markdown("### 👥 Reparto dueño / gerente")
     d1, d2, d3, d4 = st.columns(4)
-    d1.metric("65% dueño", f"RD$ {dueno_65:,.2f}")
+    d1.metric("Parte del dueño", f"RD$ {dueno_65:,.2f}")
     d2.metric("Retiros del dueño", f"RD$ {retiros_tot:,.2f}")
     d3.metric("Saldo final dueño", f"RD$ {saldo_dueno_final:,.2f}")
     d4.metric("35% gerente", f"RD$ {saldo_gerente_final:,.2f}")
@@ -6859,7 +6859,7 @@ elif menu == "Distribución Beneficios":
         st.error("Solo administración puede registrar la distribución de beneficios.")
         st.stop()
 
-    st.caption("Divide la utilidad neta: 35% gerente y 65% dueña. Los gastos del dueño se descuentan del 65% de la dueña.")
+    st.caption("Divide la utilidad neta: 35% gerente y 65% dueño. Los gastos del dueño se descuentan del 65% de la dueño.")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -6867,11 +6867,21 @@ elif menu == "Distribución Beneficios":
     with c2:
         hasta_db = st.date_input("Hasta", value=date.today(), key="dist_hasta")
 
+    st.markdown("### ⚖️ Porcentaje de distribución")
     p1, p2 = st.columns(2)
     with p1:
-        porc_duena = st.number_input("% Dueña", min_value=0.0, max_value=100.0, value=65.0, step=1.0, key="dist_porc_duena")
+        porc_gerente = st.number_input(
+            "% Gerente",
+            min_value=0.0,
+            max_value=100.0,
+            value=35.0,
+            step=1.0,
+            key="dist_porc_gerente",
+            help="Puedes subirlo o bajarlo según el acuerdo del mes."
+        )
+    porc_duena = max(100.0 - float(porc_gerente), 0.0)
     with p2:
-        porc_gerente = st.number_input("% Gerente", min_value=0.0, max_value=100.0, value=35.0, step=1.0, key="dist_porc_gerente")
+        st.metric("% Dueño", f"{porc_duena:.2f}%")
 
     calc = calcular_distribucion_beneficios(desde_db, hasta_db, porc_duena, porc_gerente)
 
@@ -6879,21 +6889,21 @@ elif menu == "Distribución Beneficios":
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Utilidad neta", _fmt_rd(calc["utilidad_neta"]))
     k2.metric("35% gerente", _fmt_rd(calc["monto_gerente_calculado"]))
-    k3.metric("65% dueña", _fmt_rd(calc["monto_duena_calculado"]))
-    k4.metric("Gastos dueña", _fmt_rd(calc["gastos_duena_periodo"]))
+    k3.metric("Parte del dueño", _fmt_rd(calc["monto_duena_calculado"]))
+    k4.metric("Gastos dueño", _fmt_rd(calc["gastos_duena_periodo"]))
 
-    st.markdown("### 👑 Parte de la dueña")
+    st.markdown("### 👑 Parte de la dueño")
     d1, d2, d3 = st.columns(3)
-    d1.metric("Disponible dueña después de gastos", _fmt_rd(calc["disponible_duena"]))
+    d1.metric("Disponible dueño después de gastos", _fmt_rd(calc["disponible_duena"]))
 
-    max_duena = max(calc["disponible_duena"], 0)
+    max_dueno = max(calc["disponible_duena"], 0)
     with d2:
-        pago_duena = st.number_input("Monto a pagar a dueña", min_value=0.0, max_value=float(max_duena) if max_duena > 0 else None, value=0.0, step=1.0, key="dist_pago_duena")
+        pago_duena = st.number_input("Monto a pagar al dueño", min_value=0.0, max_value=float(max_dueno) if max_dueno > 0 else None, value=0.0, step=1.0, key="dist_pago_duena")
     with d3:
-        reinversion_duena = st.number_input("Monto a reinvertir", min_value=0.0, max_value=float(max(max_duena - pago_duena, 0)) if max_duena > 0 else None, value=float(max(max_duena - pago_duena, 0)), step=1.0, key="dist_reinv_duena")
+        reinversion_duena = st.number_input("Monto a reinvertir", min_value=0.0, max_value=float(max(max_dueno - pago_duena, 0)) if max_dueno > 0 else None, value=float(max(max_dueno - pago_duena, 0)), step=1.0, key="dist_reinv_duena")
 
-    pendiente_duena = max(max_duena - pago_duena - reinversion_duena, 0)
-    exceso_gastos_duena = abs(calc["disponible_duena"]) if calc["disponible_duena"] < 0 else 0
+    pendiente_duena = max(max_dueno - pago_duena - reinversion_duena, 0)
+    exceso_gastos_dueno = abs(calc["disponible_duena"]) if calc["disponible_duena"] < 0 else 0
 
     st.markdown("### 👨‍💼 Parte del gerente")
     g1, g2, g3 = st.columns(3)
@@ -6906,7 +6916,7 @@ elif menu == "Distribución Beneficios":
     st.markdown("### 💳 Método de pago")
     m1, m2 = st.columns(2)
     with m1:
-        metodo_duena = st.selectbox("Método pago dueña", ["efectivo", "transferencia", "tarjeta"], key="dist_metodo_duena")
+        metodo_duena = st.selectbox("Método pago dueño", ["efectivo", "transferencia", "tarjeta"], key="dist_metodo_duena")
     with m2:
         metodo_gerente = st.selectbox("Método pago gerente", ["efectivo", "transferencia", "tarjeta"], key="dist_metodo_gerente")
 
@@ -6916,25 +6926,23 @@ elif menu == "Distribución Beneficios":
         {"Concepto": "Gerente 35%", "RD$": _fmt_rd(calc["monto_gerente_calculado"])},
         {"Concepto": "Pago gerente", "RD$": _fmt_rd(pago_gerente)},
         {"Concepto": "Pendiente gerente", "RD$": _fmt_rd(pendiente_gerente)},
-        {"Concepto": "Dueña 65%", "RD$": _fmt_rd(calc["monto_duena_calculado"])},
-        {"Concepto": "Gastos/retiros dueña", "RD$": _fmt_rd(-calc["gastos_duena_periodo"])},
-        {"Concepto": "Disponible dueña", "RD$": _fmt_rd(calc["disponible_duena"])},
-        {"Concepto": "Pago dueña", "RD$": _fmt_rd(pago_duena)},
-        {"Concepto": "Reinversión dueña", "RD$": _fmt_rd(reinversion_duena)},
-        {"Concepto": "Pendiente dueña", "RD$": _fmt_rd(pendiente_duena)},
-        {"Concepto": "Dueña debe al negocio por exceso de gastos", "RD$": _fmt_rd(exceso_gastos_duena)},
+        {"Concepto": "Parte del dueño", "RD$": _fmt_rd(calc["monto_duena_calculado"])},
+        {"Concepto": "Gastos/retiros dueño", "RD$": _fmt_rd(-calc["gastos_duena_periodo"])},
+        {"Concepto": "Disponible dueño", "RD$": _fmt_rd(calc["disponible_duena"])},
+        {"Concepto": "Pago dueño", "RD$": _fmt_rd(pago_duena)},
+        {"Concepto": "Reinversión dueño", "RD$": _fmt_rd(reinversion_duena)},
+        {"Concepto": "Pendiente dueño", "RD$": _fmt_rd(pendiente_duena)},
+        {"Concepto": "Dueño debe al negocio por exceso de gastos", "RD$": _fmt_rd(exceso_gastos_dueno)},
     ])
     st.dataframe(resumen_dist, use_container_width=True, hide_index=True)
 
-    if exceso_gastos_duena > 0:
-        st.warning(f"La dueña gastó más de su 65%. Diferencia a favor del negocio: {_fmt_rd(exceso_gastos_duena)}")
+    if exceso_gastos_dueno > 0:
+        st.warning(f"La dueño gastó más de su 65%. Diferencia a favor del negocio: {_fmt_rd(exceso_gastos_dueno)}")
 
     observacion = st.text_area("Observación", key="dist_obs")
 
     if st.button("💾 Guardar distribución", key="btn_guardar_distribucion"):
-        if abs((porc_duena + porc_gerente) - 100) > 0.01:
-            st.error("Los porcentajes deben sumar 100%.")
-        elif guardar_distribucion_beneficios(
+        if guardar_distribucion_beneficios(
             desde_db, hasta_db, calc,
             pago_duena, reinversion_duena, pendiente_duena,
             pago_gerente, pendiente_gerente,
@@ -6969,7 +6977,7 @@ elif menu == "Capital Base":
             concepto = st.text_input("Concepto", value="Capital base inicial", key="cap_concepto")
             monto = st.number_input("Monto", min_value=0.0, step=1.0, key="cap_monto")
         with c2:
-            origen = st.selectbox("Origen", ["Inventario + dinero real", "Aporte dueña", "Ajuste contable", "Otro"], key="cap_origen")
+            origen = st.selectbox("Origen", ["Inventario + dinero real", "Aporte dueño", "Ajuste contable", "Otro"], key="cap_origen")
             obs = st.text_area("Observación", key="cap_obs")
         if st.button("Guardar capital base", key="btn_cap_guardar"):
             if insertar("capital_base", {"fecha": datetime.now().isoformat(), "concepto": concepto, "monto": float(monto), "origen": origen, "observacion": obs, "activo": True}):
