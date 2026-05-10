@@ -3071,33 +3071,30 @@ def obtener_config_financiera():
 
 def calcular_costo_ventas_real(desde, hasta, ventas_df=None) -> float:
     """
-    Calcula costo de ventas real desde detalle_venta.
-    Prioridad:
-    1) detalle_venta.total_costo / costo_total / costo_venta
-    2) detalle_venta.costo_unitario * cantidad
-    3) buscar costo del producto en productos por producto_id/codigo/nombre
+    Calcula el costo de ventas real desde detalle_venta.
+    Cruza detalle_venta con ventas del período por venta_id.
     """
-    detalle = _filtrar_periodo_df(_df_actual("detalle_venta"), desde, hasta)
-
-    # Si detalle_venta no tiene fecha, cruzar por venta_id contra las ventas del periodo.
-    if detalle.empty or ("fecha" not in detalle.columns and "created_at" not in detalle.columns):
-        detalle = _df_actual("detalle_venta")
-        if ventas_df is not None and not ventas_df.empty and not detalle.empty and "venta_id" in detalle.columns:
-            venta_ids = set()
-            for c in ["id", "venta_id"]:
-                if c in ventas_df.columns:
-                    venta_ids.update(ventas_df[c].dropna().astype(str).tolist())
-            if venta_ids:
-                detalle = detalle[detalle["venta_id"].astype(str).isin(venta_ids)].copy()
-
+    detalle = _df_actual("detalle_venta")
     if detalle is None or detalle.empty:
-        # Respaldo: sumar costo_venta guardado en ventas si existe
         if ventas_df is not None and not ventas_df.empty:
-            cv = _sum_any(ventas_df, ["costo_venta", "costo_total", "costo"])
-            return float(cv)
+            return float(_sum_any(ventas_df, ["costo_venta", "costo_total", "costo"]))
         return 0.0
 
-    # Quitar anulados si existe columna
+    if ventas_df is not None and not ventas_df.empty and "venta_id" in detalle.columns:
+        venta_ids = set()
+        for c in ["id", "identificación", "identificacion", "venta_id"]:
+            if c in ventas_df.columns:
+                venta_ids.update(ventas_df[c].dropna().astype(str).tolist())
+        if venta_ids:
+            detalle = detalle[detalle["venta_id"].astype(str).isin(venta_ids)].copy()
+    else:
+        detalle = _filtrar_periodo_df(detalle, desde, hasta)
+
+    if detalle.empty:
+        if ventas_df is not None and not ventas_df.empty:
+            return float(_sum_any(ventas_df, ["costo_venta", "costo_total", "costo"]))
+        return 0.0
+
     for col_anulado in ["anulado", "cancelado"]:
         if col_anulado in detalle.columns:
             try:
@@ -3109,11 +3106,9 @@ def calcular_costo_ventas_real(desde, hasta, ventas_df=None) -> float:
     if directo > 0:
         return float(directo)
 
-    total = 0.0
     productos = _df_actual("productos")
 
     def _buscar_costo_producto(row):
-        # por id
         try:
             pid = row.get("producto_id")
             if pid and not productos.empty and "id" in productos.columns:
@@ -3122,7 +3117,6 @@ def calcular_costo_ventas_real(desde, hasta, ventas_df=None) -> float:
                     return _num(m.iloc[0].get("costo") or m.iloc[0].get("costo_unitario") or m.iloc[0].get("costo_promedio"))
         except Exception:
             pass
-        # por código
         try:
             codigo = row.get("codigo") or row.get("codigo_barra")
             if codigo and not productos.empty:
@@ -3133,7 +3127,6 @@ def calcular_costo_ventas_real(desde, hasta, ventas_df=None) -> float:
                             return _num(m.iloc[0].get("costo") or m.iloc[0].get("costo_unitario") or m.iloc[0].get("costo_promedio"))
         except Exception:
             pass
-        # por nombre
         try:
             nombre = row.get("producto") or row.get("nombre")
             if nombre and not productos.empty and "nombre" in productos.columns:
@@ -3147,6 +3140,7 @@ def calcular_costo_ventas_real(desde, hasta, ventas_df=None) -> float:
             pass
         return 0.0
 
+    total = 0.0
     for _, r in detalle.iterrows():
         cant = _num(r.get("cantidad") or r.get("qty") or 0)
         costo_unit = _num(r.get("costo_unitario") or r.get("costo") or r.get("costo_promedio"))
@@ -3162,6 +3156,15 @@ def calcular_estado_resultados_pro(desde, hasta) -> dict:
 
     ventas = _filtrar_periodo_df(_df_actual("ventas"), desde, hasta)
     ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() and not ventas.empty else ventas
+    if not ventas.empty:
+        for col_anulado in ["anulado", "cancelado"]:
+            if col_anulado in ventas.columns:
+                try:
+                    ventas = ventas[~ventas[col_anulado].fillna(False).astype(bool)].copy()
+                except Exception:
+                    pass
+        if "estado" in ventas.columns:
+            ventas = ventas[~ventas["estado"].astype(str).apply(normalizar_texto).isin(["anulada", "cancelada"])].copy()
     total_col = "total_contable" if "total_contable" in ventas.columns else "total"
     ventas_brutas = _sum_any(ventas, ["venta_bruta", total_col, "total", "subtotal"])
     descuentos = _sum_any(ventas, ["descuento_total", "descuento", "descuentos"])
@@ -3424,6 +3427,11 @@ def render_estado_resultados_pro(desde, hasta):
     k3.metric("Utilidad neta", _fmt_rd(er["utilidad_neta"]), f"{er['margen_neto']:.2f}%")
     k4.metric("Reinversión", _fmt_rd(er["excedente_reinversion"]))
 
+    with st.expander("🔎 Validación rápida del costo de ventas", expanded=False):
+        st.write(f"Costo de ventas real leído desde detalle/productos: {_fmt_rd(er.get('costo_ventas_real', 0))}")
+        st.write(f"Costo por fórmula de inventario: {_fmt_rd(er.get('costo_ventas_formula', 0))}")
+        st.write("La utilidad bruta debe ser: Ventas netas - Costo de ventas.")
+
     secciones = [
         ("🟦 1. Ingresos por ventas", [
             ("Ventas Brutas", er["ventas_brutas"]),
@@ -3646,9 +3654,9 @@ if menu == "Dashboard":
     d1.metric("Parte del dueño", f"RD$ {dueno_65:,.2f}")
     d2.metric("Retiros del dueño", f"RD$ {retiros_tot:,.2f}")
     d3.metric("Saldo final dueño", f"RD$ {saldo_dueno_final:,.2f}")
-    d4.metric("35% gerente", f"RD$ {saldo_gerente_final:,.2f}")
+    d4.metric("Beneficio gerente", f"RD$ {saldo_gerente_final:,.2f}")
 
-    st.caption("Los retiros del dueño solo se descuentan del 65% del dueño. No afectan el 35% del gerente.")
+    st.caption("Los retiros/gastos del dueño solo se descuentan de la parte del dueño. No afectan el beneficio del gerente.")
 
     st.markdown("### 📈 Gráficos")
     charts = [
@@ -6961,7 +6969,7 @@ elif menu == "Distribución Beneficios":
         st.error("Solo administración puede registrar la distribución de beneficios.")
         st.stop()
 
-    st.caption("Divide la utilidad neta: 35% gerente y 65% dueño. Los gastos del dueño se descuentan del 65% de la dueño.")
+    st.caption("Divide la utilidad neta: 35% gerente y Parte del dueño. Los gastos del dueño se descuentan del 65% de la dueño.")
 
     c1, c2 = st.columns(2)
     with c1:
