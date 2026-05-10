@@ -1338,7 +1338,7 @@ def cargar_datos() -> dict[str, pd.DataFrame]:
         "inventario_lotes",
         "movimientos",
         "movimientos_caja",
-        "configuracion_sistema",
+        "configuracion_sistema",        "cuentas_contables",        "movimientos_contables",        "capital_base",        "activos_fijos",        "depreciaciones",        "configuracion_financiera",
     ]
 
     data: dict[str, pd.DataFrame] = {}
@@ -2699,7 +2699,12 @@ def resumen_dinero_real_pro() -> dict:
     cuentas = leer_actualizado("cuentas_dinero")
     saldo_inicial = 0.0
     if not cuentas.empty:
-        saldo_inicial = sum(float(limpiar_numero(r.get("saldo_inicial")) or 0) for _, r in cuentas.iterrows())
+        saldo_inicial += sum(float(limpiar_numero(r.get("saldo_inicial")) or 0) for _, r in cuentas.iterrows())
+    capital_df = _df_actual("capital_base") if "_df_actual" in globals() else pd.DataFrame()
+    if not capital_df.empty:
+        if "activo" in capital_df.columns:
+            capital_df = capital_df[capital_df["activo"] == True]
+        saldo_inicial += _sum_any(capital_df, ["monto", "valor", "total"]) if "_sum_any" in globals() else 0.0
 
     # Lectura financiera correcta:
     # - Inventario a costo NO es ganancia; es mercancía/inversión.
@@ -2956,6 +2961,328 @@ def registrar_abono_credito_seguro(fila, monto, metodo_pago, observacion=""):
     return True
 
 
+
+# =========================================================
+# MOTOR FINANCIERO / CONTABLE PRO - BIBE RON 01
+# =========================================================
+
+def _df_actual(tabla: str) -> pd.DataFrame:
+    try:
+        return leer_actualizado(tabla)
+    except Exception:
+        return DATA.get(tabla, pd.DataFrame()).copy()
+
+def _fecha_col(df: pd.DataFrame):
+    for c in ["fecha", "created_at", "fecha_apertura", "fecha_compra"]:
+        if c in df.columns:
+            return c
+    return None
+
+def _filtrar_periodo_df(df: pd.DataFrame, desde, hasta) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    col = _fecha_col(df)
+    if not col:
+        return df.copy()
+    out = df.copy()
+    out["_fecha_dt"] = pd.to_datetime(out[col], errors="coerce")
+    try:
+        return out[(out["_fecha_dt"].dt.date >= desde) & (out["_fecha_dt"].dt.date <= hasta)].copy()
+    except Exception:
+        return out.copy()
+
+def _num(v) -> float:
+    try:
+        return float(limpiar_numero(v) or 0)
+    except Exception:
+        return 0.0
+
+def _sum_any(df: pd.DataFrame, cols) -> float:
+    if df is None or df.empty:
+        return 0.0
+    for c in cols:
+        if c in df.columns:
+            try:
+                return float(pd.to_numeric(df[c].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0).sum())
+            except Exception:
+                return 0.0
+    return 0.0
+
+def registrar_movimiento_contable(modulo, referencia_id, cuenta_codigo, cuenta_nombre, tipo_cuenta, debito=0, credito=0, descripcion="", usuario=None):
+    try:
+        payload = {
+            "fecha": datetime.now().isoformat(),
+            "modulo": modulo,
+            "referencia_id": str(referencia_id or ""),
+            "cuenta_codigo": str(cuenta_codigo or ""),
+            "cuenta_nombre": str(cuenta_nombre or ""),
+            "tipo_cuenta": str(tipo_cuenta or ""),
+            "debito": float(debito or 0),
+            "credito": float(credito or 0),
+            "descripcion": descripcion,
+            "usuario": usuario or nombre_usuario_actual(),
+        }
+        if "json_safe_payload" in globals():
+            payload = json_safe_payload(payload)
+        supabase.table("movimientos_contables").insert(payload).execute()
+        return True
+    except Exception:
+        return False
+
+def obtener_inventario_a_costo_fecha(fecha_limite=None) -> float:
+    try:
+        vals = calcular_valores_inventario_pro()
+        return float(vals.get("inventario_costo", 0) or 0)
+    except Exception:
+        return 0.0
+
+def obtener_inventario_a_venta_fecha(fecha_limite=None) -> float:
+    try:
+        vals = calcular_valores_inventario_pro()
+        return float(vals.get("inventario_venta", 0) or 0)
+    except Exception:
+        return 0.0
+
+def obtener_config_financiera():
+    cfg = _df_actual("configuracion_financiera")
+    if cfg.empty:
+        return {"nombre_negocio": "BIBE RON 01", "porcentaje_isr": 0, "incluir_isr": False, "incluir_depreciacion": True, "moneda": "RD$"}
+    return cfg.iloc[0].to_dict()
+
+def calcular_estado_resultados_pro(desde, hasta) -> dict:
+    cfg = obtener_config_financiera()
+
+    ventas = _filtrar_periodo_df(_df_actual("ventas"), desde, hasta)
+    ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() and not ventas.empty else ventas
+    total_col = "total_contable" if "total_contable" in ventas.columns else "total"
+    ventas_brutas = _sum_any(ventas, ["venta_bruta", total_col, "total"])
+    descuentos = _sum_any(ventas, ["descuento_total", "descuento", "descuentos"])
+    devoluciones = _sum_any(ventas, ["devolucion_total", "devolucion", "devoluciones"])
+    ventas_netas = max(ventas_brutas - descuentos - devoluciones, 0)
+
+    compras = _filtrar_periodo_df(_df_actual("compras"), desde, hasta)
+    compras_periodo = _sum_any(compras, ["monto", "total", "valor", "costo_total"])
+    fletes = _sum_any(compras, ["flete", "fletes", "acarreo", "acarreos"])
+
+    ajustes = _filtrar_periodo_df(_df_actual("ajustes_inventario"), desde, hasta)
+    ajustes_positivos = 0.0
+    ajustes_negativos = 0.0
+    if not ajustes.empty:
+        for _, r in ajustes.iterrows():
+            monto = _num(r.get("valor") or r.get("monto") or r.get("total") or r.get("costo_total"))
+            tipo = normalizar_texto(r.get("tipo") or r.get("tipo_ajuste") or r.get("movimiento") or "")
+            if tipo in ["entrada", "positivo", "aumento", "ajuste positivo"]:
+                ajustes_positivos += monto
+            elif tipo in ["salida", "negativo", "disminucion", "disminución", "ajuste negativo"]:
+                ajustes_negativos += monto
+
+    inv_final = obtener_inventario_a_costo_fecha(hasta)
+    inventario_inicial = max(inv_final - compras_periodo - fletes - ajustes_positivos + ajustes_negativos, 0)
+    costo_ventas = max(inventario_inicial + compras_periodo + fletes + ajustes_positivos - inv_final, 0)
+
+    utilidad_bruta = ventas_netas - costo_ventas
+    margen_bruto = (utilidad_bruta / ventas_netas * 100) if ventas_netas else 0
+
+    gastos = _filtrar_periodo_df(_df_actual("gastos"), desde, hasta)
+    adelantos = _filtrar_periodo_df(_df_actual("adelantos_empleados"), desde, hasta)
+    pagos_empleados = _filtrar_periodo_df(_df_actual("pagos_empleados"), desde, hasta)
+
+    personal = _sum_any(pagos_empleados, ["monto", "total", "valor"]) + _sum_any(adelantos, ["monto", "total", "valor"])
+    cargas_sociales = gastos_fijos = gastos_variables = comisiones_bancarias = 0.0
+
+    if not gastos.empty:
+        for _, r in gastos.iterrows():
+            monto = _num(r.get("monto") or r.get("total") or r.get("valor"))
+            cat = normalizar_texto(r.get("categoria_estado_resultado") or r.get("categoria") or r.get("tipo") or r.get("concepto") or "")
+            concepto = normalizar_texto(r.get("concepto") or r.get("descripcion") or "")
+            texto = f"{cat} {concepto}"
+            if any(k in texto for k in ["tss", "infotep", "carga social", "seguridad social"]):
+                cargas_sociales += monto
+            elif any(k in texto for k in ["sueldo", "empleado", "nomina", "nómina", "personal", "comision empleado", "comisión empleado"]):
+                personal += monto
+            elif any(k in texto for k in ["alquiler", "luz", "energia", "energía", "agua", "internet", "telefono", "teléfono", "basura", "fijo"]):
+                gastos_fijos += monto
+            elif any(k in texto for k in ["banco", "interes", "interés", "comision bancaria", "comisión bancaria", "financiero"]):
+                comisiones_bancarias += monto
+            else:
+                gastos_variables += monto
+
+    perdidas = _filtrar_periodo_df(_df_actual("perdidas"), desde, hasta)
+    perdidas_merma = _sum_any(perdidas, ["valor", "monto", "total", "costo_total"]) + ajustes_negativos
+
+    depreciaciones = _filtrar_periodo_df(_df_actual("depreciaciones"), desde, hasta)
+    depreciacion = _sum_any(depreciaciones, ["monto", "valor", "total"]) if bool(cfg.get("incluir_depreciacion", True)) else 0.0
+
+    total_gastos_operativos = personal + cargas_sociales + gastos_fijos + gastos_variables + perdidas_merma + depreciacion
+    utilidad_operativa = utilidad_bruta - total_gastos_operativos
+    margen_operativo = (utilidad_operativa / ventas_netas * 100) if ventas_netas else 0
+
+    porcentaje_isr = _num(cfg.get("porcentaje_isr"))
+    incluir_isr = bool(cfg.get("incluir_isr", False))
+    utilidad_antes_isr = utilidad_operativa - comisiones_bancarias
+    isr = max(utilidad_antes_isr * (porcentaje_isr / 100), 0) if incluir_isr else 0.0
+    utilidad_neta = utilidad_antes_isr - isr
+    margen_neto = (utilidad_neta / ventas_netas * 100) if ventas_netas else 0
+
+    dueno = _filtrar_periodo_df(_df_actual("gastos_dueno"), desde, hasta)
+    retiros_dueno = _sum_any(dueno, ["monto", "total", "valor"])
+    excedente_reinversion = utilidad_neta - retiros_dueno
+
+    cxc = _df_actual("cuentas_por_cobrar")
+    cxc_pend = cxc
+    if not cxc.empty and "estado" in cxc.columns:
+        cxc_pend = cxc[cxc["estado"].astype(str).str.lower() != "saldada"]
+    credito_pendiente = _sum_any(cxc_pend, ["saldo_pendiente", "monto_original"])
+    abonos = _filtrar_periodo_df(_df_actual("abonos_credito"), desde, hasta)
+    abonos_recibidos = _sum_any(abonos, ["monto", "total", "valor"])
+
+    inv_venta = obtener_inventario_a_venta_fecha(hasta)
+    inv_costo = inv_final
+    ganancia_potencial = inv_venta - inv_costo
+
+    return {
+        "cfg": cfg,
+        "ventas_brutas": ventas_brutas,
+        "descuentos": descuentos,
+        "devoluciones": devoluciones,
+        "ventas_netas": ventas_netas,
+        "inventario_inicial": inventario_inicial,
+        "compras_periodo": compras_periodo,
+        "fletes": fletes,
+        "ajustes_positivos": ajustes_positivos,
+        "inventario_final": inv_final,
+        "costo_ventas": costo_ventas,
+        "utilidad_bruta": utilidad_bruta,
+        "margen_bruto": margen_bruto,
+        "personal": personal,
+        "cargas_sociales": cargas_sociales,
+        "gastos_fijos": gastos_fijos,
+        "gastos_variables": gastos_variables,
+        "perdidas_merma": perdidas_merma,
+        "depreciacion": depreciacion,
+        "total_gastos_operativos": total_gastos_operativos,
+        "utilidad_operativa": utilidad_operativa,
+        "margen_operativo": margen_operativo,
+        "comisiones_bancarias": comisiones_bancarias,
+        "utilidad_antes_isr": utilidad_antes_isr,
+        "isr": isr,
+        "utilidad_neta": utilidad_neta,
+        "margen_neto": margen_neto,
+        "retiros_dueno": retiros_dueno,
+        "excedente_reinversion": excedente_reinversion,
+        "credito_pendiente": credito_pendiente,
+        "abonos_recibidos": abonos_recibidos,
+        "inventario_a_costo": inv_costo,
+        "inventario_a_venta": inv_venta,
+        "ganancia_potencial_inventario": ganancia_potencial,
+    }
+
+def _fmt_rd(v):
+    v = float(v or 0)
+    if v < 0:
+        return f"(RD$ {abs(v):,.2f})"
+    return f"RD$ {v:,.2f}"
+
+def _estado_tabla(items):
+    return pd.DataFrame([{"Concepto": k, "RD$": _fmt_rd(v)} for k, v in items])
+
+def render_estado_resultados_pro(desde, hasta):
+    er = calcular_estado_resultados_pro(desde, hasta)
+    cfg = er["cfg"]
+    nombre_negocio = cfg.get("nombre_negocio") or "BIBE RON 01"
+
+    st.markdown(f"## 🧾 {nombre_negocio}")
+    st.markdown("### Estado de Resultados Ejecutivo PRO")
+    st.caption(f"Período: {desde.strftime('%d/%m/%Y')} al {hasta.strftime('%d/%m/%Y')} | Valores expresados en RD$")
+
+    st.markdown("### 📊 Resumen ejecutivo")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Ventas netas", _fmt_rd(er["ventas_netas"]))
+    k2.metric("Utilidad bruta", _fmt_rd(er["utilidad_bruta"]), f"{er['margen_bruto']:.2f}%")
+    k3.metric("Utilidad neta", _fmt_rd(er["utilidad_neta"]), f"{er['margen_neto']:.2f}%")
+    k4.metric("Reinversión", _fmt_rd(er["excedente_reinversion"]))
+
+    secciones = [
+        ("🟦 1. Ingresos por ventas", [
+            ("Ventas Brutas", er["ventas_brutas"]),
+            ("(-) Descuentos aplicados", -er["descuentos"]),
+            ("(-) Devoluciones / anulaciones", -er["devoluciones"]),
+            ("VENTAS NETAS", er["ventas_netas"]),
+        ]),
+        ("🟨 2. Costo de ventas", [
+            ("Inventario inicial", er["inventario_inicial"]),
+            ("(+) Compras del período", er["compras_periodo"]),
+            ("(+) Fletes y acarreos", er["fletes"]),
+            ("(+) Ajustes positivos inventario", er["ajustes_positivos"]),
+            ("(-) Inventario final", -er["inventario_final"]),
+            ("TOTAL COSTO DE VENTAS", er["costo_ventas"]),
+        ]),
+        ("🟩 3. Margen de beneficio", [
+            ("Ventas Netas", er["ventas_netas"]),
+            ("(-) Costo de Ventas", -er["costo_ventas"]),
+            ("UTILIDAD BRUTA", er["utilidad_bruta"]),
+        ]),
+        ("🟥 4. Gastos operativos", [
+            ("Sueldos y pagos empleados", er["personal"]),
+            ("TSS / INFOTEP / Cargas sociales", er["cargas_sociales"]),
+            ("Gastos fijos", er["gastos_fijos"]),
+            ("Gastos variables", er["gastos_variables"]),
+            ("Pérdidas de mercancía / merma", er["perdidas_merma"]),
+            ("Depreciación", er["depreciacion"]),
+            ("TOTAL GASTOS OPERATIVOS", er["total_gastos_operativos"]),
+        ]),
+        ("🟫 5. Resultado operativo", [
+            ("Utilidad Bruta", er["utilidad_bruta"]),
+            ("(-) Gastos Operativos", -er["total_gastos_operativos"]),
+            ("UTILIDAD OPERATIVA (EBIT)", er["utilidad_operativa"]),
+        ]),
+        ("🟨 6. Gastos financieros e impuestos", [
+            ("Comisiones bancarias / intereses", -er["comisiones_bancarias"]),
+            ("UTILIDAD ANTES DE ISR", er["utilidad_antes_isr"]),
+            ("(-) ISR estimado", -er["isr"]),
+            ("UTILIDAD NETA DEL PERÍODO", er["utilidad_neta"]),
+        ]),
+        ("🟦 7. Cuentas por cobrar", [
+            ("Créditos pendientes clientes", er["credito_pendiente"]),
+            ("Abonos recibidos en el período", er["abonos_recibidos"]),
+        ]),
+        ("🟪 8. Disponibilidad y reinversión", [
+            ("Utilidad Neta", er["utilidad_neta"]),
+            ("(-) Retiros / gastos del dueño", -er["retiros_dueno"]),
+            ("EXCEDENTE PARA REINVERSIÓN", er["excedente_reinversion"]),
+        ]),
+        ("📦 9. Posición del negocio", [
+            ("Inventario a costo", er["inventario_a_costo"]),
+            ("Inventario a venta", er["inventario_a_venta"]),
+            ("Ganancia potencial inventario", er["ganancia_potencial_inventario"]),
+            ("Crédito pendiente", er["credito_pendiente"]),
+        ]),
+    ]
+
+    for titulo, items in secciones:
+        st.markdown(f"### {titulo}")
+        st.dataframe(_estado_tabla(items), use_container_width=True, hide_index=True)
+
+    st.markdown("### 🚦 Alertas financieras")
+    alertas = []
+    if er["ventas_netas"] > 0 and er["margen_bruto"] < 20:
+        alertas.append("🔴 Margen bruto bajo: revisar precios, costos o descuentos.")
+    elif er["ventas_netas"] > 0:
+        alertas.append("🟢 Margen bruto en seguimiento.")
+    if er["ventas_netas"] > 0 and er["gastos_fijos"] > er["ventas_netas"] * 0.20:
+        alertas.append("🟡 Gastos fijos altos respecto a ventas.")
+    if er["ventas_netas"] > 0 and er["credito_pendiente"] > er["ventas_netas"] * 0.25:
+        alertas.append("🟡 Crédito pendiente elevado; dar seguimiento a cobros.")
+    if er["ventas_netas"] > 0 and er["perdidas_merma"] > er["ventas_netas"] * 0.03:
+        alertas.append("🔴 Merma/pérdidas altas.")
+    if not alertas:
+        alertas.append("🟢 Sin alertas críticas para este período.")
+    for a in alertas:
+        st.write(a)
+
+    st.caption("Firma propietaria: ______________________    |    Preparado por: ______________________")
+
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -2994,6 +3321,8 @@ menu_base = [
     "Gastos Dueño",
     "Cierre de Caja",
     "Estado de Resultados",
+    "Activos Fijos",
+    "Capital Base",
     "Reportes",
     "Créditos",
     "Usuarios",
@@ -5519,82 +5848,31 @@ elif menu == "Caja":
 
 # =========================================================
 elif menu == "Estado de Resultados":
-    st.title("📊 Estado de Resultados")
+    st.title("🧾 Estado de Resultados PRO")
+    if not (es_admin() or tiene_permiso("puede_ver_reportes")):
+        st.error("No tienes permiso para ver este reporte.")
+        st.stop()
 
-    desde, hasta = rango_fechas_ui("er")
+    st.caption("Reporte financiero real: ventas, costo de ventas, gastos, utilidad, créditos, retiros y reinversión.")
 
-    ventas_df = obtener_ventas_periodo_actualizadas(desde, hasta)
-    compras_df = filtrar_por_fechas(DATA["compras"], desde, hasta)
-    gastos_df = filtrar_por_fechas(DATA["gastos"], desde, hasta)
-    perdidas_df = filtrar_por_fechas(DATA["perdidas"], desde, hasta)
-    dueno_df = filtrar_por_fechas(DATA["gastos_dueno"], desde, hasta)
+    c1, c2 = st.columns(2)
+    with c1:
+        desde_er = st.date_input("Desde", value=date.today().replace(day=1), key="er_pro_desde")
+    with c2:
+        hasta_er = st.date_input("Hasta", value=date.today(), key="er_pro_hasta")
 
-    ventas_tot = suma_col(ventas_df, "total")
-    compras_tot = suma_col(compras_df, "monto")
-    utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df)
-    utilidad_bruta_manual = st.number_input("Utilidad bruta manual / ajuste", min_value=0.0, step=1.0, key="er_utilidad_bruta_manual")
-    utilidad_bruta = float(utilidad_bruta_ventas) + float(utilidad_bruta_manual)
-    costo_ventas = 0.0
-    gastos_fijos, gastos_variables = obtener_gastos_fijos_variables(DATA["gastos"], desde, hasta)
-    empleados_fijos = obtener_empleados_fijos_periodo(DATA["empleados"], desde, hasta)
-    empleados_variables = obtener_empleados_variables_periodo(DATA["gastos"], desde, hasta)
-    perdidas_tot = suma_col(perdidas_df, "valor")
-    retiros_tot = suma_col(dueno_df, "monto")
+    with st.expander("⚙️ Configuración financiera del reporte", expanded=False):
+        cfg_fin = obtener_config_financiera()
+        st.write("Configura ISR, depreciación y datos del negocio desde Supabase en la tabla configuracion_financiera.")
+        st.json({
+            "nombre_negocio": cfg_fin.get("nombre_negocio", "BIBE RON 01"),
+            "porcentaje_isr": cfg_fin.get("porcentaje_isr", 0),
+            "incluir_isr": cfg_fin.get("incluir_isr", False),
+            "incluir_depreciacion": cfg_fin.get("incluir_depreciacion", True),
+        })
 
-    adelantos_tot = suma_col(filtrar_por_fechas(DATA["adelantos_empleados"], desde, hasta), "monto")
-    utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
+    render_estado_resultados_pro(desde_er, hasta_er)
 
-    resumen = pd.DataFrame(
-        [
-            ["Ventas", ventas_tot],
-            ["Compras", compras_tot],
-            ["Costo de ventas", costo_ventas],
-            ["Utilidad bruta desde ventas", utilidad_bruta_ventas],
-            ["Utilidad bruta manual", utilidad_bruta_manual],
-            ["Utilidad bruta total", utilidad_bruta],
-            ["Gastos fijos", gastos_fijos],
-            ["Gastos variables", gastos_variables],
-            ["Empleados fijos", empleados_fijos],
-            ["Empleados variables", empleados_variables],
-            ["Adelantos", adelantos_tot],
-            ["Pérdidas", perdidas_tot],
-            ["Retiros del dueño", retiros_tot],
-            ["65% dueño", utilidad_neta * 0.65],
-            ["35% gerente", utilidad_neta * 0.35],
-            ["Utilidad neta", utilidad_neta],
-        ],
-        columns=["concepto", "monto"],
-    )
-
-    st.dataframe(resumen, use_container_width=True)
-    descargar_archivos(resumen, "estado_resultados_resumen")
-
-    if st.button("💾 Guardar snapshot de este estado de resultados"):
-        ok = guardar_snapshot_estado_resultados(
-            fecha=date.today(),
-            desde=desde,
-            hasta=hasta,
-            ventas=ventas_tot,
-            compras=compras_tot,
-            costo_ventas=costo_ventas,
-            utilidad_bruta=utilidad_bruta,
-            gastos_fijos=gastos_fijos,
-            gastos_variables=gastos_variables,
-            empleados_fijos=empleados_fijos,
-            empleados_variables=empleados_variables,
-            perdidas=perdidas_tot,
-            retiros_dueno=retiros_tot,
-            utilidad_neta=utilidad_neta,
-        )
-        if ok:
-            st.success("Snapshot guardado.")
-            st.rerun()
-
-    hist = DATA["estado_resultados"].copy()
-    if not hist.empty:
-        st.subheader("📚 Historial guardado")
-        st.dataframe(hist, use_container_width=True)
-        descargar_archivos(hist, "estado_resultados_historial")
 
 
 
@@ -6435,6 +6713,117 @@ elif menu == "Créditos":
 # =========================================================
 # USUARIOS
 # =========================================================
+
+# =========================================================
+# CAPITAL BASE
+# =========================================================
+elif menu == "Capital Base":
+    st.title("💼 Capital Base")
+    if not es_admin():
+        st.error("Solo administración puede configurar el capital base.")
+        st.stop()
+
+    st.caption("Aquí registras el capital que pertenece al negocio para que no se confunda con ganancia.")
+
+    with st.expander("➕ Registrar capital base", expanded=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            concepto = st.text_input("Concepto", value="Capital base inicial", key="cap_concepto")
+            monto = st.number_input("Monto", min_value=0.0, step=1.0, key="cap_monto")
+        with c2:
+            origen = st.selectbox("Origen", ["Inventario + dinero real", "Aporte dueña", "Ajuste contable", "Otro"], key="cap_origen")
+            obs = st.text_area("Observación", key="cap_obs")
+        if st.button("Guardar capital base", key="btn_cap_guardar"):
+            if insertar("capital_base", {"fecha": datetime.now().isoformat(), "concepto": concepto, "monto": float(monto), "origen": origen, "observacion": obs, "activo": True}):
+                registrar_movimiento_contable("capital_base", concepto, "3001", "Capital base", "capital", credito=float(monto), descripcion=obs)
+                st.success("Capital base guardado.")
+                st.rerun()
+
+    df = _df_actual("capital_base")
+    if df.empty:
+        st.info("No hay capital base registrado.")
+    else:
+        st.dataframe(df, use_container_width=True)
+        descargar_archivos(df, "capital_base")
+
+# =========================================================
+# ACTIVOS FIJOS
+# =========================================================
+elif menu == "Activos Fijos":
+    st.title("🧊 Activos Fijos y Depreciación")
+    if not es_admin():
+        st.error("Solo administración puede gestionar activos fijos.")
+        st.stop()
+
+    st.caption("Registra freezers, neveras, mobiliario y equipos para calcular depreciación.")
+
+    with st.expander("➕ Registrar activo fijo", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            nombre = st.text_input("Activo", key="af_nombre")
+            categoria = st.selectbox("Categoría", ["Freezer", "Nevera", "Mobiliario", "Equipo", "Vehículo", "Otro"], key="af_cat")
+        with c2:
+            fecha_compra = st.date_input("Fecha compra", value=date.today(), key="af_fecha")
+            costo = st.number_input("Costo", min_value=0.0, step=1.0, key="af_costo")
+        with c3:
+            vida = st.number_input("Vida útil meses", min_value=1.0, step=1.0, value=60.0, key="af_vida")
+            dep_mensual = costo / vida if vida else 0
+            st.metric("Depreciación mensual", f"RD$ {dep_mensual:,.2f}")
+        obs = st.text_area("Observación", key="af_obs")
+        if st.button("Guardar activo fijo", key="btn_af_guardar"):
+            payload = {
+                "fecha_compra": str(fecha_compra),
+                "nombre": nombre,
+                "categoria": categoria,
+                "costo": float(costo),
+                "vida_util_meses": float(vida),
+                "depreciacion_mensual": float(dep_mensual),
+                "depreciacion_acumulada": 0,
+                "valor_en_libros": float(costo),
+                "estado": "activo",
+                "observacion": obs,
+            }
+            if insertar("activos_fijos", payload):
+                st.success("Activo fijo guardado.")
+                st.rerun()
+
+    activos = _df_actual("activos_fijos")
+    if activos.empty:
+        st.info("No hay activos fijos registrados.")
+    else:
+        st.dataframe(activos, use_container_width=True)
+        descargar_archivos(activos, "activos_fijos")
+
+    with st.expander("📉 Generar depreciación mensual", expanded=False):
+        periodo = st.text_input("Periodo", value=date.today().strftime("%Y-%m"), key="dep_periodo")
+        if st.button("Generar depreciación del mes", key="btn_dep_generar"):
+            creados = 0
+            for _, r in activos.iterrows():
+                if str(r.get("estado", "activo")).lower() != "activo":
+                    continue
+                monto = float(limpiar_numero(r.get("depreciacion_mensual")) or 0)
+                if monto <= 0:
+                    continue
+                if insertar("depreciaciones", {
+                    "activo_id": r.get("id"),
+                    "fecha": str(date.today()),
+                    "activo_nombre": r.get("nombre"),
+                    "monto": monto,
+                    "periodo": periodo,
+                    "observacion": "Depreciación mensual automática",
+                }):
+                    registrar_movimiento_contable("depreciacion", r.get("id"), "6006", "Depreciación", "gasto", debito=monto, descripcion=f"Depreciación {r.get('nombre')}")
+                    creados += 1
+            st.success(f"Depreciaciones generadas: {creados}")
+            st.rerun()
+
+    deps = _df_actual("depreciaciones")
+    if not deps.empty:
+        st.subheader("Historial de depreciaciones")
+        st.dataframe(deps, use_container_width=True)
+
+
+
 elif menu == "Usuarios":
     st.title("👤 Usuarios")
     if not es_admin() and not tiene_permiso("puede_configurar"):
