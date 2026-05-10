@@ -2998,15 +2998,34 @@ def _num(v) -> float:
         return 0.0
 
 def _sum_any(df: pd.DataFrame, cols) -> float:
+    """
+    Suma la mejor columna disponible.
+    Importante: si una columna existe pero está toda en cero, no se queda con esa;
+    busca otra columna con valores reales. Esto evita que venta_bruta default 0
+    opaque los totales reales de ventas.
+    """
     if df is None or df.empty:
         return 0.0
+
+    mejores = []
     for c in cols:
         if c in df.columns:
             try:
-                return float(pd.to_numeric(df[c].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0).sum())
+                serie = pd.to_numeric(df[c].apply(lambda x: limpiar_numero(x)), errors="coerce").fillna(0)
+                suma = float(serie.sum())
+                positivos = int((serie.abs() > 0).sum())
+                mejores.append((c, suma, positivos))
             except Exception:
-                return 0.0
-    return 0.0
+                continue
+
+    if not mejores:
+        return 0.0
+
+    # elegir columna con más valores reales; si empatan, mayor suma absoluta
+    mejores = sorted(mejores, key=lambda x: (x[2], abs(x[1])), reverse=True)
+    return float(mejores[0][1])
+
+
 
 def registrar_movimiento_contable(modulo, referencia_id, cuenta_codigo, cuenta_nombre, tipo_cuenta, debito=0, credito=0, descripcion="", usuario=None):
     try:
@@ -3055,9 +3074,15 @@ def calcular_estado_resultados_pro(desde, hasta) -> dict:
     ventas = _filtrar_periodo_df(_df_actual("ventas"), desde, hasta)
     ventas = aplicar_total_contable_df(ventas) if "aplicar_total_contable_df" in globals() and not ventas.empty else ventas
     total_col = "total_contable" if "total_contable" in ventas.columns else "total"
-    ventas_brutas = _sum_any(ventas, ["venta_bruta", total_col, "total"])
+    ventas_brutas = _sum_any(ventas, ["venta_bruta", total_col, "total", "subtotal"])
     descuentos = _sum_any(ventas, ["descuento_total", "descuento", "descuentos"])
     devoluciones = _sum_any(ventas, ["devolucion_total", "devolucion", "devoluciones"])
+
+    # Si venta_bruta quedó en cero por columna nueva agregada en Supabase,
+    # tomar total real como base.
+    if ventas_brutas <= 0 and not ventas.empty:
+        ventas_brutas = _sum_any(ventas, [total_col, "total", "subtotal"])
+
     ventas_netas = max(ventas_brutas - descuentos - devoluciones, 0)
 
     compras = _filtrar_periodo_df(_df_actual("compras"), desde, hasta)
@@ -5870,6 +5895,15 @@ elif menu == "Estado de Resultados":
             "incluir_isr": cfg_fin.get("incluir_isr", False),
             "incluir_depreciacion": cfg_fin.get("incluir_depreciacion", True),
         })
+
+    with st.expander("🔎 Ver datos base usados por el reporte", expanded=False):
+        ventas_dbg = _filtrar_periodo_df(_df_actual("ventas"), desde_er, hasta_er)
+        st.write("Ventas encontradas en el periodo:", len(ventas_dbg))
+        if not ventas_dbg.empty:
+            cols_dbg = [c for c in ["fecha", "numero_factura", "total", "total_contable", "subtotal", "venta_bruta", "descuento", "descuento_total", "metodo_pago", "usuario"] if c in ventas_dbg.columns]
+            st.dataframe(ventas_dbg[cols_dbg] if cols_dbg else ventas_dbg, use_container_width=True)
+        gastos_dbg = _filtrar_periodo_df(_df_actual("gastos"), desde_er, hasta_er)
+        st.write("Gastos encontrados en el periodo:", len(gastos_dbg))
 
     render_estado_resultados_pro(desde_er, hasta_er)
 
