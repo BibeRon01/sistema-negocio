@@ -1951,6 +1951,60 @@ def calcular_total_dinero_inventario() -> float:
     except Exception:
         return 0.0
 
+
+def calcular_utilidad_neta_operativa_periodo(desde, hasta, utilidad_bruta_manual=0.0) -> dict:
+    """
+    Fuente única para Dashboard y Distribución.
+    Regla:
+    Utilidad bruta + ajuste manual
+    - gastos fijos
+    - gastos variables
+    - empleados fijos
+    - empleados variables
+    - pérdidas de mercancía
+    = utilidad neta operativa
+
+    Gastos/retiros del dueño NO bajan la utilidad neta operativa.
+    Solo se descuentan de la parte del dueño luego del reparto.
+    """
+    ventas_df = obtener_ventas_periodo_actualizadas(desde, hasta)
+    gastos_fijos, gastos_variables = obtener_gastos_fijos_variables(DATA["gastos"], desde, hasta)
+    empleados_fijos = obtener_empleados_fijos_periodo(DATA["empleados"], desde, hasta)
+    empleados_variables = obtener_empleados_variables_periodo(DATA["gastos"], desde, hasta)
+    perdidas_df = filtrar_por_fechas(DATA["perdidas"], desde, hasta)
+    dueno_df = filtrar_por_fechas(DATA["gastos_dueno"], desde, hasta)
+
+    utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df)
+    utilidad_bruta_total = float(utilidad_bruta_ventas) + float(utilidad_bruta_manual or 0)
+    perdidas_tot = suma_col(perdidas_df, "valor")
+    retiros_dueno = suma_col(dueno_df, "monto")
+
+    utilidad_neta = (
+        utilidad_bruta_total
+        - gastos_fijos
+        - gastos_variables
+        - empleados_fijos
+        - empleados_variables
+        - perdidas_tot
+    )
+
+    utilidad_distribuible = max(utilidad_neta, 0)
+
+    return {
+        "ventas_df": ventas_df,
+        "utilidad_bruta_ventas": float(utilidad_bruta_ventas),
+        "utilidad_bruta_total": float(utilidad_bruta_total),
+        "gastos_fijos": float(gastos_fijos),
+        "gastos_variables": float(gastos_variables),
+        "empleados_fijos": float(empleados_fijos),
+        "empleados_variables": float(empleados_variables),
+        "perdidas": float(perdidas_tot),
+        "retiros_dueno": float(retiros_dueno),
+        "utilidad_neta": float(utilidad_neta),
+        "utilidad_distribuible": float(utilidad_distribuible),
+    }
+
+
 def resumen_financiero_periodo(desde, hasta, utilidad_bruta_manual: float = 0.0) -> dict[str, float]:
     ventas_df = obtener_ventas_periodo_actualizadas(desde, hasta)
     compras_df = filtrar_por_fechas(DATA["compras"], desde, hasta)
@@ -3320,12 +3374,18 @@ def _estado_tabla(items):
 # =========================================================
 
 def calcular_distribucion_beneficios(desde, hasta, porc_duena=65.0, porc_gerente=35.0) -> dict:
-    """Calcula la distribución mensual: gerente 35%, dueño 65%, gastos dueño contra el 65%."""
-    er = calcular_estado_resultados_pro(desde, hasta) if "calcular_estado_resultados_pro" in globals() else {}
-    utilidad_neta = float(er.get("utilidad_neta", 0) or 0)
+    """
+    Calcula la distribución mensual correctamente.
+    Si la utilidad neta es negativa o cero, NO se reparte.
+    Las pérdidas de mercancía sí afectan al gerente porque bajan la utilidad neta.
+    Los gastos/retiros del dueño solo afectan la parte del dueño.
+    """
+    base = calcular_utilidad_neta_operativa_periodo(desde, hasta, 0.0) if "calcular_utilidad_neta_operativa_periodo" in globals() else {}
+    utilidad_neta = float(base.get("utilidad_neta", 0) or 0)
+    utilidad_distribuible = max(utilidad_neta, 0)
 
-    monto_dueno = utilidad_neta * (float(porc_duena) / 100)
-    monto_gerente = utilidad_neta * (float(porc_gerente) / 100)
+    monto_dueno = utilidad_distribuible * (float(porc_duena) / 100)
+    monto_gerente = utilidad_distribuible * (float(porc_gerente) / 100)
 
     dueno = _filtrar_periodo_df(_df_actual("gastos_dueno"), desde, hasta)
     if not dueno.empty and "afecta_distribucion" in dueno.columns:
@@ -3333,17 +3393,22 @@ def calcular_distribucion_beneficios(desde, hasta, porc_duena=65.0, porc_gerente
     gastos_dueno = _sum_any(dueno, ["monto", "total", "valor"])
 
     disponible_duena = monto_dueno - gastos_dueno
+    exceso_gastos_dueno = abs(disponible_duena) if disponible_duena < 0 else 0.0
 
     return {
         "utilidad_neta": utilidad_neta,
+        "utilidad_distribuible": utilidad_distribuible,
+        "periodo_en_perdida": utilidad_neta <= 0,
         "porcentaje_duena": float(porc_duena),
         "porcentaje_gerente": float(porc_gerente),
         "monto_duena_calculado": monto_dueno,
         "monto_gerente_calculado": monto_gerente,
         "gastos_duena_periodo": gastos_dueno,
         "disponible_duena": disponible_duena,
-        "estado_resultados": er,
+        "exceso_gastos_dueno": exceso_gastos_dueno,
+        "estado_resultados": base,
     }
+
 
 def guardar_distribucion_beneficios(desde, hasta, calc, pago_duena, reinversion_duena, pendiente_duena, pago_gerente, pendiente_gerente, metodo_duena, metodo_gerente, observacion):
     payload = {
@@ -3609,16 +3674,21 @@ if menu == "Dashboard":
     pagos_empleados_debug = filtrar_por_fechas(leer_pagos_empleados_actualizados(), desde, hasta) if "leer_pagos_empleados_actualizados" in globals() else DATA.get("adelantos_empleados", pd.DataFrame()).copy()
     pagos_empleados_tot = suma_col(pagos_empleados_debug, "monto")
 
-    utilidad_bruta_ventas = obtener_utilidad_bruta_periodo(ventas_df)
     utilidad_bruta_manual = st.number_input("Utilidad bruta manual / ajuste", min_value=0.0, step=1.0, key="dash_utilidad_bruta_manual")
-    utilidad_bruta = float(utilidad_bruta_ventas) + float(utilidad_bruta_manual)
+    base_utilidad = calcular_utilidad_neta_operativa_periodo(desde, hasta, utilidad_bruta_manual)
 
-    utilidad_neta = utilidad_bruta - gastos_fijos - gastos_variables - empleados_fijos - empleados_variables - perdidas_tot
-    dueno_65 = utilidad_neta * 0.65
-    gerente_35 = utilidad_neta * 0.35
+    utilidad_bruta_ventas = base_utilidad["utilidad_bruta_ventas"]
+    utilidad_bruta = base_utilidad["utilidad_bruta_total"]
+    utilidad_neta = base_utilidad["utilidad_neta"]
+    utilidad_distribuible = base_utilidad["utilidad_distribuible"]
 
-    # El retiro del dueño NO afecta al gerente ni baja la utilidad neta.
-    # Solo se descuenta del 65% correspondiente al dueño.
+    # Si hay pérdida, NO se reparte pérdida. Gerente y dueño quedan en cero.
+    porcentaje_gerente_dash = 35.0
+    porcentaje_dueno_dash = 100.0 - porcentaje_gerente_dash
+    dueno_65 = utilidad_distribuible * (porcentaje_dueno_dash / 100)
+    gerente_35 = utilidad_distribuible * (porcentaje_gerente_dash / 100)
+
+    # El retiro/gasto del dueño solo se descuenta de la parte del dueño.
     saldo_dueno_final = dueno_65 - retiros_tot
     saldo_gerente_final = gerente_35
 
@@ -3655,6 +3725,8 @@ if menu == "Dashboard":
     d2.metric("Retiros del dueño", f"RD$ {retiros_tot:,.2f}")
     d3.metric("Saldo final dueño", f"RD$ {saldo_dueno_final:,.2f}")
     d4.metric("Beneficio gerente", f"RD$ {saldo_gerente_final:,.2f}")
+    if utilidad_neta <= 0:
+        st.warning("Este período cerró en pérdida. No hay utilidad distribuible para gerente ni dueño.")
 
     st.caption("Los retiros/gastos del dueño solo se descuentan de la parte del dueño. No afectan el beneficio del gerente.")
 
@@ -6969,7 +7041,7 @@ elif menu == "Distribución Beneficios":
         st.error("Solo administración puede registrar la distribución de beneficios.")
         st.stop()
 
-    st.caption("Divide la utilidad neta: 35% gerente y Parte del dueño. Los gastos del dueño se descuentan del 65% de la dueño.")
+    st.caption("Divide la utilidad neta positiva según el % del gerente. Los gastos/retiros del dueño se descuentan solo de la parte del dueño.")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -6998,11 +7070,14 @@ elif menu == "Distribución Beneficios":
     st.markdown("### 📊 Cálculo automático")
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Utilidad neta", _fmt_rd(calc["utilidad_neta"]))
-    k2.metric("35% gerente", _fmt_rd(calc["monto_gerente_calculado"]))
+    k2.metric("Beneficio gerente", _fmt_rd(calc["monto_gerente_calculado"]))
     k3.metric("Parte del dueño", _fmt_rd(calc["monto_duena_calculado"]))
     k4.metric("Gastos dueño", _fmt_rd(calc["gastos_duena_periodo"]))
 
-    st.markdown("### 👑 Parte de la dueño")
+    if calc.get("periodo_en_perdida"):
+        st.warning("Este período está en pérdida. No se calcula beneficio para gerente ni dueño. Los gastos del dueño quedan como consumo/deuda contra el negocio.")
+
+    st.markdown("### 👑 Parte del dueño")
     d1, d2, d3 = st.columns(3)
     d1.metric("Disponible dueño después de gastos", _fmt_rd(calc["disponible_duena"]))
 
@@ -7033,7 +7108,7 @@ elif menu == "Distribución Beneficios":
     st.markdown("### 📌 Resumen final")
     resumen_dist = pd.DataFrame([
         {"Concepto": "Utilidad neta", "RD$": _fmt_rd(calc["utilidad_neta"])},
-        {"Concepto": "Gerente 35%", "RD$": _fmt_rd(calc["monto_gerente_calculado"])},
+        {"Concepto": "Beneficio gerente según %", "RD$": _fmt_rd(calc["monto_gerente_calculado"])},
         {"Concepto": "Pago gerente", "RD$": _fmt_rd(pago_gerente)},
         {"Concepto": "Pendiente gerente", "RD$": _fmt_rd(pendiente_gerente)},
         {"Concepto": "Parte del dueño", "RD$": _fmt_rd(calc["monto_duena_calculado"])},
