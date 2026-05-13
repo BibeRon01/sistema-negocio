@@ -3452,7 +3452,25 @@ def calcular_distribucion_beneficios(desde, hasta, porc_duena=65.0, porc_gerente
     }
 
 
-def guardar_distribucion_beneficios(desde, hasta, calc, pago_duena, reinversion_duena, pendiente_duena, pago_gerente, pendiente_gerente, metodo_duena, metodo_gerente, observacion):
+def guardar_distribucion_beneficios(
+    desde, hasta, calc,
+    pago_duena, reinversion_duena, pendiente_duena,
+    pago_gerente, pendiente_gerente,
+    metodo_duena, metodo_gerente,
+    observacion,
+    pago_dueno_efectivo=0.0, pago_dueno_transferencia=0.0, pago_dueno_tarjeta=0.0,
+    pago_gerente_efectivo=0.0, pago_gerente_transferencia=0.0, pago_gerente_tarjeta=0.0,
+):
+    # Totales reales desde desglose mixto
+    pago_duena_total = float(pago_dueno_efectivo or 0) + float(pago_dueno_transferencia or 0) + float(pago_dueno_tarjeta or 0)
+    pago_gerente_total = float(pago_gerente_efectivo or 0) + float(pago_gerente_transferencia or 0) + float(pago_gerente_tarjeta or 0)
+
+    # Compatibilidad: si no se usó desglose, usa el campo anterior
+    if pago_duena_total <= 0:
+        pago_duena_total = float(pago_duena or 0)
+    if pago_gerente_total <= 0:
+        pago_gerente_total = float(pago_gerente or 0)
+
     payload = {
         "periodo_desde": str(desde),
         "periodo_hasta": str(hasta),
@@ -3463,17 +3481,24 @@ def guardar_distribucion_beneficios(desde, hasta, calc, pago_duena, reinversion_
         "monto_gerente_calculado": float(calc["monto_gerente_calculado"]),
         "gastos_duena_periodo": float(calc["gastos_duena_periodo"]),
         "disponible_duena": float(calc["disponible_duena"]),
-        "pago_duena": float(pago_duena),
+        "pago_duena": float(pago_duena_total),
         "reinversion_duena": float(reinversion_duena),
         "pendiente_duena": float(pendiente_duena),
-        "pago_gerente": float(pago_gerente),
+        "pago_gerente": float(pago_gerente_total),
         "pendiente_gerente": float(pendiente_gerente),
-        "metodo_pago_duena": metodo_duena,
-        "metodo_pago_gerente": metodo_gerente,
+        "metodo_pago_duena": "mixto" if pago_duena_total > 0 else metodo_duena,
+        "metodo_pago_gerente": "mixto" if pago_gerente_total > 0 else metodo_gerente,
         "estado": "registrada",
         "observacion": observacion,
         "usuario": nombre_usuario_actual(),
         "fecha_registro": datetime.now().isoformat(),
+        # Desglose mixto
+        "pago_dueno_efectivo": float(pago_dueno_efectivo or 0),
+        "pago_dueno_transferencia": float(pago_dueno_transferencia or 0),
+        "pago_dueno_tarjeta": float(pago_dueno_tarjeta or 0),
+        "pago_gerente_efectivo": float(pago_gerente_efectivo or 0),
+        "pago_gerente_transferencia": float(pago_gerente_transferencia or 0),
+        "pago_gerente_tarjeta": float(pago_gerente_tarjeta or 0),
     }
     if "json_safe_payload" in globals():
         payload = json_safe_payload(payload)
@@ -3486,23 +3511,48 @@ def guardar_distribucion_beneficios(desde, hasta, calc, pago_duena, reinversion_
         st.error(f"No se pudo guardar la distribución: {e}")
         return False
 
-    # Movimientos de dinero real / contables
-    try:
-        if float(pago_duena or 0) > 0:
-            cuenta = cuenta_por_metodo_pago(metodo_duena) if "cuenta_por_metodo_pago" in globals() else ("Efectivo negocio" if metodo_duena == "efectivo" else "Banco")
-            try:
-                registrar_movimiento_dinero("salida", float(pago_duena), "Pago beneficio dueño", metodo_pago=metodo_duena, cuenta=cuenta, categoria="distribucion_beneficios")
-            except Exception:
-                pass
-            registrar_movimiento_contable("distribucion_beneficios", dist_id, "3003", "Retiros del dueño", "capital", debito=float(pago_duena), descripcion="Pago beneficio dueño")
+    def _registrar_salida_mixta(persona, monto, metodo, cuenta_contable_codigo, cuenta_contable_nombre, tipo_cuenta, descripcion):
+        if float(monto or 0) <= 0:
+            return
+        cuenta = cuenta_por_metodo_pago(metodo) if "cuenta_por_metodo_pago" in globals() else ("Efectivo negocio" if metodo == "efectivo" else "Banco")
+        try:
+            registrar_movimiento_dinero(
+                "salida",
+                float(monto),
+                descripcion,
+                metodo_pago=metodo,
+                cuenta=cuenta,
+                categoria="distribucion_beneficios" if persona == "dueno" else "beneficio_gerente",
+            )
+        except Exception:
+            pass
+        registrar_movimiento_contable(
+            "distribucion_beneficios",
+            dist_id,
+            cuenta_contable_codigo,
+            cuenta_contable_nombre,
+            tipo_cuenta,
+            debito=float(monto),
+            descripcion=f"{descripcion} por {metodo}",
+        )
 
-        if float(pago_gerente or 0) > 0:
-            cuenta = cuenta_por_metodo_pago(metodo_gerente) if "cuenta_por_metodo_pago" in globals() else ("Efectivo negocio" if metodo_gerente == "efectivo" else "Banco")
-            try:
-                registrar_movimiento_dinero("salida", float(pago_gerente), "Pago beneficio gerente", metodo_pago=metodo_gerente, cuenta=cuenta, categoria="beneficio_gerente")
-            except Exception:
-                pass
-            registrar_movimiento_contable("distribucion_beneficios", dist_id, "6009", "Beneficio gerente", "gasto", debito=float(pago_gerente), descripcion="Pago beneficio gerente")
+    try:
+        # Pagos mixtos dueño
+        _registrar_salida_mixta("dueno", pago_dueno_efectivo, "efectivo", "3003", "Retiros del dueño", "capital", "Pago beneficio dueño")
+        _registrar_salida_mixta("dueno", pago_dueno_transferencia, "transferencia", "3003", "Retiros del dueño", "capital", "Pago beneficio dueño")
+        _registrar_salida_mixta("dueno", pago_dueno_tarjeta, "tarjeta", "3003", "Retiros del dueño", "capital", "Pago beneficio dueño")
+
+        # Respaldo si no hay desglose
+        if float(pago_duena_total or 0) > 0 and (float(pago_dueno_efectivo or 0) + float(pago_dueno_transferencia or 0) + float(pago_dueno_tarjeta or 0)) <= 0:
+            _registrar_salida_mixta("dueno", pago_duena_total, metodo_duena, "3003", "Retiros del dueño", "capital", "Pago beneficio dueño")
+
+        # Pagos mixtos gerente
+        _registrar_salida_mixta("gerente", pago_gerente_efectivo, "efectivo", "6009", "Beneficio gerente", "gasto", "Pago beneficio gerente")
+        _registrar_salida_mixta("gerente", pago_gerente_transferencia, "transferencia", "6009", "Beneficio gerente", "gasto", "Pago beneficio gerente")
+        _registrar_salida_mixta("gerente", pago_gerente_tarjeta, "tarjeta", "6009", "Beneficio gerente", "gasto", "Pago beneficio gerente")
+
+        if float(pago_gerente_total or 0) > 0 and (float(pago_gerente_efectivo or 0) + float(pago_gerente_transferencia or 0) + float(pago_gerente_tarjeta or 0)) <= 0:
+            _registrar_salida_mixta("gerente", pago_gerente_total, metodo_gerente, "6009", "Beneficio gerente", "gasto", "Pago beneficio gerente")
 
         if float(reinversion_duena or 0) > 0:
             registrar_movimiento_contable("distribucion_beneficios", dist_id, "3006", "Reinversión de utilidades", "capital", credito=float(reinversion_duena), descripcion="Utilidad dueño reinvertida")
@@ -7158,32 +7208,65 @@ elif menu == "Distribución Beneficios":
         st.warning("Este período está en pérdida. No se calcula beneficio para gerente ni dueño. Los gastos del dueño quedan como consumo/deuda contra el negocio.")
 
     st.markdown("### 👑 Parte del dueño")
-    d1, d2, d3 = st.columns(3)
+    d1, d2 = st.columns(2)
     d1.metric("Disponible dueño después de gastos", _fmt_rd(calc["disponible_duena"]))
 
-    max_dueno = max(calc["disponible_duena"], 0)
-    with d2:
-        pago_duena = st.number_input("Monto a pagar al dueño", min_value=0.0, max_value=float(max_dueno) if max_dueno > 0 else None, value=0.0, step=1.0, key="dist_pago_duena")
-    with d3:
-        reinversion_duena = st.number_input("Monto a reinvertir", min_value=0.0, max_value=float(max(max_dueno - pago_duena, 0)) if max_dueno > 0 else None, value=float(max(max_dueno - pago_duena, 0)), step=1.0, key="dist_reinv_duena")
+    max_duena = max(calc["disponible_duena"], 0)
 
-    pendiente_duena = max(max_dueno - pago_duena - reinversion_duena, 0)
-    exceso_gastos_dueno = abs(calc["disponible_duena"]) if calc["disponible_duena"] < 0 else 0
+    st.caption("Puedes pagar al dueño por varios métodos. El sistema suma efectivo + transferencia + tarjeta.")
+    pd1, pd2, pd3 = st.columns(3)
+    with pd1:
+        pago_dueno_efectivo = st.number_input("Pago dueño efectivo", min_value=0.0, value=0.0, step=1.0, key="dist_pago_dueno_efectivo")
+    with pd2:
+        pago_dueno_transferencia = st.number_input("Pago dueño transferencia", min_value=0.0, value=0.0, step=1.0, key="dist_pago_dueno_transferencia")
+    with pd3:
+        pago_dueno_tarjeta = st.number_input("Pago dueño tarjeta", min_value=0.0, value=0.0, step=1.0, key="dist_pago_dueno_tarjeta")
+
+    pago_duena = float(pago_dueno_efectivo or 0) + float(pago_dueno_transferencia or 0) + float(pago_dueno_tarjeta or 0)
+
+    if pago_duena > max_duena:
+        st.error("El pago total al dueño no puede ser mayor que el disponible del dueño.")
+        pago_duena = max_duena
+
+    restante_dueno = max(max_duena - pago_duena, 0)
+    reinversion_duena = st.number_input(
+        "Monto a reinvertir",
+        min_value=0.0,
+        max_value=float(restante_dueno) if restante_dueno > 0 else None,
+        value=float(restante_dueno),
+        step=1.0,
+        key="dist_reinv_duena"
+    )
+
+    pendiente_duena = max(max_duena - pago_duena - reinversion_duena, 0)
+    exceso_gastos_duena = abs(calc["disponible_duena"]) if calc["disponible_duena"] < 0 else 0
 
     st.markdown("### 👨‍💼 Parte del gerente")
-    g1, g2, g3 = st.columns(3)
+    g1, g2 = st.columns(2)
     g1.metric("Calculado gerente", _fmt_rd(calc["monto_gerente_calculado"]))
-    with g2:
-        pago_gerente = st.number_input("Monto a pagar gerente", min_value=0.0, max_value=float(max(calc["monto_gerente_calculado"], 0)) if calc["monto_gerente_calculado"] > 0 else None, value=float(max(calc["monto_gerente_calculado"], 0)), step=1.0, key="dist_pago_gerente")
-    pendiente_gerente = max(calc["monto_gerente_calculado"] - pago_gerente, 0)
-    g3.metric("Pendiente gerente", _fmt_rd(pendiente_gerente))
 
-    st.markdown("### 💳 Método de pago")
-    m1, m2 = st.columns(2)
-    with m1:
-        metodo_duena = st.selectbox("Método pago dueño", ["efectivo", "transferencia", "tarjeta"], key="dist_metodo_duena")
-    with m2:
-        metodo_gerente = st.selectbox("Método pago gerente", ["efectivo", "transferencia", "tarjeta"], key="dist_metodo_gerente")
+    max_gerente = max(calc["monto_gerente_calculado"], 0)
+
+    st.caption("Puedes pagar al gerente por varios métodos. El sistema suma efectivo + transferencia + tarjeta.")
+    pg1, pg2, pg3 = st.columns(3)
+    with pg1:
+        pago_gerente_efectivo = st.number_input("Pago gerente efectivo", min_value=0.0, value=0.0, step=1.0, key="dist_pago_gerente_efectivo")
+    with pg2:
+        pago_gerente_transferencia = st.number_input("Pago gerente transferencia", min_value=0.0, value=0.0, step=1.0, key="dist_pago_gerente_transferencia")
+    with pg3:
+        pago_gerente_tarjeta = st.number_input("Pago gerente tarjeta", min_value=0.0, value=0.0, step=1.0, key="dist_pago_gerente_tarjeta")
+
+    pago_gerente = float(pago_gerente_efectivo or 0) + float(pago_gerente_transferencia or 0) + float(pago_gerente_tarjeta or 0)
+
+    if pago_gerente > max_gerente:
+        st.error("El pago total al gerente no puede ser mayor que el beneficio calculado del gerente.")
+        pago_gerente = max_gerente
+
+    pendiente_gerente = max(max_gerente - pago_gerente, 0)
+    g2.metric("Pendiente gerente", _fmt_rd(pendiente_gerente))
+
+    metodo_duena = "mixto"
+    metodo_gerente = "mixto"
 
     st.markdown("### 📌 Resumen final")
     resumen_dist = pd.DataFrame([
@@ -7213,6 +7296,12 @@ elif menu == "Distribución Beneficios":
             pago_gerente, pendiente_gerente,
             metodo_duena, metodo_gerente,
             observacion,
+            pago_dueno_efectivo=pago_dueno_efectivo,
+            pago_dueno_transferencia=pago_dueno_transferencia,
+            pago_dueno_tarjeta=pago_dueno_tarjeta,
+            pago_gerente_efectivo=pago_gerente_efectivo,
+            pago_gerente_transferencia=pago_gerente_transferencia,
+            pago_gerente_tarjeta=pago_gerente_tarjeta,
         ):
             st.success("Distribución guardada correctamente.")
             st.rerun()
