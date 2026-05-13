@@ -3373,6 +3373,48 @@ def _estado_tabla(items):
 # DISTRIBUCIÓN DE BENEFICIOS
 # =========================================================
 
+
+def obtener_distribucion_guardada_periodo(desde, hasta) -> dict | None:
+    """
+    Busca la última distribución guardada para el mismo rango de fechas.
+    El Dashboard debe usar esto para verse igual que Distribución Beneficios.
+    """
+    try:
+        df = _df_actual("distribucion_beneficios")
+    except Exception:
+        df = pd.DataFrame()
+
+    if df is None or df.empty:
+        return None
+
+    dsd = str(desde)
+    hst = str(hasta)
+
+    try:
+        tmp = df.copy()
+        if "periodo_desde" in tmp.columns and "periodo_hasta" in tmp.columns:
+            tmp = tmp[
+                (tmp["periodo_desde"].astype(str).str[:10] == dsd) &
+                (tmp["periodo_hasta"].astype(str).str[:10] == hst)
+            ].copy()
+        else:
+            return None
+
+        if tmp.empty:
+            return None
+
+        if "fecha_registro" in tmp.columns:
+            tmp["_fecha_registro"] = pd.to_datetime(tmp["fecha_registro"], errors="coerce")
+            tmp = tmp.sort_values("_fecha_registro", ascending=False)
+        elif "created_at" in tmp.columns:
+            tmp["_fecha_registro"] = pd.to_datetime(tmp["created_at"], errors="coerce")
+            tmp = tmp.sort_values("_fecha_registro", ascending=False)
+
+        return tmp.iloc[0].to_dict()
+    except Exception:
+        return None
+
+
 def calcular_distribucion_beneficios(desde, hasta, porc_duena=65.0, porc_gerente=35.0) -> dict:
     """
     Calcula la distribución mensual correctamente.
@@ -3682,15 +3724,41 @@ if menu == "Dashboard":
     utilidad_neta = base_utilidad["utilidad_neta"]
     utilidad_distribuible = base_utilidad["utilidad_distribuible"]
 
-    # Si hay pérdida, NO se reparte pérdida. Gerente y dueño quedan en cero.
-    porcentaje_gerente_dash = 35.0
-    porcentaje_dueno_dash = 100.0 - porcentaje_gerente_dash
-    dueno_65 = utilidad_distribuible * (porcentaje_dueno_dash / 100)
-    gerente_35 = utilidad_distribuible * (porcentaje_gerente_dash / 100)
+    # Primero intenta leer la distribución guardada para este mismo periodo.
+    # Si existe, el Dashboard muestra exactamente lo guardado en Distribución Beneficios.
+    dist_guardada = obtener_distribucion_guardada_periodo(desde, hasta) if "obtener_distribucion_guardada_periodo" in globals() else None
 
-    # El retiro/gasto del dueño solo se descuenta de la parte del dueño.
-    saldo_dueno_final = dueno_65 - retiros_tot
-    saldo_gerente_final = gerente_35
+    if dist_guardada:
+        porcentaje_gerente_dash = float(limpiar_numero(dist_guardada.get("porcentaje_gerente")) or 35.0)
+        porcentaje_dueno_dash = float(limpiar_numero(dist_guardada.get("porcentaje_duena")) or (100.0 - porcentaje_gerente_dash))
+        dueno_65 = float(limpiar_numero(dist_guardada.get("monto_duena_calculado")) or 0)
+        gerente_35 = float(limpiar_numero(dist_guardada.get("monto_gerente_calculado")) or 0)
+        retiros_tot = float(limpiar_numero(dist_guardada.get("gastos_duena_periodo")) or retiros_tot)
+        saldo_dueno_final = float(limpiar_numero(dist_guardada.get("disponible_duena")) or (dueno_65 - retiros_tot))
+        saldo_gerente_final = gerente_35
+        pago_dueno_dash = float(limpiar_numero(dist_guardada.get("pago_duena")) or 0)
+        reinversion_dueno_dash = float(limpiar_numero(dist_guardada.get("reinversion_duena")) or 0)
+        pendiente_dueno_dash = float(limpiar_numero(dist_guardada.get("pendiente_duena")) or 0)
+        pago_gerente_dash = float(limpiar_numero(dist_guardada.get("pago_gerente")) or 0)
+        pendiente_gerente_dash = float(limpiar_numero(dist_guardada.get("pendiente_gerente")) or 0)
+        fuente_distribucion_dash = "Distribución guardada"
+    else:
+        # Si no hay distribución guardada, se muestra cálculo preliminar.
+        # Si hay pérdida, NO se reparte pérdida. Gerente y dueño quedan en cero.
+        porcentaje_gerente_dash = 35.0
+        porcentaje_dueno_dash = 100.0 - porcentaje_gerente_dash
+        dueno_65 = utilidad_distribuible * (porcentaje_dueno_dash / 100)
+        gerente_35 = utilidad_distribuible * (porcentaje_gerente_dash / 100)
+
+        # El retiro/gasto del dueño solo se descuenta de la parte del dueño.
+        saldo_dueno_final = dueno_65 - retiros_tot
+        saldo_gerente_final = gerente_35
+        pago_dueno_dash = 0.0
+        reinversion_dueno_dash = max(saldo_dueno_final, 0)
+        pendiente_dueno_dash = 0.0
+        pago_gerente_dash = 0.0
+        pendiente_gerente_dash = gerente_35
+        fuente_distribucion_dash = "Cálculo preliminar"
 
     st.markdown("### 💼 Resumen general")
     a1, a2, a3, a4 = st.columns(4)
@@ -3720,13 +3788,25 @@ if menu == "Dashboard":
     c4.metric("Ajuste manual utilidad", f"RD$ {utilidad_bruta_manual:,.2f}")
 
     st.markdown("### 👥 Reparto dueño / gerente")
+    st.caption(f"Fuente del reparto: {fuente_distribucion_dash}. Gerente {porcentaje_gerente_dash:.2f}% | Dueño {porcentaje_dueno_dash:.2f}%")
+
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Parte del dueño", f"RD$ {dueno_65:,.2f}")
-    d2.metric("Retiros del dueño", f"RD$ {retiros_tot:,.2f}")
-    d3.metric("Saldo final dueño", f"RD$ {saldo_dueno_final:,.2f}")
+    d2.metric("Gastos/retiros dueño", f"RD$ {retiros_tot:,.2f}")
+    d3.metric("Disponible dueño", f"RD$ {saldo_dueno_final:,.2f}")
     d4.metric("Beneficio gerente", f"RD$ {saldo_gerente_final:,.2f}")
+
     if utilidad_neta <= 0:
         st.warning("Este período cerró en pérdida. No hay utilidad distribuible para gerente ni dueño.")
+
+    if dist_guardada:
+        e1, e2, e3, e4 = st.columns(4)
+        e1.metric("Pago dueño", f"RD$ {pago_dueno_dash:,.2f}")
+        e2.metric("Reinversión dueño", f"RD$ {reinversion_dueno_dash:,.2f}")
+        e3.metric("Pago gerente", f"RD$ {pago_gerente_dash:,.2f}")
+        e4.metric("Pendiente gerente", f"RD$ {pendiente_gerente_dash:,.2f}")
+    else:
+        st.info("Este período todavía no tiene una distribución guardada. El Dashboard muestra un cálculo preliminar. Para fijar el porcentaje, guarda la distribución en el módulo Distribución Beneficios.")
 
     st.caption("Los retiros/gastos del dueño solo se descuentan de la parte del dueño. No afectan el beneficio del gerente.")
 
