@@ -3435,7 +3435,7 @@ def calcular_distribucion_beneficios(desde, hasta, porc_duena=65.0, porc_gerente
     gastos_dueno = _sum_any(dueno, ["monto", "total", "valor"])
 
     disponible_duena = monto_dueno - gastos_dueno
-    exceso_gastos_dueno = abs(disponible_duena) if disponible_duena < 0 else 0.0
+    exceso_gastos_duena = abs(disponible_duena) if disponible_duena < 0 else 0.0
 
     return {
         "utilidad_neta": utilidad_neta,
@@ -3447,7 +3447,7 @@ def calcular_distribucion_beneficios(desde, hasta, porc_duena=65.0, porc_gerente
         "monto_gerente_calculado": monto_gerente,
         "gastos_duena_periodo": gastos_dueno,
         "disponible_duena": disponible_duena,
-        "exceso_gastos_dueno": exceso_gastos_dueno,
+        "exceso_gastos_duena": exceso_gastos_duena,
         "estado_resultados": base,
     }
 
@@ -7280,12 +7280,12 @@ elif menu == "Distribución Beneficios":
         {"Concepto": "Pago dueño", "RD$": _fmt_rd(pago_duena)},
         {"Concepto": "Reinversión dueño", "RD$": _fmt_rd(reinversion_duena)},
         {"Concepto": "Pendiente dueño", "RD$": _fmt_rd(pendiente_duena)},
-        {"Concepto": "Dueño debe al negocio por exceso de gastos", "RD$": _fmt_rd(exceso_gastos_dueno)},
+        {"Concepto": "Dueño debe al negocio por exceso de gastos", "RD$": _fmt_rd(exceso_gastos_duena)},
     ])
     st.dataframe(resumen_dist, use_container_width=True, hide_index=True)
 
-    if exceso_gastos_dueno > 0:
-        st.warning(f"La dueño gastó más de su 65%. Diferencia a favor del negocio: {_fmt_rd(exceso_gastos_dueno)}")
+    if exceso_gastos_duena > 0:
+        st.warning(f"La dueño gastó más de su 65%. Diferencia a favor del negocio: {_fmt_rd(exceso_gastos_duena)}")
 
     observacion = st.text_area("Observación", key="dist_obs")
 
