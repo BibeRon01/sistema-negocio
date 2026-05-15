@@ -3685,6 +3685,83 @@ def metodo_es_mixto(metodo):
         return str(metodo or "").strip().lower() == "mixto"
 
 
+
+# =========================================================
+# RECONSTRUIR CAJA DESDE VENTAS_PAGOS
+# =========================================================
+
+def reconstruir_movimientos_caja_desde_ventas_pagos(venta_id):
+    """
+    Fuente real: ventas_pagos.
+    Borra cualquier movimiento de caja de esa venta y lo reconstruye por método real.
+    Nunca crea metodo_pago='mixto'.
+    Crédito no entra como dinero físico, pero puede quedar fuera de caja para no inflar efectivo.
+    """
+    try:
+        venta_id_txt = str(venta_id)
+
+        # Buscar la venta para tomar caja_id y fecha si hace falta
+        venta_resp = supabase.table("ventas").select("*").eq("id", venta_id_txt).execute()
+        venta_row = (venta_resp.data or [{}])[0] if venta_resp.data else {}
+        caja_id_venta = venta_row.get("caja_id")
+        dia_venta = venta_row.get("dia_operativo") or str(date.today())
+        usuario_venta = venta_row.get("usuario") or nombre_usuario_actual()
+
+        # Buscar pagos reales
+        pagos_resp = supabase.table("ventas_pagos").select("*").eq("venta_id", venta_id_txt).execute()
+        pagos = pagos_resp.data or []
+
+        # Borrar movimientos viejos de esa venta para evitar duplicados o mixto
+        try:
+            supabase.table("movimientos_caja").delete().eq("origen", "venta").eq("referencia_id", venta_id_txt).execute()
+        except Exception:
+            pass
+
+        for p in pagos:
+            metodo = normalizar_texto(p.get("metodo") or p.get("metodo_pago") or "")
+            monto = float(limpiar_numero(p.get("monto")) or 0)
+
+            if monto <= 0:
+                continue
+
+            # Nunca registrar mixto. Se guardan solo las partes reales.
+            if metodo == "mixto":
+                continue
+
+            # Crédito no es dinero físico; ya vive en cuentas por cobrar.
+            if metodo == "credito":
+                continue
+
+            caja_id = p.get("caja_id") or caja_id_venta
+            dia_operativo = p.get("dia_operativo") or dia_venta
+            usuario = p.get("usuario") or usuario_venta
+
+            payload = {
+                "fecha": datetime.now().isoformat(),
+                "dia_operativo": str(dia_operativo),
+                "caja_id": str(caja_id) if caja_id else None,
+                "tipo_movimiento": "entrada",
+                "origen": "venta",
+                "referencia_id": venta_id_txt,
+                "metodo_pago": metodo,
+                "monto": monto,
+                "descripcion": "Ingreso automático por venta desde ventas_pagos",
+                "usuario": usuario,
+                "anulado": False,
+            }
+            if "json_safe_payload" in globals():
+                payload = json_safe_payload(payload)
+            supabase.table("movimientos_caja").insert(payload).execute()
+
+        return True
+    except Exception as e:
+        try:
+            st.warning(f"No se pudo reconstruir movimientos de caja: {e}")
+        except Exception:
+            pass
+        return False
+
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -6750,6 +6827,10 @@ elif menu == "POS":
                                     "caja_id": str(caja_activa.get("id")),
                                     "dia_operativo": ahora_str(),
                                 })).execute()
+                                try:
+                                    reconstruir_movimientos_caja_desde_ventas_pagos(venta_id)
+                                except Exception:
+                                    pass
                                 if metodo != "credito" and not metodo_es_mixto(metodo):
                                     try:
                                         supabase.table("movimientos_caja").insert(json_safe_payload({
