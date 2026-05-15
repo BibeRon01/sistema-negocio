@@ -6767,6 +6767,31 @@ elif menu == "POS":
                                         })).execute()
                                     except Exception:
                                         pass
+                        # Reconstruir movimientos de caja de esta venta desde los pagos reales.
+                        # Esto evita que quede un movimiento metodo_pago='mixto' por el total completo.
+                        try:
+                            supabase.table("movimientos_caja").delete().eq("referencia_id", str(venta_id)).eq("origen", "venta").execute()
+                        except Exception:
+                            pass
+                        for metodo_fix, monto_fix in pagos.items():
+                            if float(monto_fix or 0) > 0 and metodo_fix != "credito" and not metodo_es_mixto(metodo_fix):
+                                try:
+                                    supabase.table("movimientos_caja").insert(json_safe_payload({
+                                        "fecha": datetime.now().isoformat(),
+                                        "dia_operativo": ahora_str(),
+                                        "caja_id": str(caja_activa.get("id")),
+                                        "tipo_movimiento": "entrada",
+                                        "origen": "venta",
+                                        "referencia_id": str(venta_id),
+                                        "metodo_pago": metodo_fix,
+                                        "monto": float(monto_fix),
+                                        "descripcion": f"Ingreso automático por venta {venta_id}",
+                                        "usuario": nombre_usuario_actual(),
+                                        "anulado": False,
+                                    })).execute()
+                                except Exception:
+                                    pass
+
                         if pago_credito > 0:
                             supabase.table("cuentas_por_cobrar").insert({
                                 "cliente_id": cliente_id,
