@@ -2993,7 +2993,8 @@ def registrar_abono_credito_seguro(fila, monto, metodo_pago, observacion=""):
         "caja_id": json_safe_value(caja_activa.get("id")),
     })
     try:
-        supabase.table("movimientos_caja").insert(mov_payload).execute()
+        if not metodo_es_mixto(mov_payload.get("metodo_pago")):
+            supabase.table("movimientos_caja").insert(mov_payload).execute()
     except Exception:
         pass
 
@@ -3670,6 +3671,18 @@ def render_estado_resultados_pro(desde, hasta):
         st.write(a)
 
     st.caption("Firma propietaria: ______________________    |    Preparado por: ______________________")
+
+
+
+# =========================================================
+# PROTECCIÓN CAJA: NO DUPLICAR VENTAS MIXTAS
+# =========================================================
+
+def metodo_es_mixto(metodo):
+    try:
+        return normalizar_texto(metodo) == "mixto"
+    except Exception:
+        return str(metodo or "").strip().lower() == "mixto"
 
 
 # =========================================================
@@ -6737,11 +6750,12 @@ elif menu == "POS":
                                     "caja_id": str(caja_activa.get("id")),
                                     "dia_operativo": ahora_str(),
                                 })).execute()
-                                if metodo != "credito":
+                                if metodo != "credito" and not metodo_es_mixto(metodo):
                                     try:
-                                        supabase.table("movimientos_caja").insert({
+                                        supabase.table("movimientos_caja").insert(json_safe_payload({
                                             "fecha": datetime.now().isoformat(),
                                             "dia_operativo": ahora_str(),
+                                            "caja_id": str(caja_activa.get("id")),
                                             "tipo_movimiento": "entrada",
                                             "origen": "venta",
                                             "referencia_id": str(venta_id),
@@ -6749,7 +6763,8 @@ elif menu == "POS":
                                             "monto": float(monto),
                                             "descripcion": f"Venta POS {venta_id}",
                                             "usuario": nombre_usuario_actual(),
-                                        }).execute()
+                                            "anulado": False,
+                                        })).execute()
                                     except Exception:
                                         pass
                         if pago_credito > 0:
