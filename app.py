@@ -18,6 +18,19 @@ from supabase import Client, create_client
 # =========================================================
 st.set_page_config(page_title="Sistema de Negocio PRO", layout="wide")
 
+# Ocultar la barra y botones por defecto de Streamlit (White-Label Puro)
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+footer {visibility: hidden;}
+div[data-testid="stDecoration"] {display: none;}
+div[data-testid="stStatusWidget"] {display: none;}
+.viewerBadge_container__1QS1G {display: none !important;}
+button[title="View source code"] {display: none !important;}
+</style>
+""", unsafe_allow_html=True)
+
 
 # =========================================================
 # SECRETS / CONEXIÓN
