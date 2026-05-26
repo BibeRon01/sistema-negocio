@@ -3332,7 +3332,8 @@ def generar_numero_factura_pos() -> str:
 def mostrar_factura_pos(post_venta: dict):
     """
     Muestra factura/ticket visible y descargable para cajera y admin.
-    Incluye botón de impresión dentro de la vista previa para evitar bloqueo de pop-ups.
+    Permite elegir el formato en pantalla y ofrece un único botón de impresión
+    limpio que nunca es bloqueado por el navegador.
     """
     if not post_venta:
         return
@@ -3342,57 +3343,17 @@ def mostrar_factura_pos(post_venta: dict):
     venta_ref = post_venta.get("numero_factura") or post_venta.get("venta_id") or "factura"
 
     st.markdown("### 🧾 Factura / Ticket")
-    st.caption("Permitido para cajera y administradora. Si el navegador bloquea la impresión automática, usa el botón dentro de la vista previa.")
-
-    # AUTO-IMPRIMIR Y ABRIR CAJA AUTOMÁTICAMENTE
-    if "auto_print_done" not in st.session_state or st.session_state["auto_print_done"] != venta_ref:
-        lanzar_impresion_navegador(html_ticket)
-        st.session_state["auto_print_done"] = venta_ref
-
-    # Generar versiones de autodisparo para descarga fuera del sandbox
-    script_auto = """
-    <script>
-      window.onload = function() {
-        window.print();
-        setTimeout(function() {
-          window.close();
-        }, 1500);
-      };
-    </script>
-    """
     
-    html_factura_descarga = html_factura.replace("</body>", f"{script_auto}</body>") if "</body>" in html_factura else html_factura + script_auto
-    html_ticket_descarga = html_ticket.replace("</body>", f"{script_auto}</body>") if "</body>" in html_ticket else html_ticket + script_auto
+    # Selector de formato único y limpio
+    formato = st.radio(
+        "Formato de impresión:",
+        ["Ticket Térmico (80mm)", "Factura Completa (Carta/A4)"],
+        horizontal=True,
+        key=f"formato_impresion_{post_venta.get('venta_id')}"
+    )
 
-    p1, p2, p3, p4 = st.columns(4)
-    with p1:
-        if st.button("🌐 Imprimir Factura", key=f"btn_pos_imprimir_factura_{post_venta.get('venta_id')}", use_container_width=True):
-            lanzar_impresion_navegador(html_factura)
-            st.success("Enviado al navegador.")
-    with p2:
-        if st.button("🌐 Imprimir Ticket", key=f"btn_pos_imprimir_ticket_{post_venta.get('venta_id')}", use_container_width=True):
-            lanzar_impresion_navegador(html_ticket)
-            st.success("Enviado al navegador.")
-    with p3:
-        st.download_button(
-            "📥 Auto-Print Factura",
-            data=html_factura_descarga.encode("utf-8"),
-            file_name=f"auto_print_factura_{venta_ref}.html",
-            mime="text/html",
-            key=f"descargar_factura_html_{post_venta.get('venta_id')}",
-            use_container_width=True,
-            help="Descarga un archivo HTML auto-ejecutable. Al abrirlo, mandará a imprimir tu factura de inmediato."
-        )
-    with p4:
-        st.download_button(
-            "📥 Auto-Print Ticket",
-            data=html_ticket_descarga.encode("utf-8"),
-            file_name=f"auto_print_ticket_{venta_ref}.html",
-            mime="text/html",
-            key=f"descargar_ticket_html_{post_venta.get('venta_id')}",
-            use_container_width=True,
-            help="Descarga un archivo HTML auto-ejecutable. Al abrirlo, mandará a imprimir tu ticket térmico de inmediato."
-        )
+    # Cargar el HTML correspondiente
+    html_seleccionado = html_ticket if "Ticket" in formato else html_factura
 
     html_preview = f"""
     <html>
@@ -3418,6 +3379,7 @@ def mostrar_factura_pos(post_venta: dict):
           font-weight: bold;
           cursor: pointer;
           margin: 4px;
+          font-family: Arial, sans-serif;
         }}
         @media print {{
           .toolbar {{ display: none; }}
@@ -3427,17 +3389,17 @@ def mostrar_factura_pos(post_venta: dict):
     </head>
     <body>
       <div class='toolbar'>
-        <button class='btn' onclick='window.print()'>🖨️ Imprimir esta factura</button>
+        <button class='btn' onclick='window.print()'>🖨️ Imprimir</button>
         <button class='btn' onclick='document.body.style.zoom="85%"'>Ajustar vista</button>
       </div>
-      {html_factura}
+      {html_seleccionado}
     </body>
     </html>
     """
 
     with st.expander("👁️ Ver factura antes de imprimir", expanded=True):
         components.html(html_preview, height=760, scrolling=True)
-        st.info("Para imprimir: usa el botón verde dentro de la factura. También puedes descargarla y abrirla en Chrome.")
+        st.info("Para imprimir: usa el botón verde 'Imprimir' dentro de la vista previa de arriba.")
 
 
 
