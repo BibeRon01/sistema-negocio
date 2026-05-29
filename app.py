@@ -179,6 +179,32 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    # ------------------------------------------------------------
+    # RLS Application
+    # ------------------------------------------------------------
+    def apply_rls():
+        """Execute setup_security.sql once if not already applied.
+        Uses a simple flag stored in table `configuracion_sistema` (clave='rls_aplicado').
+        """
+        try:
+            # Check flag
+            flag = supabase.table('configuracion_sistema').select('valor').eq('clave', 'rls_aplicado').execute()
+            if flag.data and flag.data[0].get('valor') == 'true':
+                return
+            # Read SQL file
+            sql_path = '/Users/user/.gemini/antigravity/scratch/sistema_contable/migrations/setup_security.sql'
+            with open(sql_path, 'r') as f:
+                sql_content = f.read()
+            # Execute raw SQL via RPC (needs a PostgreSQL function `execute_sql` created beforehand)
+            # For simplicity we invoke a supabase RPC that runs the script.
+            supabase.rpc('execute_sql', {'sql': sql_content}).execute()
+            # Set flag
+            supabase.table('configuracion_sistema').upsert({"clave": "rls_aplicado", "valor": "true"}).execute()
+        except Exception as e:
+            st.error(f"Error applying RLS policies: {e}")
+    # Run on app start
+    apply_rls()
 except Exception as exc:
     st.error(f"No se pudo conectar con Supabase: {exc}")
     st.stop()
@@ -2267,7 +2293,9 @@ class LazyDataDict(dict):
 
 
 def cargar_datos() -> LazyDataDict:
-    limpiar_cache_datos()
+    # No limpiamos la caché global en cada renderizado de Streamlit para permitir
+    # que la caché en memoria (session_cache_tablas) con TTL de 30s en leer_tabla funcione correctamente.
+    # Esto elimina las consultas de red redundantes y acelera drásticamente todo el sistema (especialmente el POS).
     return LazyDataDict()
 
 
@@ -3028,6 +3056,21 @@ def json_safe_payload(payload: dict) -> dict:
     """Limpia un diccionario antes de enviarlo a Supabase."""
     return {str(k): json_safe_value(v) for k, v in payload.items()}
 
+def aplicar_venta_pos(payload: dict):
+    """Insert a POS sale into the `ventas` table, adding the `es_credito` flag.
+    This helper is primarily for testing; it mirrors the logic used in the POS UI.
+    """
+    # Ensure we don't modify the original dict
+    payload = payload.copy()
+    # Set credit flag based on pago_credito amount
+    payload["es_credito"] = payload.get("pago_credito", 0) > 0
+    try:
+        safe_payload = json_safe_payload(payload)
+        supabase.table("ventas").insert(safe_payload).execute(safe_payload)
+    except Exception as e:
+        st.error(f"Error inserting venta POS: {e}")
+        raise
+
 
 def crear_cliente_rapido_pos(nombre, telefono="", documento="", direccion="", email=""):
     """Crea un cliente desde el POS usando la tabla clientes existente."""
@@ -3076,6 +3119,18 @@ def obtener_caja_abierta():
     usuario_id = usuario_id_actual()
     if not usuario_id:
         return None
+    try:
+        # Intentamos usar la caché de session_state a través de leer_tabla
+        caja_df = leer_tabla("caja")
+        if not caja_df.empty and "usuario_id" in caja_df.columns and "estado" in caja_df.columns:
+            abiertas = caja_df[(caja_df["usuario_id"].astype(str) == str(usuario_id)) & (caja_df["estado"] == "abierta")]
+            if not abiertas.empty:
+                if "fecha_apertura" in abiertas.columns:
+                    abiertas = abiertas.sort_values(by="fecha_apertura", ascending=False)
+                return abiertas.iloc[0].to_dict()
+            return None
+    except Exception:
+        pass
     try:
         resp = (
             supabase.table("caja")
@@ -3309,8 +3364,8 @@ def generar_numero_factura_pos() -> str:
     Ignora números raros anteriores que salieron de UUID/ID.
     """
     try:
-        resp = supabase.table("ventas").select("numero_factura").execute()
-        ventas = pd.DataFrame(resp.data or [])
+        # Usamos leer_tabla("ventas") en lugar de una consulta directa a toda la base de datos
+        ventas = leer_tabla("ventas")
     except Exception:
         ventas = DATA.get("ventas", pd.DataFrame()).copy()
 
@@ -12153,6 +12208,9 @@ elif menu == "Créditos":
     puede_editar_credito = es_admin() or tiene_permiso("puede_editar_todo")
 
     cxc = DATA.get("cuentas_por_cobrar", pd.DataFrame()).copy()
+    if "es_credito" in cxc.columns:
+        cxc = cxc[cxc["es_credito"] == True]
+    cxc = cxc.copy()
     if not cxc.empty:
         # Ordenar cronológicamente para asignar folios secuenciales estables
         for col_f in ["fecha", "created_at"]:
@@ -12293,6 +12351,49 @@ elif menu == "Créditos":
                         descargar_archivos(ledger_display, f"ledger_cxc_{cliente_sel}")
                 else:
                     st.info("No hay transacciones registradas para este cliente.")
+                # Vista de corrección
+                if puede_editar_credito:
+                    st.markdown("---")
+                    with st.expander("🛠️ Corrección Administrativa de Créditos", expanded=False):
+                        st.warning("Solo administración: usa esto para corregir errores, no para registrar pagos normales.")
+                        render_crud_generico("cuentas_por_cobrar", cxc, "Editar / eliminar cuentas por cobrar")
+                        # Dividir Crédito en cuotas
+                        st.subheader("Dividir Crédito en Cuotas")
+                        if not cxc.empty:
+                            credit_ids = cxc["id"].astype(str).tolist()
+                            selected_id = st.selectbox("Seleccionar cuenta de crédito", options=credit_ids, key="dividir_credito_select")
+                            if selected_id:
+                                row = cxc[cxc["id"].astype(str) == selected_id].iloc[0]
+                                saldo = float(limpiar_numero(row.get("saldo_pendiente")) or 0)
+                                st.write(f"Saldo pendiente: RD$ {saldo:,.2f}")
+                                max_cuotas = int(saldo) if saldo.is_integer() else int(saldo) + 1
+                                num_cuotas = st.number_input("Número de cuotas", min_value=1, max_value=max_cuotas, value=1, step=1, key="num_cuotas")
+                                if st.button("Crear Cuotas", key="btn_dividir_credito"):
+                                    monto_cuota = round(saldo / num_cuotas, 2)
+                                    caja_activa = obtener_caja_abierta()
+                                    if not caja_activa:
+                                        st.error("Abre una caja antes de crear abonos.")
+                                    else:
+                                        for i in range(num_cuotas):
+                                            payload_abono = json_safe_payload({
+                                                "cuenta_id": selected_id,
+                                                "cliente_id": row.get("cliente_id"),
+                                                "cliente_nombre": row.get("cliente_nombre"),
+                                                "monto": monto_cuota,
+                                                "metodo_pago": "cuota",
+                                                "fecha": ahora_str(),
+                                                "usuario": nombre_usuario_actual(),
+                                                "caja_id": json_safe_value(caja_activa.get("id")),
+                                                "observacion": f"Dividir crédito en cuota {i+1}/{num_cuotas}"
+                                            })
+                                            try:
+                                                supabase.table("abonos_credito").insert(payload_abono).execute()
+                                            except Exception as e:
+                                                st.error(f"Error al crear abono: {e}")
+                                                break
+                                        else:
+                                            st.success("Cuotas creadas exitosamente.")
+                                            st.rerun()
 
         # ----------------------------------------------------
         # TAB 3: REGISTRAR ABONO INTELIGENTE (FIFO)
@@ -12340,12 +12441,7 @@ elif menu == "Créditos":
                                 st.rerun()
 
         # Vista de corrección
-        if puede_editar_credito:
-            st.markdown("---")
-            with st.expander("🛠️ Corrección Administrativa de Créditos", expanded=False):
-                st.warning("Solo administración: usa esto para corregir errores, no para registrar pagos normales.")
-                render_crud_generico("cuentas_por_cobrar", cxc, "Editar / eliminar cuentas por cobrar")
-
+# (admin edit UI moved above, duplicated block removed)
 # =========================================================
 # USUARIOS
 # =========================================================
