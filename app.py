@@ -833,11 +833,11 @@ def obtener_tenant_actual() -> str:
     usuario_data = st.session_state.get("usuario_data")
     if not usuario_data:
         return "global"
-    username = str(usuario_data.get("usuario")).lower()
+    username = str(usuario_data.get("usuario") or "").lower()
     # Fase 4: Definición de Super-Admins globales
     if username in ["admin", "nelly"]:
         return "global"
-    # Si tiene un parent email (que es el username del dueño)
+    # Si tiene un parent email (que es el username del dueño / tenant key de la empresa)
     parent = usuario_data.get("email") or ""
     if parent.strip() and "@" not in parent:  # Si no es un email real, es el tenant key
         return parent.strip().lower()
