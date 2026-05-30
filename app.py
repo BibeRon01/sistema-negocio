@@ -350,12 +350,83 @@ def valor_simple(valor: Any):
     return valor
 
 
+def optimizar_y_codificar_imagen(file_bytes_or_url, is_url=False) -> str | None:
+    from PIL import Image
+    import io
+    import requests
+    import base64
+    
+    try:
+        if is_url:
+            headers = {"User-Agent": "A&M-ERP-SaaS/1.0 (nelly@amcontable.com)"}
+            resp = requests.get(file_bytes_or_url, headers=headers, timeout=5)
+            img_file = io.BytesIO(resp.content)
+        else:
+            img_file = io.BytesIO(file_bytes_or_url)
+            
+        img = Image.open(img_file)
+        
+        # Convert to RGB if in RGBA mode
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+            
+        # Resize to thumbnail max 150x150
+        img.thumbnail((150, 150))
+        
+        # Save as WebP with quality 80
+        out_bytes = io.BytesIO()
+        img.save(out_bytes, format="WebP", quality=80)
+        webp_data = out_bytes.getvalue()
+        
+        # Convert to base64 Data URI
+        b64 = base64.b64encode(webp_data).decode("utf-8")
+        return f"data:image/webp;base64,{b64}"
+    except Exception as e:
+        st.error(f"Error procesando imagen: {e}")
+        return None
+
+
+def obtener_sugerencia_imagen_wiki(query) -> list:
+    import requests
+    import urllib.parse
+    headers = {
+        "User-Agent": "A&M-ERP-SaaS/1.0 (nelly@amcontable.com)"
+    }
+    url_search = f"https://es.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(query)}&format=json&utf8=1"
+    try:
+        r = requests.get(url_search, headers=headers, timeout=5)
+        search_data = r.json()
+        search_results = search_data.get("query", {}).get("search", [])
+        if not search_results:
+            return []
+            
+        urls = []
+        # Get the page image for the top 3 matches
+        for res in search_results[:3]:
+            title = res.get("title")
+            url_img = f"https://es.wikipedia.org/w/api.php?action=query&titles={urllib.parse.quote(title)}&prop=pageimages&format=json&pithumbsize=300"
+            r_img = requests.get(url_img, headers=headers, timeout=5)
+            pages = r_img.json().get("query", {}).get("pages", {})
+            for pid, pdata in pages.items():
+                thumb = pdata.get("thumbnail", {})
+                if thumb:
+                    urls.append({
+                        "title": title,
+                        "url": thumb.get("source")
+                    })
+        return urls
+    except Exception:
+        return []
+
+
 def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None = None, excluir: list[str] | None = None):
     if not puede_editar_global():
         return
     if df is None or df.empty:
         return
     excluir = set((excluir or []) + ["id"])
+    if nombre_tabla == "productos":
+        excluir.add("imagen_url")
     if "identificación" in df.columns:
         excluir.add("identificación")
     titulo = titulo or f"🛠️ Editar / eliminar en {nombre_tabla}"
@@ -426,6 +497,53 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
                             nuevos_datos[col] = st.text_area(col, value=limpiar_texto(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
                         else:
                             nuevos_datos[col] = st.text_input(col, value=limpiar_texto(valor), key=f"crud_{nombre_tabla}_{col}_{fila_id}")
+
+        if nombre_tabla == "productos":
+            st.markdown("---")
+            st.subheader("🖼️ Imagen del Producto")
+            
+            img_actual = fila.get("imagen_url")
+            if img_actual and str(img_actual).strip():
+                st.image(img_actual, width=150, caption="Imagen actual")
+                if st.button("🗑️ Quitar Imagen", key=f"btn_remove_img_{fila_id}"):
+                    actualizar("productos", fila_id, {"imagen_url": None})
+                    st.success("Imagen quitada correctamente.")
+                    st.rerun()
+            else:
+                st.info("Este producto no tiene imagen asignada.")
+                
+            img_file = st.file_uploader("Subir foto desde galería o cámara:", type=["png", "jpg", "jpeg", "webp"], key=f"uploader_prod_img_{fila_id}")
+            if img_file is not None:
+                if st.button("💾 Guardar Foto Subida", key=f"btn_save_uploaded_img_{fila_id}"):
+                    webp_b64 = optimizar_y_codificar_imagen(img_file.getvalue(), is_url=False)
+                    if webp_b64:
+                        actualizar("productos", fila_id, {"imagen_url": webp_b64})
+                        st.success("¡Foto guardada y optimizada con éxito!")
+                        st.rerun()
+            
+            prod_nombre = str(fila.get("nombre") or "")
+            if st.button("🔍 Sugerir Imagen Inteligente (IA)", key=f"btn_suggest_img_{fila_id}"):
+                sugerencias = obtener_sugerencia_imagen_wiki(prod_nombre)
+                if not sugerencias:
+                    st.warning("⚠️ No se encontraron imágenes sugeridas para este producto en la web.")
+                else:
+                    st.session_state[f"sugerencias_imgs_{fila_id}"] = sugerencias
+            
+            sug_state_key = f"sugerencias_imgs_{fila_id}"
+            if sug_state_key in st.session_state:
+                st.write("**Sugerencias encontradas (haz clic en una para guardarla):**")
+                sug_cols = st.columns(len(st.session_state[sug_state_key]))
+                for s_idx, sug in enumerate(st.session_state[sug_state_key]):
+                    with sug_cols[s_idx]:
+                        st.image(sug["url"], use_container_width=True)
+                        if st.button(f"Seleccionar {s_idx+1}", key=f"btn_select_sug_{s_idx}_{fila_id}"):
+                            with st.spinner("Descargando y optimizando..."):
+                                webp_b64 = optimizar_y_codificar_imagen(sug["url"], is_url=True)
+                                if webp_b64:
+                                    actualizar("productos", fila_id, {"imagen_url": webp_b64})
+                                    st.success("¡Imagen inteligente guardada!")
+                                    del st.session_state[sug_state_key]
+                                    st.rerun()
 
         c1, c2 = st.columns(2)
         with c1:
@@ -1436,8 +1554,65 @@ def login_simple() -> bool:
 
     return False
 
+
+def verificar_licencia_y_alertas():
+    tenant = obtener_tenant_actual()
+    if tenant == "global":
+        return
+        
+    try:
+        resp = supabase.table("suscripciones_empresas").select("*").eq("empresa_id", tenant).order("fecha_vencimiento", desc=True).limit(1).execute()
+        suscripciones = resp.data or []
+        
+        if not suscripciones:
+            st.warning("⚠️ Su empresa no tiene un registro de licencia activo en el sistema. Por favor, comuníquese con el administrador A&M para registrar su pago.")
+            return
+
+        ultima_sub = suscripciones[0]
+        fecha_venc_str = ultima_sub.get("fecha_vencimiento")
+        if not fecha_venc_str:
+            return
+            
+        fecha_venc = datetime.strptime(fecha_venc_str, "%Y-%m-%d").date()
+        hoy = datetime.now().date()
+        dias_restantes = (fecha_venc - hoy).days
+        dias_gracia = int(ultima_sub.get("dias_gracia") or 5)
+        
+        # Bloqueo de login si excede los 5 días de gracia
+        if dias_restantes + dias_gracia < 0:
+            st.markdown(f"""
+            <div style="background-color: #ff4b4b; color: white; padding: 24px; border-radius: 12px; border: 2px solid #b91c1c; text-align: center; margin-top: 50px; font-family: -apple-system, sans-serif;">
+                <h2 style="color: white; margin: 0 0 10px 0; font-size: 26px;">❌ SISTEMA SUSPENDIDO</h2>
+                <p style="font-size: 15px; margin: 0 0 15px 0; line-height: 1.5;">
+                    Estimado usuario, el período de gracia de su licencia ha expirado.<br>
+                    Su servicio de sistema contable venció el <strong>{fecha_venc.strftime('%d/%m/%Y')}</strong> y se han agotado los {dias_gracia} días de gracia para regularizar su pago.
+                </p>
+                <div style="background-color: rgba(0,0,0,0.2); padding: 12px 18px; border-radius: 8px; font-size: 14px; font-weight: bold; display: inline-block;">
+                    📞 Por favor, comuníquese de inmediato con Nelly / A&M para reactivar su servicio.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.stop()
+            
+        # Banner Naranja: Período de Gracia Activo (Vencido pero dentro de los 5 días)
+        elif dias_restantes < 0:
+            dias_gracia_restantes = dias_gracia + dias_restantes
+            st.sidebar.warning(f"⚠️ Período de gracia activo: Su licencia venció el {fecha_venc.strftime('%d/%m/%Y')}. Le quedan {dias_gracia_restantes} día(s) de gracia antes de la suspensión automática del sistema.")
+            st.warning(f"⚠️ **Atención**: Su licencia contable ha vencido el **{fecha_venc.strftime('%d/%m/%Y')}**. Actualmente se encuentra en su período de gracia y le quedan **{dias_gracia_restantes} día(s) de gracia** para realizar su pago antes del bloqueo automático del sistema.")
+            
+        # Banner Amarillo: Licencia por vencer pronto (dentro de los próximos 5 días)
+        elif dias_restantes <= 5:
+            st.sidebar.info(f"⚠️ Su licencia vence en {dias_restantes} días (el {fecha_venc.strftime('%d/%m/%Y')}). Por favor, prepare su próximo pago.")
+            st.info(f"⚠️ **Atención**: Su licencia de servicio vence pronto en **{dias_restantes} días** (el **{fecha_venc.strftime('%d/%m/%Y')}**). Por favor, coordine su próximo pago para evitar interrupciones de servicio.")
+            
+    except Exception:
+        pass
+
+
 if not login_simple():
     st.stop()
+
+verificar_licencia_y_alertas()
 
 
 
@@ -11123,9 +11298,16 @@ elif menu == "POS":
                         precio = limpiar_numero(row.get("precio")) or 0.0
                         stock = obtener_existencia_producto(row)
                         stock_class = "low" if stock <= 5 else ""
+                        
+                        img_url = row.get("imagen_url")
+                        if img_url and str(img_url).strip():
+                            img_html = f'<div class="pos-img" style="background-color: transparent;"><img src="{img_url}" style="max-height: 70px; max-width: 100%; object-fit: contain; border-radius: 4px;" /></div>'
+                        else:
+                            img_html = '<div class="pos-img">📷 Sin Imagen</div>'
+                            
                         html_card = f"""
                         <div class="pos-card">
-                            <div class="pos-img">📷 Sin Imagen</div>
+                            {img_html}
                             <div class="pos-stock {stock_class}">Stock: {stock:,.0f}</div>
                             <div class="pos-title">{nombre}</div>
                             <div class="pos-price">$ {precio:,.2f}</div>
@@ -12992,28 +13174,51 @@ elif menu == "🏢 Gestión de Empresas":
     except Exception:
         todas_cfg = []
 
-    total_empresas = len(todas_cfg)
-    st.markdown(f"### 📋 Empresas registradas ({total_empresas})")
+    # Organizar el panel de control exclusivo en pestañas elegantes
+    tab_kpi, tab_licencias, tab_config = st.tabs(["🏢 Resumen Ecosistema", "💳 Licencias y Cobros", "🛠️ Configurar Empresas y Usuarios"])
 
-    if not todas_cfg:
-        st.info("No hay empresas registradas aún.")
-    else:
-        cols_emp = st.columns(min(total_empresas, 4))
-        for i, cfg_e in enumerate(todas_cfg):
-            prop = cfg_e.get("propietario") or "global"
-            nombre_e = cfg_e.get("negocio_nombre") or prop.capitalize()
-            slogan_e = cfg_e.get("slogan") or ""
-            status_tag = " <span style='color:#ff4b4b;font-weight:bold;font-size:9px;'>[SUSPENDIDA]</span>" if "[SUSPENDIDO]" in slogan_e else " <span style='color:#09ab3b;font-weight:bold;font-size:9px;'>[ACTIVA]</span>"
-            try:
-                v_resp = supabase.table("ventas").select("total").eq("empresa_id", prop).execute()
-                ventas_data = v_resp.data or []
-                total_ventas_e = sum(float(r.get("total") or 0) for r in ventas_data)
-                n_ventas = len(ventas_data)
-            except Exception:
-                total_ventas_e = 0.0
-                n_ventas = 0
-            with cols_emp[i % 4]:
-                st.markdown(f"""
+    with tab_kpi:
+        total_empresas = len(todas_cfg)
+        st.markdown(f"### 📋 Empresas registradas ({total_empresas})")
+
+        if not todas_cfg:
+            st.info("No hay empresas registradas aún.")
+        else:
+            cols_emp = st.columns(min(total_empresas, 4))
+            for i, cfg_e in enumerate(todas_cfg):
+                prop = cfg_e.get("propietario") or "global"
+                nombre_e = cfg_e.get("negocio_nombre") or prop.capitalize()
+                slogan_e = cfg_e.get("slogan") or ""
+                
+                # Determinar si está suspendida revisando slogan o la tabla de suscripciones
+                es_susp = False
+                try:
+                    resp_l = supabase.table("suscripciones_empresas").select("*").eq("empresa_id", prop).order("fecha_vencimiento", desc=True).limit(1).execute()
+                    if resp_l.data:
+                        fv = datetime.strptime(resp_l.data[0]["fecha_vencimiento"], "%Y-%m-%d").date()
+                        h = datetime.now().date()
+                        dg = int(resp_l.data[0].get("dias_gracia") or 5)
+                        if (fv - h).days + dg < 0:
+                            es_susp = True
+                except Exception:
+                    pass
+                
+                if "[SUSPENDIDO]" in slogan_e:
+                    es_susp = True
+                
+                status_tag = " <span style='color:#ff4b4b;font-weight:bold;font-size:9px;'>[SUSPENDIDA]</span>" if es_susp else " <span style='color:#09ab3b;font-weight:bold;font-size:9px;'>[ACTIVA]</span>"
+                
+                try:
+                    v_resp = supabase.table("ventas").select("total").eq("empresa_id", prop).execute()
+                    ventas_data = v_resp.data or []
+                    total_ventas_e = sum(float(r.get("total") or 0) for r in ventas_data)
+                    n_ventas = len(ventas_data)
+                except Exception:
+                    total_ventas_e = 0.0
+                    n_ventas = 0
+                    
+                with cols_emp[i % 4]:
+                    st.markdown(f"""
 <div class='emp-kpi'>
 <div class='emp-kpi-label'>{nombre_e}{status_tag}</div>
 <div class='emp-kpi-val'>{n_ventas}</div>
@@ -13022,8 +13227,120 @@ elif menu == "🏢 Gestión de Empresas":
 </div>
 """, unsafe_allow_html=True)
 
+    with tab_licencias:
+        st.subheader("💳 Control y Registro de Licencias y Cobros")
+        
+        # 1. Registrar Nuevo Pago
+        st.markdown("#### ➕ Registrar Pago / Suscripción de Licencia")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            opciones_emp_list = [e.get("propietario") for e in todas_cfg if e.get("propietario") != "global"]
+            emp_cobrar = st.selectbox("Seleccione la Empresa:", opciones_emp_list, key="lic_emp_cobrar")
+            fecha_ini = st.date_input("Fecha de Pago/Inicio:", value=datetime.now().date(), key="lic_fecha_ini")
+        with c2:
+            periodo_sel = st.selectbox("Período Contratado:", ["1 mes", "3 meses", "1 año"], key="lic_periodo")
+            monto_cobrado = st.number_input("Monto Cobrado (RD$):", min_value=0.0, step=100.0, value=1500.0, key="lic_monto")
+        with c3:
+            metodo_cobro = st.selectbox("Método de Pago:", ["Transferencia", "Efectivo", "Tarjeta"], key="lic_metodo")
+            obs_cobro = st.text_input("Observación:", placeholder="Pago completo / Descuento especial", key="lic_obs")
+            
+        if st.button("💳 Registrar Cobro y Activar Licencia", key="btn_registrar_cobro", use_container_width=True):
+            if not emp_cobrar:
+                st.error("Por favor seleccione una empresa válida.")
+            else:
+                try:
+                    # Calcular fecha de vencimiento usando calendario exacto
+                    import calendar
+                    meses_sumar = 1
+                    if "3 meses" in periodo_sel:
+                        meses_sumar = 3
+                    elif "1 año" in periodo_sel:
+                        meses_sumar = 12
+                        
+                    month = fecha_ini.month - 1 + meses_sumar
+                    year = fecha_ini.year + month // 12
+                    month = month % 12 + 1
+                    day = min(fecha_ini.day, calendar.monthrange(year, month)[1])
+                    fecha_venc = date(year, month, day)
+                    
+                    # Insertar en public.suscripciones_empresas
+                    supabase.table("suscripciones_empresas").insert({
+                        "empresa_id": emp_cobrar,
+                        "fecha_inicio": str(fecha_ini),
+                        "fecha_vencimiento": str(fecha_venc),
+                        "monto_pagado": float(monto_cobrado),
+                        "periodo": periodo_sel,
+                        "metodo_pago": metodo_cobro.lower(),
+                        "dias_gracia": 5,
+                        "observacion": obs_cobro
+                    }).execute()
+                    
+                    # Reactivar automáticamente la empresa en configuracion_sistema quitando [SUSPENDIDO]
+                    cfg_emp = next((e for e in todas_cfg if e.get("propietario") == emp_cobrar), None)
+                    if cfg_emp:
+                        slogan_act = str(cfg_emp.get("slogan") or "")
+                        slogan_new = slogan_act.replace("[SUSPENDIDO]", "").strip()
+                        supabase.table("configuracion_sistema").update({
+                            "slogan": slogan_new
+                        }).eq("propietario", emp_cobrar).execute()
+                    
+                    # Limpiar caché e informar éxito
+                    _obtener_configuracion_interna.clear()
+                    st.success(f"🎉 Licencia registrada con éxito para '{emp_cobrar}'. Vence el {fecha_venc.strftime('%d/%m/%Y')} (más 5 días de gracia).")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Error al registrar cobro: {exc}")
+                    
         st.markdown("---")
+        st.markdown("#### 📋 Historial de Pagos y Estado de Licencias")
+        
+        # Cargar licencias registradas
+        try:
+            resp_subs = supabase.table("suscripciones_empresas").select("*").order("created_at", desc=True).execute()
+            subs_data = resp_subs.data or []
+        except Exception:
+            subs_data = []
+            
+        if not subs_data:
+            st.info("No hay pagos de suscripción registrados aún.")
+        else:
+            rows_lic = []
+            hoy = datetime.now().date()
+            for row in subs_data:
+                emp = row.get("empresa_id")
+                ini = datetime.strptime(row.get("fecha_inicio"), "%Y-%m-%d").date()
+                venc = datetime.strptime(row.get("fecha_vencimiento"), "%Y-%m-%d").date()
+                dg = int(row.get("dias_gracia") or 5)
+                monto = float(row.get("monto_pagado") or 0.0)
+                per = row.get("periodo")
+                met = row.get("metodo_pago")
+                
+                dias_rest = (venc - hoy).days
+                
+                # Calcular estado dinámico
+                if dias_rest + dg < 0:
+                    status_text = "🔴 Suspendida (Excedió gracia)"
+                elif dias_rest < 0:
+                    status_text = f"🟠 Período Gracia ({dg + dias_rest} días)"
+                elif dias_rest <= 5:
+                    status_text = f"⚠️ Vence Pronto ({dias_rest} días)"
+                else:
+                    status_text = f"🟢 Al corriente ({dias_rest} días)"
+                    
+                rows_lic.append({
+                    "Empresa": emp.upper(),
+                    "Fecha Pago": ini.strftime("%d/%m/%Y"),
+                    "Vence El": venc.strftime("%d/%m/%Y"),
+                    "Días Restantes": dias_rest,
+                    "Estado Licencia": status_text,
+                    "Monto Cobrado": f"RD$ {monto:,.2f}",
+                    "Período": per,
+                    "Método": met.upper()
+                })
+            st.dataframe(pd.DataFrame(rows_lic), use_container_width=True)
 
+    with tab_config:
+        st.subheader("🛠️ Configuración de Empresas y Usuarios")
         with st.expander("📊 Ver tabla completa de empresas", expanded=False):
             df_empresas = pd.DataFrame(todas_cfg)
             cols_mostrar = [c for c in ["propietario","negocio_nombre","nombre_sistema","telefono","rnc","direccion"] if c in df_empresas.columns]
@@ -13088,8 +13405,8 @@ elif menu == "🏢 Gestión de Empresas":
         except Exception as exc:
             st.warning(f"No se pudieron cargar los usuarios: {exc}")
 
-    st.markdown("---")
-    with st.expander("➕ Crear nueva empresa", expanded=False):
+        st.markdown("---")
+        st.subheader("➕ Crear nueva empresa")
         nc1, nc2 = st.columns(2)
         with nc1:
             new_prop = st.text_input("ID único (sin espacios, ej: empresa2)", key="new_emp_prop", placeholder="empresa2")
