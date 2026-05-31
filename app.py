@@ -13238,11 +13238,25 @@ elif menu == "🏢 Gestión de Empresas":
             emp_cobrar = st.selectbox("Seleccione la Empresa:", opciones_emp_list, key="lic_emp_cobrar")
             fecha_ini = st.date_input("Fecha de Pago/Inicio:", value=datetime.now().date(), key="lic_fecha_ini")
         with c2:
-            periodo_sel = st.selectbox("Período Contratado:", ["1 mes", "3 meses", "1 año"], key="lic_periodo")
-            monto_cobrado = st.number_input("Monto Cobrado (RD$):", min_value=0.0, step=100.0, value=1500.0, key="lic_monto")
+            meses_sel = st.selectbox("Meses Contratados:", list(range(1, 13)), index=0, key="lic_meses")
+            periodo_sel = f"{meses_sel} mes" if meses_sel == 1 else f"{meses_sel} meses"
+            
+            metodo_cobro = st.selectbox("Método de Pago:", ["Transferencia", "Efectivo", "Tarjeta", "Mixto"], key="lic_metodo")
         with c3:
-            metodo_cobro = st.selectbox("Método de Pago:", ["Transferencia", "Efectivo", "Tarjeta"], key="lic_metodo")
             obs_cobro = st.text_input("Observación:", placeholder="Pago completo / Descuento especial", key="lic_obs")
+            
+        # Interfaz de cobro mixto dinámica
+        if metodo_cobro == "Mixto":
+            st.markdown("##### 💰 Desglose de Pago Mixto")
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                monto_efectivo = st.number_input("Monto en Efectivo (RD$):", min_value=0.0, step=100.0, value=0.0, key="lic_monto_efectivo")
+            with col_m2:
+                monto_banco = st.number_input("Monto en Transf / Tarjeta (RD$):", min_value=0.0, step=100.0, value=1500.0, key="lic_monto_banco")
+            monto_cobrado = monto_efectivo + monto_banco
+            st.info(f"💰 **Total Cobrado (Mixto)**: RD$ {monto_cobrado:,.2f}")
+        else:
+            monto_cobrado = st.number_input("Monto Cobrado (RD$):", min_value=0.0, step=100.0, value=1500.0, key="lic_monto")
             
         if st.button("💳 Registrar Cobro y Activar Licencia", key="btn_registrar_cobro", use_container_width=True):
             if not emp_cobrar:
@@ -13251,17 +13265,19 @@ elif menu == "🏢 Gestión de Empresas":
                 try:
                     # Calcular fecha de vencimiento usando calendario exacto
                     import calendar
-                    meses_sumar = 1
-                    if "3 meses" in periodo_sel:
-                        meses_sumar = 3
-                    elif "1 año" in periodo_sel:
-                        meses_sumar = 12
+                    meses_sumar = meses_sel
                         
                     month = fecha_ini.month - 1 + meses_sumar
                     year = fecha_ini.year + month // 12
                     month = month % 12 + 1
                     day = min(fecha_ini.day, calendar.monthrange(year, month)[1])
                     fecha_venc = date(year, month, day)
+                    
+                    # Formatear la observación del pago mixto
+                    obs_final = obs_cobro
+                    if metodo_cobro == "Mixto":
+                        desglose = f"[PAGO MIXTO] Efectivo: RD$ {monto_efectivo:,.2f} | Banco: RD$ {monto_banco:,.2f}"
+                        obs_final = f"{desglose}. {obs_cobro}" if obs_cobro else desglose
                     
                     # Insertar en public.suscripciones_empresas
                     supabase.table("suscripciones_empresas").insert({
@@ -13272,7 +13288,7 @@ elif menu == "🏢 Gestión de Empresas":
                         "periodo": periodo_sel,
                         "metodo_pago": metodo_cobro.lower(),
                         "dias_gracia": 5,
-                        "observacion": obs_cobro
+                        "observacion": obs_final
                     }).execute()
                     
                     # Reactivar automáticamente la empresa en configuracion_sistema quitando [SUSPENDIDO]
