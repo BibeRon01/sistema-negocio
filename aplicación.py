@@ -171,7 +171,9 @@ def obtener_secreto(nombre: str, default: str = "") -> str:
 
 SUPABASE_URL = obtener_secreto("SUPABASE_URL", "")
 SUPABASE_KEY = obtener_secreto("SUPABASE_KEY", "")
-APP_PASSWORD = obtener_secreto("APP_PASSWORD", "")
+APP_PASSWORD = obtener_secreto("APP_PASSWORD", "20162907")
+if not APP_PASSWORD:
+    APP_PASSWORD = "20162907"
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     st.error("Faltan SUPABASE_URL y/o SUPABASE_KEY en .streamlit/secrets.toml")
