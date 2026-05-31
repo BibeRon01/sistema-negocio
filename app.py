@@ -13568,6 +13568,8 @@ elif menu == "🏢 Gestión de Empresas":
 
         st.markdown("---")
         st.subheader("➕ Crear nueva empresa")
+        
+        st.markdown("##### 🏢 Datos de la Empresa")
         nc1, nc2 = st.columns(2)
         with nc1:
             new_prop = st.text_input("ID único (sin espacios, ej: empresa2)", key="new_emp_prop", placeholder="empresa2")
@@ -13577,37 +13579,84 @@ elif menu == "🏢 Gestión de Empresas":
             new_rnc = st.text_input("RNC", key="new_emp_rnc")
             new_dir = st.text_input("Dirección", key="new_emp_dir")
             new_slogan = st.text_input("Slogan", key="new_emp_slogan")
-        if st.button("🏢 Crear empresa", key="btn_crear_emp"):
+            
+        st.markdown("##### 👤 Cuenta de Administrador Inicial (Altamente Recomendado)")
+        st.caption("Crea la cuenta de usuario principal para esta empresa de forma automática.")
+        nca1, nca2 = st.columns(2)
+        with nca1:
+            adm_user = st.text_input("Usuario de Acceso:", placeholder="ej. biberon_admin", key="new_emp_adm_user")
+            adm_nombre = st.text_input("Nombre del Propietario/Encargado:", placeholder="ej. Administrador Bibe Ron", key="new_emp_adm_nombre")
+        with nca2:
+            adm_pass = st.text_input("Clave / Contraseña:", placeholder="ej. 123456", key="new_emp_adm_pass")
+            
+        if st.button("🏢 Crear empresa y usuario administrador", key="btn_crear_emp", use_container_width=True):
             prop_id = (new_prop or "").strip().lower().replace(" ", "_")
+            user_clean = (adm_user or "").strip().lower()
+            name_clean = (adm_nombre or "").strip()
+            pass_clean = (adm_pass or "").strip()
+            
             if not prop_id:
                 st.error("El ID de empresa es obligatorio.")
             elif any(e.get("propietario") == prop_id for e in todas_cfg):
                 st.error(f"Ya existe una empresa con ID '{prop_id}'.")
+            elif user_clean and (not name_clean or not pass_clean):
+                st.error("Si deseas crear un administrador, debes rellenar su Nombre Completo y Clave.")
             else:
                 try:
+                    # Validar si el usuario administrador ya existe si se especificó uno
+                    if user_clean:
+                        user_exist = supabase.table("usuarios").select("*").eq("usuario", user_clean).execute().data
+                        if user_exist:
+                            st.error(f"Ya existe un usuario con el nombre '{user_clean}' en el sistema.")
+                            st.stop()
+                            
                     base = supabase.table("configuracion_sistema").select("*").eq("id", 1).execute().data
                     payload = (base[0].copy() if base else {})
                     payload.pop("id", None)
                     
-                    clave_actual = base[0].get("clave") if (base and base[0].get("clave")) else "123456"
-                    
+                    # Para evitar el error 'duplicate key value violates unique constraint "configuracion_sistema_clave_idx"',
+                    # usamos el prop_id como clave única de esta empresa en configuracion_sistema.
                     payload.update({
                         "propietario": prop_id,
                         "negocio_nombre": new_nombre or f"Empresa {prop_id.capitalize()}",
                         "nombre_sistema": f"A&M · {(new_nombre or prop_id).capitalize()}",
                         "telefono": new_tel, "rnc": new_rnc, "direccion": new_dir,
-                        "slogan": new_slogan, "logo_url": None, "clave": clave_actual
+                        "slogan": new_slogan, "logo_url": None, "clave": prop_id
                     })
                     supabase.table("configuracion_sistema").insert(payload).execute()
-                    _obtener_configuracion_interna.clear()
+                    
+                    # Registrar auditoría de la empresa
                     registrar_auditoria_pro(
                         accion="crear_empresa", modulo="Gestión de Empresas",
                         tabla_afectada="configuracion_sistema",
                         despues_json={"propietario": prop_id, "negocio_nombre": new_nombre},
                         descripcion=f"Nueva empresa creada: {prop_id}"
                     )
-                    st.success(f"✅ Empresa '{new_nombre or prop_id}' creada. ID: `{prop_id}`")
-                    st.info(f"Para dar acceso, crea usuarios y pon en el campo **email** = `{prop_id}`")
+                    
+                    # Crear automáticamente el usuario si se especificaron los datos
+                    user_created_msg = ""
+                    if user_clean and pass_clean:
+                        new_user_payload = {
+                            "usuario": user_clean,
+                            "nombre": name_clean,
+                            "clave": pass_clean,
+                            "rol": "admin",
+                            "activo": True,
+                            "email": prop_id, # Vinculado al propietario
+                            "puede_vender": True,
+                            "puede_ver_reportes": True,
+                            "puede_configurar": True,
+                            "puede_registrar_compras": True,
+                            "puede_registrar_gastos": True,
+                            "puede_editar_ventas": True,
+                            "puede_eliminar": True,
+                            "puede_anular": True
+                        }
+                        supabase.table("usuarios").insert(new_user_payload).execute()
+                        user_created_msg = f" y se creó el usuario administrador '{user_clean}'"
+                    
+                    _obtener_configuracion_interna.clear()
+                    st.success(f"✅ ¡Empresa '{new_nombre or prop_id}' creada con éxito{user_created_msg}! ID: `{prop_id}`")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Error al crear empresa: {exc}")
