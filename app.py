@@ -5197,6 +5197,13 @@ def obtener_atributos_producto(producto: dict) -> dict | None:
 # =========================================================
 if menu == "Dashboard":
     st.title("📊 Dashboard PRO")
+    
+    # Botón de emergencia visible en la pantalla principal para forzar cierre de sesión antigua
+    st.info("💡 **¿Estás atascado(a) o quieres cambiar de cuenta?** Presiona el siguiente botón para cerrar la sesión antigua y poder iniciar sesión con tu usuario **nelly**:")
+    if st.button("🚪 CERRAR SESIÓN DE EMERGENCIA", key="emergency_logout_btn", use_container_width=True, type="primary"):
+        st.session_state.pop("usuario_data", None)
+        st.session_state.pop("session_cache_tablas", None)
+        st.rerun()
 
     desde, hasta = rango_fechas_ui("dash")
 
