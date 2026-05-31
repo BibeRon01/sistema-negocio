@@ -1458,15 +1458,20 @@ def login_simple() -> bool:
     if st.button("Entrar", key="btn_login_usuario", use_container_width=True):
         encontrado = None
         error_login = None
+        
+        # Robust credentials cleaning
+        usr_in_clean = str(usuario_in or "").strip()
+        pwd_in_clean = str(clave_in or "").strip()
+        
         try:
             resp = supabase.table("usuarios").select("*").execute()
             filas = resp.data or []
-            usuario_n = normalizar_texto(usuario_in)
+            usuario_n = normalizar_texto(usr_in_clean)
             for fila in filas:
                 fila_usuario = normalizar_texto(fila.get("usuario") or fila.get("email") or "")
-                fila_clave = str(fila.get("clave") or fila.get("password") or "")
+                fila_clave = str(fila.get("clave") or fila.get("password") or "").strip()
                 activo = bool(fila.get("activo", True))
-                if activo and fila_usuario == usuario_n and fila_clave == str(clave_in):
+                if activo and fila_usuario == usuario_n and fila_clave == pwd_in_clean:
                     encontrado = fila
                     break
         except Exception as exc:
@@ -1497,7 +1502,8 @@ def login_simple() -> bool:
             st.session_state["usuario_data"] = encontrado
             st.rerun()
 
-        if APP_PASSWORD and usuario_in == "admin" and clave_in == APP_PASSWORD:
+        # Robust check for Super-Admin global
+        if APP_PASSWORD and usr_in_clean.lower() == "admin" and pwd_in_clean == str(APP_PASSWORD).strip():
             st.session_state["usuario_data"] = {
                 "usuario": "admin",
                 "nombre": "Administrador",
