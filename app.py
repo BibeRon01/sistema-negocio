@@ -223,8 +223,83 @@ TABLAS_MULTI_TENANT = {
     "compras", "gastos", "empleados", "pagos_empleados", "perdidas",
     "gastos_dueno", "activos_fijos", "capital_base", "creditos",
     "auditoria_eventos", "usuarios", "ajustes_inventario", "conteo_inventario",
-    "distribuciones", "notas_credito"
+    "distribuciones", "notas_credito", "suscripciones_empresas", "secuencia_ncf"
 }
+
+# Monkey-patching de Supabase client para aislamiento Multi-Tenant automático y transparente
+class WrappedQueryBuilder:
+    def __init__(self, original_builder, table_name):
+        self.original_builder = original_builder
+        self.table_name = table_name
+
+    def select(self, *args, **kwargs):
+        builder = self.original_builder.select(*args, **kwargs)
+        tenant = obtener_tenant_actual()
+        if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
+            if self.table_name == "usuarios":
+                return builder.eq("email", tenant)
+            else:
+                return builder.eq("empresa_id", tenant)
+        return builder
+
+    def update(self, datos, *args, **kwargs):
+        # Auto-inyectar empresa_id en updates si es necesario
+        tenant = obtener_tenant_actual()
+        if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
+            if self.table_name != "usuarios" and "empresa_id" not in datos:
+                datos["empresa_id"] = tenant
+            elif self.table_name == "usuarios" and "email" not in datos:
+                datos["email"] = tenant
+        
+        builder = self.original_builder.update(datos, *args, **kwargs)
+        if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
+            if self.table_name == "usuarios":
+                return builder.eq("email", tenant)
+            else:
+                return builder.eq("empresa_id", tenant)
+        return builder
+
+    def delete(self, *args, **kwargs):
+        builder = self.original_builder.delete(*args, **kwargs)
+        tenant = obtener_tenant_actual()
+        if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
+            if self.table_name == "usuarios":
+                return builder.eq("email", tenant)
+            else:
+                return builder.eq("empresa_id", tenant)
+        return builder
+
+    def insert(self, datos, *args, **kwargs):
+        tenant = obtener_tenant_actual()
+        # Si 'datos' es una lista de diccionarios, procesar cada uno
+        if isinstance(datos, list):
+            for d in datos:
+                if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
+                    if self.table_name == "usuarios":
+                        if "email" not in d or not d["email"]:
+                            d["email"] = tenant
+                    else:
+                        if "empresa_id" not in d or not d["empresa_id"]:
+                            d["empresa_id"] = tenant
+        elif isinstance(datos, dict):
+            if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
+                if self.table_name == "usuarios":
+                    if "email" not in datos or not datos["email"]:
+                        datos["email"] = tenant
+                else:
+                    if "empresa_id" not in datos or not datos["empresa_id"]:
+                        datos["empresa_id"] = tenant
+                        
+        return self.original_builder.insert(datos, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self.original_builder, name)
+
+original_table = supabase.table
+def custom_table(table_name):
+    original_builder = original_table(table_name)
+    return WrappedQueryBuilder(original_builder, table_name)
+supabase.table = custom_table
 
 # =========================================================
 # LOGO A&M (base64 embebido para uso sin servidor web)
@@ -13432,24 +13507,25 @@ elif menu == "🏢 Gestión de Empresas":
         st.markdown("---")
         st.markdown("**⚠️ Zona de Peligro**")
         with st.expander("🗑️ Eliminar esta Empresa y Todos sus Datos", expanded=False):
-            st.warning(f"¿Está seguro de que desea eliminar la empresa '{cfg_sel.get('negocio_nombre') or cfg_sel.get('propietario')}'? Esto eliminará la empresa, todos sus usuarios asociados, y sus licencias permanentemente de la base de datos. Esta acción no se puede deshacer.")
-            confirm_text = st.text_input("Para confirmar la eliminación, escriba el ID único de la empresa a continuación:", placeholder=cfg_sel["propietario"], key="delete_emp_confirm_id")
+            prop_val = str(cfg_sel.get("propietario") or "").strip()
+            st.warning(f"¿Está seguro de que desea eliminar la empresa '{cfg_sel.get('negocio_nombre') or prop_val}'? Esto eliminará la empresa, todos sus usuarios asociados, y sus licencias permanentemente de la base de datos. Esta acción no se puede deshacer.")
+            confirm_text = st.text_input("Para confirmar la eliminación, escriba el ID único de la empresa a continuación:", placeholder=prop_val if prop_val else "vacío", key="delete_emp_confirm_id")
             
             if st.button("🚨 Eliminar Empresa Permanentemente", key="btn_eliminar_emp_definitivo", use_container_width=True):
-                if confirm_text.strip().lower() == cfg_sel["propietario"].strip().lower():
+                if confirm_text.strip().lower() == prop_val.lower():
                     try:
                         # 1. Eliminar usuarios asociados a la empresa (campo email = propietario)
-                        supabase.table("usuarios").delete().eq("email", cfg_sel["propietario"]).execute()
-                        # 2. Eliminar suscripciones asociadas a la empresa (campo empresa_id = propietario)
-                        try:
-                            supabase.table("suscripciones_empresas").delete().eq("empresa_id", cfg_sel["propietario"]).execute()
-                        except Exception:
-                            pass
-                        # 3. Eliminar la configuración de la empresa (tabla configuracion_sistema)
+                        if prop_val:
+                            supabase.table("usuarios").delete().eq("email", prop_val).execute()
+                            try:
+                                supabase.table("suscripciones_empresas").delete().eq("empresa_id", prop_val).execute()
+                            except Exception:
+                                pass
+                        # 2. Eliminar la configuración de la empresa (tabla configuracion_sistema)
                         supabase.table("configuracion_sistema").delete().eq("id", cfg_sel["id"]).execute()
                         
                         _obtener_configuracion_interna.clear()
-                        st.success(f"🗑️ Empresa '{cfg_sel.get('negocio_nombre')}' y sus datos asociados han sido eliminados.")
+                        st.success(f"🗑️ Empresa '{cfg_sel.get('negocio_nombre') or prop_val}' y sus datos asociados han sido eliminados.")
                         st.rerun()
                     except Exception as exc_del:
                         st.error(f"Error al eliminar la empresa: {exc_del}")
