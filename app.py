@@ -13443,12 +13443,15 @@ elif menu == "🏢 Gestión de Empresas":
                     base = supabase.table("configuracion_sistema").select("*").eq("id", 1).execute().data
                     payload = (base[0].copy() if base else {})
                     payload.pop("id", None)
+                    
+                    clave_actual = base[0].get("clave") if (base and base[0].get("clave")) else "123456"
+                    
                     payload.update({
                         "propietario": prop_id,
                         "negocio_nombre": new_nombre or f"Empresa {prop_id.capitalize()}",
                         "nombre_sistema": f"A&M · {(new_nombre or prop_id).capitalize()}",
                         "telefono": new_tel, "rnc": new_rnc, "direccion": new_dir,
-                        "slogan": new_slogan, "logo_url": None
+                        "slogan": new_slogan, "logo_url": None, "clave": clave_actual
                     })
                     supabase.table("configuracion_sistema").insert(payload).execute()
                     _obtener_configuracion_interna.clear()
