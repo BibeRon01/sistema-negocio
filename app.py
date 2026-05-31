@@ -13378,18 +13378,135 @@ elif menu == "🏢 Gestión de Empresas":
             except Exception as exc:
                 st.error(f"Error: {exc}")
 
+        # Check if the company has any user accounts and show helper to create one
+        try:
+            emp_usrs_data = supabase.table("usuarios").select("id").eq("email", cfg_sel["propietario"]).execute().data or []
+            if not emp_usrs_data:
+                st.info(f"💡 **Nota:** Esta empresa aún no tiene ningún usuario registrado. Puedes crearle su primer usuario administrador en la sección **Crear usuario/administrador** más abajo, o usar el siguiente acceso rápido:")
+                with st.expander("👤 Crear primer usuario administrador para esta empresa", expanded=False):
+                    cr_usr_user = st.text_input("Usuario de Acceso:", placeholder="ej. biberon_admin", key=f"quick_usr_{cfg_sel['propietario']}")
+                    cr_usr_name = st.text_input("Nombre Completo:", placeholder="ej. Administrador", key=f"quick_name_{cfg_sel['propietario']}")
+                    cr_usr_pass = st.text_input("Clave / Contraseña:", placeholder="ej. 123456", key=f"quick_pass_{cfg_sel['propietario']}")
+                    if st.button("🚀 Crear Usuario Administrador", key=f"quick_btn_{cfg_sel['propietario']}", use_container_width=True):
+                        user_clean = cr_usr_user.strip().lower()
+                        name_clean = cr_usr_name.strip()
+                        pass_clean = cr_usr_pass.strip()
+                        if not user_clean or not pass_clean or not name_clean:
+                            st.error("Todos los campos son obligatorios.")
+                        else:
+                            # Validar si ya existe ese nombre de usuario
+                            user_exist = supabase.table("usuarios").select("*").eq("usuario", user_clean).execute().data
+                            if user_exist:
+                                st.error(f"Ya existe un usuario con el nombre '{user_clean}'.")
+                            else:
+                                new_user_payload = {
+                                    "usuario": user_clean,
+                                    "nombre": name_clean,
+                                    "clave": pass_clean,
+                                    "rol": "admin",
+                                    "activo": True,
+                                    "email": cfg_sel["propietario"],
+                                    "puede_vender": True,
+                                    "puede_ver_reportes": True,
+                                    "puede_configurar": True,
+                                    "puede_registrar_compras": True,
+                                    "puede_registrar_gastos": True,
+                                    "puede_editar_ventas": True,
+                                    "puede_eliminar": True,
+                                    "puede_anular": True
+                                }
+                                supabase.table("usuarios").insert(new_user_payload).execute()
+                                st.success(f"🎉 ¡Usuario '{user_clean}' creado con éxito para '{cfg_sel.get('negocio_nombre')}'!")
+                                st.rerun()
+        except Exception as exc_usr_chk:
+            pass
+
+        st.markdown("---")
+        st.markdown("**⚠️ Zona de Peligro**")
+        with st.expander("🗑️ Eliminar esta Empresa y Todos sus Datos", expanded=False):
+            st.warning(f"¿Está seguro de que desea eliminar la empresa '{cfg_sel.get('negocio_nombre') or cfg_sel.get('propietario')}'? Esto eliminará la empresa, todos sus usuarios asociados, y sus licencias permanentemente de la base de datos. Esta acción no se puede deshacer.")
+            confirm_text = st.text_input("Para confirmar la eliminación, escriba el ID único de la empresa a continuación:", placeholder=cfg_sel["propietario"], key="delete_emp_confirm_id")
+            
+            if st.button("🚨 Eliminar Empresa Permanentemente", key="btn_eliminar_emp_definitivo", use_container_width=True):
+                if confirm_text.strip().lower() == cfg_sel["propietario"].strip().lower():
+                    try:
+                        # 1. Eliminar usuarios asociados a la empresa (campo email = propietario)
+                        supabase.table("usuarios").delete().eq("email", cfg_sel["propietario"]).execute()
+                        # 2. Eliminar suscripciones asociadas a la empresa (campo empresa_id = propietario)
+                        try:
+                            supabase.table("suscripciones_empresas").delete().eq("empresa_id", cfg_sel["propietario"]).execute()
+                        except Exception:
+                            pass
+                        # 3. Eliminar la configuración de la empresa (tabla configuracion_sistema)
+                        supabase.table("configuracion_sistema").delete().eq("id", cfg_sel["id"]).execute()
+                        
+                        _obtener_configuracion_interna.clear()
+                        st.success(f"🗑️ Empresa '{cfg_sel.get('negocio_nombre')}' y sus datos asociados han sido eliminados.")
+                        st.rerun()
+                    except Exception as exc_del:
+                        st.error(f"Error al eliminar la empresa: {exc_del}")
+                else:
+                    st.error("El ID de confirmación no coincide con el ID de la empresa.")
+
         st.markdown("---")
         st.subheader("👥 Usuarios por empresa")
         emp_sel_usr = st.selectbox("Ver usuarios de:", ["TODAS"] + [e.get("propietario","?") for e in todas_cfg], key="sel_emp_usr")
         try:
+            # Seleccionamos también la clave para que la Super-Admin pueda verla
             if emp_sel_usr == "TODAS":
-                usr_resp = supabase.table("usuarios").select("usuario,nombre,rol,activo,email").execute()
+                usr_resp = supabase.table("usuarios").select("id,usuario,clave,nombre,rol,activo,email").execute()
             else:
-                usr_resp = supabase.table("usuarios").select("usuario,nombre,rol,activo,email").eq("email", emp_sel_usr).execute()
+                usr_resp = supabase.table("usuarios").select("id,usuario,clave,nombre,rol,activo,email").eq("email", emp_sel_usr).execute()
             df_usr_emp = pd.DataFrame(usr_resp.data or [])
             if not df_usr_emp.empty:
-                df_usr_emp = df_usr_emp.rename(columns={"email":"empresa_id"})
-                st.dataframe(df_usr_emp, use_container_width=True)
+                df_usr_emp_display = df_usr_emp.rename(columns={"email":"empresa_id", "clave": "contraseña_actual"})
+                st.dataframe(df_usr_emp_display, use_container_width=True)
+                
+                st.markdown("#### 🛠️ Editar / Eliminar Cuenta de Usuario")
+                opciones_usrs = []
+                mapa_usrs = {}
+                for _, u_row in df_usr_emp.iterrows():
+                    lbl = f"{u_row['usuario']} ({u_row['nombre']}) - Empresa: {u_row['email'] or 'global'}"
+                    opciones_usrs.append(lbl)
+                    mapa_usrs[lbl] = u_row
+                
+                usr_a_editar_lbl = st.selectbox("Seleccione el usuario a gestionar:", opciones_usrs, key="super_admin_sel_usr_edit")
+                usr_sel = mapa_usrs[usr_a_editar_lbl]
+                
+                col_ue1, col_ue2 = st.columns(2)
+                with col_ue1:
+                    edit_u_username = st.text_input("Usuario de Acceso:", value=usr_sel["usuario"], key="sa_edit_u_user")
+                    edit_u_name = st.text_input("Nombre de Persona:", value=usr_sel["nombre"], key="sa_edit_u_name")
+                    edit_u_email = st.text_input("Asociar a Empresa ID (email):", value=usr_sel["email"] or "", key="sa_edit_u_email")
+                with col_ue2:
+                    edit_u_pass = st.text_input("Clave / Contraseña:", value=usr_sel["clave"], key="sa_edit_u_pass")
+                    edit_u_rol = st.selectbox("Rol:", ["admin", "gerente", "cajera"], index=["admin", "gerente", "cajera"].index(usr_sel["rol"]) if usr_sel["rol"] in ["admin", "gerente", "cajera"] else 0, key="sa_edit_u_rol")
+                    edit_u_activo = st.checkbox("Usuario Activo", value=bool(usr_sel["activo"]), key="sa_edit_u_activo")
+                
+                c_btn_sa1, c_btn_sa2 = st.columns(2)
+                with c_btn_sa1:
+                    if st.button("💾 Guardar Cambios de Usuario", key="sa_btn_save_user", use_container_width=True):
+                        try:
+                            supabase.table("usuarios").update({
+                                "usuario": edit_u_username.strip().lower(),
+                                "nombre": edit_u_name.strip(),
+                                "email": edit_u_email.strip() if edit_u_email.strip() else None,
+                                "clave": edit_u_pass.strip(),
+                                "rol": edit_u_rol,
+                                "activo": edit_u_activo
+                            }).eq("id", usr_sel["id"]).execute()
+                            st.success(f"🎉 Usuario '{edit_u_username}' actualizado con éxito.")
+                            st.rerun()
+                        except Exception as e_sa:
+                            st.error(f"Error al actualizar usuario: {e_sa}")
+                with c_btn_sa2:
+                    if st.button("🗑️ Eliminar Cuenta de Usuario", key="sa_btn_delete_user", use_container_width=True):
+                        try:
+                            supabase.table("usuarios").delete().eq("id", usr_sel["id"]).execute()
+                            st.success(f"🗑️ Cuenta de usuario '{usr_sel['usuario']}' eliminada permanentemente.")
+                            st.rerun()
+                        except Exception as e_sa_del:
+                            st.error(f"Error al eliminar usuario: {e_sa_del}")
             else:
                 st.info("No hay usuarios para esta empresa.")
         except Exception as exc:
