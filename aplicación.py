@@ -5100,9 +5100,56 @@ else:
 if not es_admin() and "Dinero Real" in menu_opciones:
     menu_opciones = [m for m in menu_opciones if m != "Dinero Real"]
 
-menu = st.sidebar.selectbox("Menú", menu_opciones)
+# Inicializar estado de menú actual si no existe
+if "menu_actual" not in st.session_state:
+    st.session_state["menu_actual"] = menu_opciones[0] if menu_opciones else "Dashboard"
+
+# 1. Selector en la barra lateral (Sidebar)
+menu_sidebar = st.sidebar.selectbox(
+    "Menú", 
+    menu_opciones, 
+    index=menu_opciones.index(st.session_state["menu_actual"]) if st.session_state["menu_actual"] in menu_opciones else 0,
+    key="menu_sidebar_sb"
+)
+
+# 2. Selector en la pantalla principal (Top Navbar Backup para cuando el menú lateral está cerrado)
+st.markdown("""
+<style>
+    .top-nav-box {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        border: 1px solid #e9ecef;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+with st.container():
+    col_nav_title, col_nav_sel = st.columns([1, 2])
+    with col_nav_title:
+        st.markdown("<p style='margin-top: 10px; font-weight: bold; color: #1e293b;'>🧭 Ir al Módulo / Sección:</p>", unsafe_allow_html=True)
+    with col_nav_sel:
+        menu_top = st.selectbox(
+            "Seleccionar módulo",
+            menu_opciones,
+            index=menu_opciones.index(st.session_state["menu_actual"]) if st.session_state["menu_actual"] in menu_opciones else 0,
+            label_visibility="collapsed",
+            key="menu_top_selectbox"
+        )
+
+# Sincronizar selectores de navegación
+if menu_sidebar != st.session_state["menu_actual"]:
+    st.session_state["menu_actual"] = menu_sidebar
+    st.rerun()
+elif menu_top != st.session_state["menu_actual"]:
+    st.session_state["menu_actual"] = menu_top
+    st.rerun()
+
+menu = st.session_state["menu_actual"]
 
 if st.sidebar.button("🔄 Recargar nube"):
+    st.session_state.pop("session_cache_tablas", None)
     st.rerun()
 
 
