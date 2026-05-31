@@ -13567,6 +13567,19 @@ elif menu == "🏢 Gestión de Empresas":
                     edit_u_rol = st.selectbox("Rol:", ["admin", "gerente", "cajera"], index=["admin", "gerente", "cajera"].index(usr_sel["rol"]) if usr_sel["rol"] in ["admin", "gerente", "cajera"] else 0, key="sa_edit_u_rol")
                     edit_u_activo = st.checkbox("Usuario Activo", value=bool(usr_sel["activo"]), key="sa_edit_u_activo")
                 
+                with st.expander("🛡️ Configurar Accesos y Permisos", expanded=False):
+                    col_p1, col_p2 = st.columns(2)
+                    with col_p1:
+                        edit_u_pv = st.checkbox("Puede Vender (POS)", value=bool(usr_sel.get("puede_vender", True)), key="sa_edit_u_pv")
+                        edit_u_pev = st.checkbox("Puede Editar Ventas/Facturas", value=bool(usr_sel.get("puede_editar_ventas", False)), key="sa_edit_u_pev")
+                        edit_u_pel = st.checkbox("Puede Eliminar Registros", value=bool(usr_sel.get("puede_eliminar", False)), key="sa_edit_u_pel")
+                        edit_u_pan = st.checkbox("Puede Anular Ventas/Facturas", value=bool(usr_sel.get("puede_anular", False)), key="sa_edit_u_pan")
+                    with col_p2:
+                        edit_u_pvr = st.checkbox("Puede Ver Reportes/Dashboard", value=bool(usr_sel.get("puede_ver_reportes", False)), key="sa_edit_u_pvr")
+                        edit_u_prc = st.checkbox("Puede Registrar Compras", value=bool(usr_sel.get("puede_registrar_compras", False)), key="sa_edit_u_prc")
+                        edit_u_prg = st.checkbox("Puede Registrar Gastos", value=bool(usr_sel.get("puede_registrar_gastos", False)), key="sa_edit_u_prg")
+                        edit_u_pcf = st.checkbox("Puede Modificar Configuración", value=bool(usr_sel.get("puede_configurar", False)), key="sa_edit_u_pcf")
+                
                 c_btn_sa1, c_btn_sa2 = st.columns(2)
                 with c_btn_sa1:
                     if st.button("💾 Guardar Cambios de Usuario", key="sa_btn_save_user", use_container_width=True):
@@ -13577,7 +13590,15 @@ elif menu == "🏢 Gestión de Empresas":
                                 "email": edit_u_email.strip() if edit_u_email.strip() else None,
                                 "clave": edit_u_pass.strip(),
                                 "rol": edit_u_rol,
-                                "activo": edit_u_activo
+                                "activo": edit_u_activo,
+                                "puede_vender": edit_u_pv,
+                                "puede_ver_reportes": edit_u_pvr,
+                                "puede_configurar": edit_u_pcf,
+                                "puede_registrar_compras": edit_u_prc,
+                                "puede_registrar_gastos": edit_u_prg,
+                                "puede_editar_ventas": edit_u_pev,
+                                "puede_eliminar": edit_u_pel,
+                                "puede_anular": edit_u_pan
                             }).eq("id", usr_sel["id"]).execute()
                             st.success(f"🎉 Usuario '{edit_u_username}' actualizado con éxito.")
                             st.rerun()
@@ -13610,6 +13631,23 @@ elif menu == "🏢 Gestión de Empresas":
             n_usr_clave = st.text_input("Clave de Acceso Inicial:", placeholder="ej. biberon2026", key="admin_crear_usr_pass")
             n_usr_rol = st.selectbox("Rol Asignado:", ["admin", "gerente", "cajera"], key="admin_crear_usr_rol")
             
+        with st.expander("🛡️ Configurar Accesos Iniciales del Usuario", expanded=False):
+            col_cr1, col_cr2 = st.columns(2)
+            # Default permissions by role
+            is_cajera = n_usr_rol == "cajera"
+            is_gerente = n_usr_rol == "gerente"
+            is_admin = n_usr_rol == "admin"
+            with col_cr1:
+                n_usr_pv = st.checkbox("Puede Vender (POS)", value=True, key="sa_cr_usr_pv")
+                n_usr_pev = st.checkbox("Puede Editar Ventas/Facturas", value=is_gerente or is_admin, key="sa_cr_usr_pev")
+                n_usr_pel = st.checkbox("Puede Eliminar Registros", value=is_admin, key="sa_cr_usr_pel")
+                n_usr_pan = st.checkbox("Puede Anular Ventas/Facturas", value=is_gerente or is_admin, key="sa_cr_usr_pan")
+            with col_cr2:
+                n_usr_pvr = st.checkbox("Puede Ver Reportes/Dashboard", value=is_gerente or is_admin, key="sa_cr_usr_pvr")
+                n_usr_prc = st.checkbox("Puede Registrar Compras", value=is_gerente or is_admin, key="sa_cr_usr_prc")
+                n_usr_prg = st.checkbox("Puede Registrar Gastos", value=is_gerente or is_admin, key="sa_cr_usr_prg")
+                n_usr_pcf = st.checkbox("Puede Modificar Configuración", value=is_admin, key="sa_cr_usr_pcf")
+                
         if st.button("🚀 Registrar Cuenta de Usuario", key="btn_admin_registrar_usr_emp", use_container_width=True):
             user_clean = (n_usr_usuario or "").strip().lower()
             name_clean = (n_usr_nombre or "").strip()
@@ -13633,14 +13671,14 @@ elif menu == "🏢 Gestión de Empresas":
                             "rol": n_usr_rol,
                             "activo": True,
                             "email": emp_usr_sel, # Vinculado al propietario (empresa_id)
-                            "puede_vender": n_usr_rol in ["cajera", "gerente", "admin"],
-                            "puede_ver_reportes": n_usr_rol in ["gerente", "admin"],
-                            "puede_configurar": n_usr_rol == "admin",
-                            "puede_registrar_compras": n_usr_rol in ["gerente", "admin"],
-                            "puede_registrar_gastos": n_usr_rol in ["gerente", "admin"],
-                            "puede_editar_ventas": n_usr_rol in ["gerente", "admin"],
-                            "puede_eliminar": n_usr_rol == "admin",
-                            "puede_anular": n_usr_rol in ["gerente", "admin"]
+                            "puede_vender": n_usr_pv,
+                            "puede_ver_reportes": n_usr_pvr,
+                            "puede_configurar": n_usr_pcf,
+                            "puede_registrar_compras": n_usr_prc,
+                            "puede_registrar_gastos": n_usr_prg,
+                            "puede_editar_ventas": n_usr_pev,
+                            "puede_eliminar": n_usr_pel,
+                            "puede_anular": n_usr_pan
                         }
                         supabase.table("usuarios").insert(new_user_payload).execute()
                         st.success(f"🎉 ¡Cuenta '{user_clean}' creada con éxito para la empresa '{emp_usr_sel}'!")
