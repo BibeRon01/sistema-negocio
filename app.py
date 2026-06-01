@@ -13431,6 +13431,55 @@ elif menu == "🏢 Gestión de Empresas":
                 })
             st.dataframe(pd.DataFrame(rows_lic), use_container_width=True)
 
+            # Expandible para gestionar/eliminar pagos registrados
+            with st.expander("🛠️ Editar / Eliminar pagos de licencias", expanded=False):
+                if not subs_data:
+                    st.info("No hay pagos para gestionar.")
+                else:
+                    opciones_c = []
+                    mapa_c = {}
+                    for row in subs_data:
+                        c_id = row.get("id")
+                        c_emp = row.get("empresa_id", "").upper()
+                        c_ini = row.get("fecha_inicio")
+                        c_monto = float(row.get("monto_pagado") or 0.0)
+                        etiq = f"ID: {c_id} | {c_emp} | Fecha: {c_ini} | Monto: RD$ {c_monto:,.2f}"
+                        opciones_c.append(etiq)
+                        mapa_c[etiq] = row
+                    
+                    sel_pago_etiq = st.selectbox("Seleccione el pago a corregir o eliminar", opciones_c, key="sel_pago_gestionar")
+                    pago_sel = mapa_c[sel_pago_etiq]
+                    pago_id = pago_sel.get("id")
+                    
+                    # Campos editables
+                    new_monto = st.number_input("Monto pagado", value=float(pago_sel.get("monto_pagado") or 0.0), step=100.0, key=f"edit_monto_pago_{pago_id}")
+                    new_venc = st.date_input("Fecha de vencimiento", value=datetime.strptime(pago_sel.get("fecha_vencimiento"), "%Y-%m-%d").date(), key=f"edit_venc_pago_{pago_id}")
+                    new_obs = st.text_area("Observación", value=pago_sel.get("observacion") or "", key=f"edit_obs_pago_{pago_id}")
+                    
+                    c1g, c2g = st.columns(2)
+                    with c1g:
+                        if st.button("💾 Guardar Cambios en Pago", key=f"btn_save_pago_{pago_id}"):
+                            try:
+                                supabase.table("suscripciones_empresas").update({
+                                    "monto_pagado": float(new_monto),
+                                    "fecha_vencimiento": str(new_venc),
+                                    "observacion": new_obs
+                                }).eq("id", pago_id).execute()
+                                _obtener_configuracion_interna.clear()
+                                st.success("🎉 Pago de licencia actualizado con éxito.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Error al actualizar el pago: {exc}")
+                    with c2g:
+                        if st.button("🗑️ Eliminar Registro de Pago", key=f"btn_del_pago_{pago_id}"):
+                            try:
+                                supabase.table("suscripciones_empresas").delete().eq("id", pago_id).execute()
+                                _obtener_configuracion_interna.clear()
+                                st.success("🗑️ Registro de pago eliminado correctamente.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Error al eliminar el pago: {exc}")
+
     with tab_config:
         st.subheader("🛠️ Configuración de Empresas y Usuarios")
         with st.expander("📊 Ver tabla completa de empresas", expanded=False):
