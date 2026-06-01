@@ -21,13 +21,19 @@ st.set_page_config(page_title="Sistema de Negocio PRO", layout="wide")
 # Ocultar la barra y botones por defecto de Streamlit (White-Label Puro)
 st.markdown("""
 <style>
-#MainMenu {visibility: hidden;}
-header {visibility: hidden;}
-footer {visibility: hidden;}
-div[data-testid="stDecoration"] {display: none;}
-div[data-testid="stStatusWidget"] {display: none;}
+/* Hacemos la cabecera transparente pero visible para que el botón de expandir/contraer funcione */
+[data-testid="stHeader"] {
+    background-color: transparent !important;
+    background: transparent !important;
+}
+footer {display: none !important;}
+[data-testid="stDecoration"] {display: none !important;}
+[data-testid="stStatusWidget"] {display: none !important;}
 .viewerBadge_container__1QS1G {display: none !important;}
 button[title="View source code"] {display: none !important;}
+/* Ocultar menú superior y botón de despliegue */
+[data-testid="stMainMenu"], #MainMenu {display: none !important;}
+[data-testid="stDeployButton"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
