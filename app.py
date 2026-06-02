@@ -386,6 +386,12 @@ def tiene_permiso(flag: str) -> bool:
 
 def cerrar_sesion():
     st.session_state.pop("usuario_data", None)
+    if "session_cache_tablas" in st.session_state:
+        st.session_state["session_cache_tablas"].clear()
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
     st.rerun()
 
 
