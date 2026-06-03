@@ -230,7 +230,7 @@ TABLAS_MULTI_TENANT = {
     "gastos_dueno", "activos_fijos", "capital_base", "creditos",
     "auditoria_eventos", "usuarios", "ajustes_inventario", "conteo_inventario",
     "distribuciones", "notas_credito", "suscripciones_empresas", "secuencia_ncf",
-    "inventario_actual"
+    "inventario_actual", "cuentas_por_cobrar", "abonos_credito", "distribucion_beneficios", "ventas_pagos"
 }
 
 # Monkey-patching de Supabase client para aislamiento Multi-Tenant automático y transparente
