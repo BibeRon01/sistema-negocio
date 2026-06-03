@@ -2287,7 +2287,9 @@ def _leer_tabla_de_supabase(nombre_tabla: str, order_by: str = "id", tenant: str
             df["metodo"] = df["método"]
         if "cliente_nombre" not in df.columns and "cliente_nombr" in df.columns:
             df["cliente_nombre"] = df["cliente_nombr"]
-    return aplicar_total_contable_df(df)
+    if nombre_tabla == "ventas":
+        return aplicar_total_contable_df(df)
+    return df
 
 
 def leer_tabla(nombre_tabla: str, order_by: str = "id") -> pd.DataFrame:
