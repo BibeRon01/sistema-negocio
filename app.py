@@ -2563,6 +2563,11 @@ DATA = cargar_datos()
 if "pos_post_venta" not in st.session_state:
     st.session_state["pos_post_venta"] = None
 
+if "dash_desde" not in st.session_state:
+    st.session_state["dash_desde"] = date.today().replace(day=1)
+if "dash_hasta" not in st.session_state:
+    st.session_state["dash_hasta"] = date.today()
+
 # =========================================================
 # HELPERS DE NEGOCIO
 # =========================================================
@@ -5126,6 +5131,9 @@ else:
 # Seguridad: Dinero Real solo para administrador
 if not es_admin() and "Dinero Real" in menu_opciones:
     menu_opciones = [m for m in menu_opciones if m != "Dinero Real"]
+
+if usuario_sesion():
+    menu_opciones.append("🔒 Mi Perfil")
 
 menu = st.sidebar.selectbox("Menú", menu_opciones)
 
@@ -12633,7 +12641,7 @@ elif menu == "Créditos":
                                 row = cxc[cxc["id"].astype(str) == selected_id].iloc[0]
                                 saldo = float(limpiar_numero(row.get("saldo_pendiente")) or 0)
                                 st.write(f"Saldo pendiente: RD$ {saldo:,.2f}")
-                                max_cuotas = int(saldo) if saldo.is_integer() else int(saldo) + 1
+                                max_cuotas = max(1, int(saldo) if saldo.is_integer() else int(saldo) + 1)
                                 num_cuotas = st.number_input("Número de cuotas", min_value=1, max_value=max_cuotas, value=1, step=1, key="num_cuotas")
                                 if st.button("Crear Cuotas", key="btn_dividir_credito"):
                                     monto_cuota = round(saldo / num_cuotas, 2)
@@ -13608,6 +13616,52 @@ elif menu == "🏢 Gestión de Empresas":
                         st.error(f"Error al eliminar la empresa: {exc_del}")
                 else:
                     st.error("El ID de confirmación no coincide con el ID de la empresa.")
+        with st.expander("🔥 Borrado Total del Sistema (Reset de Fábrica)", expanded=False):
+            st.error("🚨 ¡ATENCIÓN! Esta acción eliminará permanentemente todos los datos operativos de todas las empresas en la base de datos (Ventas, Compras, Caja, Gastos, Empleados, Insumos, Pérdidas, etc.).")
+            st.warning("Se mantendrá únicamente el usuario super-administrador actual 'nelly' para que puedas seguir gestionando el sistema.")
+            confirm_reset_code = st.text_input("Para proceder, escribe 'RESET_TOTAL' a continuación:", placeholder="escribe RESET_TOTAL", key="confirm_reset_total_code")
+            if st.button("🚨 EJECUTAR RESET DE FÁBRICA", key="btn_reset_fabrica_ejecutar", use_container_width=True):
+                if confirm_reset_code.strip() == "RESET_TOTAL":
+                    with st.spinner("Borrando base de datos..."):
+                        tablas_limpiar = [
+                            "ventas", "detalle_venta", "caja", "productos", "clientes", "proveedores",
+                            "compras", "gastos", "empleados", "pagos_empleados", "perdidas",
+                            "gastos_dueno", "activos_fijos", "capital_base", "cuentas_por_cobrar",
+                            "abonos_credito", "distribucion_beneficios", "ventas_pagos",
+                            "inventario_actual", "ajustes_inventario", "conteo_inventario",
+                            "suscripciones_empresas", "secuencia_ncf"
+                        ]
+                        for tabla in tablas_limpiar:
+                            try:
+                                supabase.table(tabla).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                            except Exception:
+                                pass
+                            try:
+                                supabase.table(tabla).delete().neq("id", -1).execute()
+                            except Exception:
+                                pass
+                        
+                        try:
+                            supabase.table("usuarios").delete().neq("usuario", "nelly").neq("usuario", "admin").execute()
+                        except Exception:
+                            pass
+                        
+                        try:
+                            supabase.table("configuracion_sistema").delete().neq("id", 1).execute()
+                            supabase.table("configuracion_sistema").update({
+                                "negocio_nombre": "A&M ERP Financiero",
+                                "nombre_sistema": "SISTEMA CONTABLE A&M",
+                                "propietario": "global",
+                                "slogan": "Tema: Onyx Carbon (Dark Mode Premium)"
+                            }).eq("id", 1).execute()
+                        except Exception:
+                            pass
+                            
+                        _obtener_configuracion_interna.clear()
+                        st.success("🔥 ¡El sistema ha sido restablecido a fábrica con éxito!")
+                        st.rerun()
+                else:
+                    st.error("Código de confirmación incorrecto.")
 
         st.markdown("---")
         st.subheader("👥 Usuarios por empresa")
@@ -13859,3 +13913,44 @@ elif menu == "🏢 Gestión de Empresas":
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Error al crear empresa: {exc}")
+
+
+elif menu == "🔒 Mi Perfil":
+    st.title("🔒 Mi Perfil")
+    user = usuario_sesion()
+    if not user:
+        st.error("No hay sesión activa.")
+    else:
+        st.write("Gestiona tu información de acceso personal.")
+        user_id = user.get("id")
+        
+        with st.form("form_mi_perfil"):
+            new_nombre = st.text_input("Nombre Completo", value=str(user.get("nombre") or ""))
+            new_usuario = st.text_input("Nombre de Usuario", value=str(user.get("usuario") or ""))
+            new_clave = st.text_input("Nueva Contraseña", value=str(user.get("clave") or ""), type="password")
+            
+            if st.form_submit_button("💾 Guardar cambios"):
+                usr_clean = new_usuario.strip().lower()
+                name_clean = new_nombre.strip()
+                clave_clean = new_clave.strip()
+                
+                if not usr_clean or not name_clean or not clave_clean:
+                    st.error("Todos los campos son obligatorios.")
+                else:
+                    # Validar si el nuevo usuario ya existe (y no es el actual del mismo ID)
+                    try:
+                        existentes = supabase.table("usuarios").select("*").eq("usuario", usr_clean).execute().data or []
+                        existe_otro = any(str(u.get("id")) != str(user_id) for u in existentes)
+                    except Exception:
+                        existe_otro = False
+                        
+                    if existe_otro:
+                        st.error(f"Ya existe un usuario con el nombre '{usr_clean}'. Elige otro.")
+                    else:
+                        payload = {"nombre": name_clean, "usuario": usr_clean, "clave": clave_clean}
+                        if actualizar("usuarios", user_id, payload):
+                            # Actualizar la sesión en memoria
+                            user.update(payload)
+                            st.session_state["usuario_data"] = user
+                            st.success("✅ Tus datos de perfil se actualizaron con éxito. Por favor recarga para ver los cambios.")
+                            st.rerun()
