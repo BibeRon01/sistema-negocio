@@ -2033,23 +2033,125 @@ def df_to_excel_bytes(df: pd.DataFrame) -> bytes:
 
 
 
+def embellecer_df_exportacion(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    
+    df_clean = df.copy()
+    
+    # 1. Eliminar columnas técnicas internas
+    cols_a_eliminar = [
+        "id", "empresa_id", "clave", "logo_url", "slogan", "slogan_e",
+        "propietario_id", "producto_id", "cliente_id", "proveedor_id", "empleado_id",
+        "antes_json", "despues_json"
+    ]
+    for col in df_clean.columns:
+        col_lower = str(col).lower()
+        if col_lower.endswith("_id") or col_lower.endswith("_idx") or col_lower == "identificación":
+            if col not in cols_a_eliminar:
+                cols_a_eliminar.append(col)
+                
+    df_clean = df_clean.drop(columns=cols_a_eliminar, errors="ignore")
+    
+    # 2. Formatear booleanos a Sí/No
+    for col in df_clean.columns:
+        if df_clean[col].dtype == "bool":
+            df_clean[col] = df_clean[col].map({True: "Sí", False: "No"})
+            
+    # 3. Formatear fechas/horas
+    for col in df_clean.columns:
+        col_lower = str(col).lower()
+        if "fecha" in col_lower or "created_at" in col_lower:
+            try:
+                df_clean[col] = pd.to_datetime(df_clean[col]).dt.strftime('%d/%m/%Y %I:%M %p')
+            except Exception:
+                try:
+                    df_clean[col] = pd.to_datetime(df_clean[col]).dt.strftime('%d/%m/%Y')
+                except Exception:
+                    pass
+                    
+    # 4. Mapear nombres de columnas a nombres hermosos en español
+    mapeo_hermoso = {
+        "codigo": "Código",
+        "nombre": "Nombre",
+        "categoria": "Categoría",
+        "stock": "Existencia en Inventario",
+        "cantidad": "Cantidad",
+        "costo": "Costo (RD$)",
+        "costo_unitario": "Costo Unitario (RD$)",
+        "precio": "Precio de Venta (RD$)",
+        "precio_venta": "Precio de Venta (RD$)",
+        "precio_descuento": "Precio Oferta (RD$)",
+        "precio_especial": "Precio Mayorista (RD$)",
+        "activo": "Estado Activo",
+        "usa_inventario": "Controla Inventario",
+        "proveedor": "Proveedor",
+        "descripcion": "Descripción / Detalle",
+        "numero_factura": "No. Factura",
+        "numero": "No. Documento",
+        "metodo_pago": "Método de Pago",
+        "metodo": "Método de Pago",
+        "fecha": "Fecha",
+        "created_at": "Fecha de Registro",
+        "cliente_nombre": "Nombre de Cliente",
+        "vendedor_nombre": "Vendedor",
+        "total": "Total Facturado (RD$)",
+        "subtotal": "Subtotal (RD$)",
+        "itbis": "ITBIS (RD$)",
+        "ganancia": "Ganancia Estimada (RD$)",
+        "usuario": "Nombre de Usuario",
+        "rol": "Rol de Usuario",
+        "negocio_nombre": "Nombre de Empresa",
+        "rnc": "RNC",
+        "telefono": "Teléfono",
+        "direccion": "Dirección",
+        "fecha_vencimiento": "Fecha de Vencimiento",
+        "fecha_inicio": "Fecha de Inicio",
+        "monto_pagado": "Monto Pagado (RD$)",
+        "periodo": "Periodo de Suscripción",
+        "observacion": "Observaciones",
+        "accion": "Acción Realizada",
+        "modulo": "Módulo de Sistema",
+        "tabla_afectada": "Mesa / Tabla de Datos",
+        "tipo_comprobante": "Tipo de Comprobante (NCF)",
+        "secuencia_actual": "Secuencia NCF Actual",
+        "secuencia_maxima": "Límite Secuencia NCF",
+        "utilidad": "Utilidad Neta (RD$)",
+        "ganancia_bruta": "Ganancia Bruta (RD$)",
+        "detalle": "Detalle",
+        "monto": "Monto (RD$)",
+        "motivo": "Motivo / Concepto",
+        "tipo_gasto": "Tipo de Gasto",
+        "salario": "Sueldo Neto (RD$)",
+        "cedula": "Cédula / ID",
+        "pago_monto": "Sueldo Pagado (RD$)",
+        "tipo_pago": "Tipo de Pago",
+        "total_costo_inventario": "Costo Total Inventario (RD$)",
+        "total_valor_venta": "Valor Venta Total (RD$)",
+        "ganancia_potencial": "Margen Ganancia Potencial (RD$)"
+    }
+    
+    nuevos_headers = {}
+    for col in df_clean.columns:
+        col_str = str(col)
+        col_lower = col_str.lower()
+        if col_lower in mapeo_hermoso:
+            nuevos_headers[col_str] = mapeo_hermoso[col_lower]
+        else:
+            hermoso = col_str.replace("_", " ").title()
+            nuevos_headers[col_str] = hermoso
+            
+    df_clean = df_clean.rename(columns=nuevos_headers)
+    return df_clean
+
+
 def descargar_archivos(df: pd.DataFrame, base_name: str):
     if df is None or df.empty:
         st.info("No hay datos para descargar.")
         return
 
-    # Limpieza automática de IDs feos (UUIDs) para los reportes
-    df_clean = df.copy()
-    columnas_eliminar = [c for c in df_clean.columns if str(c).lower() == "id" or str(c).lower().endswith("_id") or str(c).lower() == "identificación"]
-    df_clean = df_clean.drop(columns=columnas_eliminar, errors="ignore")
-    
-    # Formatear fechas para que salgan limpias
-    for col in df_clean.columns:
-        if "fecha" in str(col).lower():
-            try:
-                df_clean[col] = pd.to_datetime(df_clean[col]).dt.strftime('%d/%m/%Y %H:%M')
-            except Exception:
-                pass
+    # Embellecer DataFrame para exportación
+    df_clean = embellecer_df_exportacion(df)
 
     csv_bytes = df_clean.to_csv(index=False).encode("utf-8-sig")
     xlsx_bytes = df_to_excel_bytes(df_clean)
