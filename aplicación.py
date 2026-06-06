@@ -877,7 +877,22 @@ def preparar_import_productos(df_raw: pd.DataFrame) -> pd.DataFrame:
                 return ""
         except Exception:
             pass
+        # Si es número (float/int), convertir a entero primero para evitar
+        # notación científica de Excel (ej: 7.70235e+12 → "7702350000000")
+        if isinstance(x, float):
+            try:
+                return str(int(x))
+            except (ValueError, OverflowError):
+                pass
+        if isinstance(x, int):
+            return str(x)
         txt = str(x).strip()
+        # Detectar notación científica en texto (ej: "7.70235e+12")
+        if 'e' in txt.lower() and '+' in txt:
+            try:
+                return str(int(float(txt)))
+            except (ValueError, OverflowError):
+                pass
         if txt.endswith(".0"):
             txt = txt[:-2]
         return txt
@@ -2583,6 +2598,20 @@ def eliminar(nombre_tabla: str, fila_id: Any) -> bool:
                 antes_json=antes_json,
                 descripcion=f"Registro eliminado de {nombre_tabla}."
             )
+            # Limpieza en cascada para inventario_actual
+            if nombre_tabla == "productos" and antes_json:
+                prod_nombre = antes_json.get("nombre")
+                if prod_nombre:
+                    try:
+                        tenant = obtener_tenant_actual()
+                        q = supabase.table("inventario_actual").delete().eq("producto", prod_nombre)
+                        if tenant and tenant != "global":
+                            q = q.eq("empresa_id", tenant)
+                        q.execute()
+                        invalidar_cache_tabla("inventario_actual")
+                    except Exception:
+                        pass
+
             invalidar_cache_tabla(nombre_tabla)
             return True
         except Exception as exc:
@@ -3289,9 +3318,25 @@ def calcular_valores_inventario_pro():
         # Si la mejor está totalmente en cero, devolverla solo como último recurso
         return col
 
+    # Obtener nombres de productos válidos para filtrar inventario_actual
+    productos_df = fuentes[0][1] if len(fuentes) > 0 else None
+    nombres_productos_validos = set()
+    if productos_df is not None and not productos_df.empty:
+        nombres_productos_validos = set(productos_df["nombre"].dropna().astype(str).str.strip().apply(normalizar_texto))
+
     for nombre_fuente, df in fuentes:
         if df is None or df.empty:
             continue
+
+        # Filtrar inventario_actual si corresponde para no incluir huérfanos
+        if nombre_fuente == "inventario_actual" and not df.empty:
+            if "producto" in df.columns:
+                df = df[df["producto"].dropna().astype(str).str.strip().apply(normalizar_texto).isin(nombres_productos_validos)].copy()
+            elif "nombre" in df.columns:
+                df = df[df["nombre"].dropna().astype(str).str.strip().apply(normalizar_texto).isin(nombres_productos_validos)].copy()
+            
+            if df.empty:
+                continue
 
         col_stock = _mejor_columna(df, [
             "stock", "cantidad", "existencia", "existencia_sistema", "existencias",
@@ -13328,7 +13373,7 @@ elif menu == "Configuración":
                 precios_itbis = st.checkbox("¿Precios de productos YA incluyen ITBIS?", value=bool(cfg.get("precios_incluyen_itbis", True)), help="Activa esto si tus precios de venta finales ya tienen el 18% incluido. El sistema desglosará el monto en la factura automáticamente sin sumarle más dinero al cliente.")
             if st.button("Guardar configuración", key="btn_guardar_cfg"):
                 actualizar("configuracion_sistema", cfg["id"], {"negocio_nombre": negocio_nombre, "nombre_sistema": nombre_sistema, "propietario": propietario, "slogan": slogan, "telefono": telefono, "rnc": rnc, "direccion": direccion, "recargo_tarjeta_pct": float(recargo_tarjeta_pct), "cierre_dia_operativo_hora": cierre_dia_operativo_hora, "precios_incluyen_itbis": precios_itbis})
-                obtener_configuracion.clear()
+                _obtener_configuracion_interna.clear()
                 st.success("✅ Configuración guardada correctamente.")
                 st.rerun()
             st.subheader("Logo")
