@@ -13832,6 +13832,7 @@ elif menu == "🏢 Gestión de Empresas":
             new_rnc = st.text_input("RNC", key="new_emp_rnc")
             new_dir = st.text_input("Dirección", key="new_emp_dir")
             new_slogan = st.text_input("Slogan", key="new_emp_slogan")
+            new_dias_prueba = st.number_input("Días de prueba gratis de licencia", min_value=0, max_value=365, value=7, step=1, key="new_emp_dias_prueba")
             
         st.markdown("##### 👤 Cuenta de Administrador Inicial (Altamente Recomendado)")
         st.caption("Crea la cuenta de usuario principal para esta empresa de forma automática.")
@@ -13877,6 +13878,20 @@ elif menu == "🏢 Gestión de Empresas":
                         "slogan": new_slogan, "logo_url": None, "clave": prop_id
                     })
                     supabase.table("configuracion_sistema").insert(payload).execute()
+                    
+                    # Registrar licencia de prueba gratis si es mayor a 0 días
+                    if new_dias_prueba > 0:
+                        fecha_venc_prueba = datetime.now().date() + timedelta(days=int(new_dias_prueba))
+                        supabase.table("suscripciones_empresas").insert({
+                            "empresa_id": prop_id,
+                            "fecha_inicio": str(datetime.now().date()),
+                            "fecha_vencimiento": str(fecha_venc_prueba),
+                            "monto_pagado": 0.0,
+                            "periodo": f"{new_dias_prueba} días de prueba",
+                            "metodo_pago": "prueba",
+                            "dias_gracia": 0,
+                            "observacion": f"Período de prueba de {new_dias_prueba} días otorgado al crear la empresa"
+                        }).execute()
                     
                     # Registrar auditoría de la empresa
                     registrar_auditoria_pro(
