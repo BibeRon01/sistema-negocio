@@ -5680,12 +5680,14 @@ elif menu == "Productos":
                 estado = st.empty()
                 procesados = 0
                 errores = 0
+                filas_con_error = []  # Reporte detallado de fallos
 
                 for i, row in df_preview.iterrows():
+                    nombre = ""
                     try:
                         nombre = limpiar_texto(row.get("nombre"))
                         if not nombre:
-                            continue
+                            continue  # Fila vacía, se ignora sin contar
 
                         codigo = limpiar_texto(row.get("codigo"))
                         categoria = limpiar_texto(row.get("categoria"))
@@ -5699,7 +5701,10 @@ elif menu == "Productos":
                         if existente is None:
                             existente = get_producto_por_nombre(nombre)
 
+                        ok = False
+
                         if existente is not None:
+                            # ── ACTUALIZAR producto ya existente ──
                             actual = obtener_existencia_producto(existente)
                             nueva_cant = actual
                             if modo_carga == "Actualizar costo/precio y sumar cantidad":
@@ -5707,7 +5712,7 @@ elif menu == "Productos":
                             elif modo_carga == "Actualizar costo/precio y reemplazar cantidad":
                                 nueva_cant = stock
 
-                            payload = {
+                            payload_upd = {
                                 "fecha": str(date.today()),
                                 "codigo": codigo or existente.get("codigo"),
                                 "codigo_barra": codigo or existente.get("codigo_barra") or existente.get("codigo"),
@@ -5725,14 +5730,22 @@ elif menu == "Productos":
                             }
 
                             if modo_carga != "Solo actualizar datos sin mover cantidad":
-                                payload["cantidad"] = float(nueva_cant)
-                                payload["stock"] = float(nueva_cant)
-                                payload["existencia"] = float(nueva_cant)
+                                payload_upd["cantidad"] = float(nueva_cant)
+                                payload_upd["stock"] = float(nueva_cant)
+                                payload_upd["existencia"] = float(nueva_cant)
 
-                            ok = actualizar("productos", existente["id"], payload)
-                            prod_id = existente["id"]
+                            try:
+                                ok = actualizar("productos", existente["id"], payload_upd)
+                                if not ok:
+                                    raise Exception("La actualización no fue confirmada por la base de datos.")
+                            except Exception as exc_upd:
+                                filas_con_error.append(f"Fila {i+1} ('{nombre}'): Error al actualizar — {exc_upd}")
+                                errores += 1
+                                continue
+
                         else:
-                            payload = {
+                            # ── INSERTAR producto nuevo ──
+                            payload_ins = {
                                 "fecha": str(date.today()),
                                 "codigo": codigo,
                                 "codigo_barra": codigo,
@@ -5753,24 +5766,46 @@ elif menu == "Productos":
                                 "created_at": ahora_str(),
                                 "updated_at": ahora_str(),
                             }
-                            ok = insertar("productos", payload)
-                            nuevo = get_producto_por_codigo(codigo) if codigo else get_producto_por_nombre(nombre)
-                            prod_id = nuevo.get("id") if nuevo is not None else None
+                            try:
+                                ok = insertar("productos", payload_ins)
+                                if not ok:
+                                    raise Exception("El sistema rechazó la inserción (código o nombre duplicado, o error de base de datos).")
+                                # Recargar cache para que las próximas filas vean este producto
+                                invalidar_cache_tabla("productos")
+                            except Exception as exc_ins:
+                                filas_con_error.append(f"Fila {i+1} ('{nombre}', código '{codigo}'): Error al crear — {exc_ins}")
+                                errores += 1
+                                continue
 
-                        # Sincronizar inventario actual con la misma información limpia
-                        upsert_inventario_actual(nombre, costo, precio_venta, stock if modo_carga != "Solo actualizar datos sin mover cantidad" else obtener_existencia_producto(get_producto_por_nombre(nombre)), date.today(), "Sincronizado desde carga de productos")
+                        # ── Sincronizar inventario actual (no bloquea el conteo del producto) ──
+                        try:
+                            upsert_inventario_actual(
+                                nombre, costo, precio_venta,
+                                stock if modo_carga != "Solo actualizar datos sin mover cantidad" else obtener_existencia_producto(get_producto_por_nombre(nombre) or pd.Series()),
+                                date.today(), "Sincronizado desde carga de productos"
+                            )
+                        except Exception:
+                            pass  # El fallo de inventario actual no impide que el producto cuente como procesado
 
                         procesados += 1
+
                     except Exception as e:
                         errores += 1
-                        st.warning(f"No se pudo cargar fila {i + 1}: {e}")
+                        filas_con_error.append(f"Fila {i+1} ('{nombre or 'SIN NOMBRE'}'): Error inesperado — {e}")
 
                     if len(df_preview) > 0:
                         barra.progress(min((i + 1) / len(df_preview), 1.0))
-                        estado.caption(f"Procesando {i + 1} de {len(df_preview)}...")
+                        estado.caption(f"Procesando {i + 1} de {len(df_preview)}... ✅ OK: {procesados} | ❌ Errores: {errores}")
 
                 limpiar_cache_datos()
-                st.success(f"Productos cargados/actualizados: {procesados}. Errores: {errores}.")
+
+                if procesados > 0:
+                    st.success(f"✅ Productos cargados/actualizados correctamente: **{procesados}** de {procesados + errores} filas válidas.")
+                if errores > 0:
+                    st.error(f"❌ **{errores} productos no se pudieron cargar.** Revisa el detalle abajo.")
+                    with st.expander(f"📋 Ver detalle de los {errores} errores", expanded=True):
+                        for detalle in filas_con_error:
+                            st.warning(detalle)
                 st.rerun()
 
     # ----------------------------------------------------
