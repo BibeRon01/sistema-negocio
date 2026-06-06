@@ -2316,6 +2316,11 @@ def _leer_tabla_de_supabase(nombre_tabla: str, order_by: str = "id", tenant: str
             df["metodo"] = df["método"]
         if "cliente_nombre" not in df.columns and "cliente_nombr" in df.columns:
             df["cliente_nombre"] = df["cliente_nombr"]
+    if nombre_tabla == "productos" and not df.empty and "nombre" in df.columns:
+        try:
+            df = df.sort_values(by="nombre", key=lambda col: col.str.lower(), ascending=True).reset_index(drop=True)
+        except Exception:
+            pass
     if nombre_tabla == "ventas":
         return aplicar_total_contable_df(df)
     return df
