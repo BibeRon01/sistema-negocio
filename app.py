@@ -1899,6 +1899,34 @@ def aplicar_consumo_fifo(movimientos: list[dict]):
             pass
 
 
+def promover_encabezado_inteligente(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    
+    keywords = {"nombre", "producto", "codigo", "barra", "costo", "precio", "stock", "cantidad", "existencia", "categoria", "empleado", "sueldo", "salario", "cedula", "telefono", "rnc", "direccion"}
+    
+    for idx in range(min(8, len(df))):
+        row_values = [str(v).strip().lower() for v in df.iloc[idx].tolist()]
+        coincidencias = 0
+        for val in row_values:
+            if any(k in val for k in keywords):
+                coincidencias += 1
+        
+        if coincidencias >= 2:
+            nuevas_columnas = []
+            for col_idx, val in enumerate(df.iloc[idx].tolist()):
+                val_str = str(val).strip()
+                if not val_str or val_str.lower() == "nan":
+                    val_str = f"Columna_{col_idx}"
+                nuevas_columnas.append(val_str)
+            
+            df.columns = nuevas_columnas
+            df = df.iloc[idx+1:].reset_index(drop=True)
+            return df
+            
+    return df
+
+
 def leer_archivo_subido(archivo) -> pd.DataFrame:
     try:
         nombre = archivo.name.lower()
@@ -1914,6 +1942,7 @@ def leer_archivo_subido(archivo) -> pd.DataFrame:
                     df = pd.read_csv(archivo, sep="\t", encoding="latin-1")
         else:
             df = pd.read_excel(archivo)
+        df = promover_encabezado_inteligente(df)
         df = normalizar_columnas(df)
         df = mapear_columnas(df)
         return df
@@ -3624,11 +3653,9 @@ def lanzar_impresion_navegador(html_doc: str):
 def generar_numero_factura_pos() -> str:
     """
     Genera una secuencia limpia de factura:
-    00001, 00002, 00003...
-    Ignora números raros anteriores que salieron de UUID/ID.
+    FAC-00001, FAC-00002, FAC-00003...
     """
     try:
-        # Usamos leer_tabla("ventas") en lugar de una consulta directa a toda la base de datos
         ventas = leer_tabla("ventas")
     except Exception:
         ventas = DATA.get("ventas", pd.DataFrame()).copy()
@@ -3637,16 +3664,52 @@ def generar_numero_factura_pos() -> str:
 
     if not ventas.empty and "numero_factura" in ventas.columns:
         for val in ventas["numero_factura"].dropna().astype(str):
-            txt = val.strip()
-            # Solo acepta secuencias limpias de 1 a 5 dígitos.
-            # Ej: 1, 01, 00001, 00025
-            if re.fullmatch(r"\d{1,5}", txt):
+            txt = val.strip().upper()
+            if txt.startswith("FAC-"):
+                num_part = txt.replace("FAC-", "")
+                if num_part.isdigit():
+                    try:
+                        max_num = max(max_num, int(num_part))
+                    except Exception:
+                        pass
+            elif txt.isdigit():
                 try:
                     max_num = max(max_num, int(txt))
                 except Exception:
                     pass
 
-    return str(max_num + 1).zfill(5)
+    return f"FAC-{(max_num + 1):05d}"
+
+
+def generar_numero_compra() -> str:
+    """
+    Genera una secuencia limpia de compras:
+    COM-00001, COM-00002...
+    """
+    try:
+        compras = leer_tabla("compras")
+    except Exception:
+        compras = DATA.get("compras", pd.DataFrame()).copy()
+
+    max_num = 0
+
+    if not compras.empty and "numero" in compras.columns:
+        for val in compras["numero"].dropna().astype(str):
+            txt = val.strip().upper()
+            if txt.startswith("COM-"):
+                num_part = txt.replace("COM-", "")
+                if num_part.isdigit():
+                    try:
+                        max_num = max(max_num, int(num_part))
+                    except Exception:
+                        pass
+            elif txt.isdigit():
+                try:
+                    max_num = max(max_num, int(txt))
+                except Exception:
+                    pass
+
+    return f"COM-{(max_num + 1):05d}"
 
 def mostrar_factura_pos(post_venta: dict):
     """
@@ -6967,7 +7030,7 @@ elif menu == "Compras":
                 # Demás campos
                 c_fields1, c_fields2 = st.columns(2)
                 with c_fields1:
-                    num_fact = st.text_input("No. Factura", key="comp_num")
+                    num_fact = st.text_input("No. Factura", value=generar_numero_compra(), key="comp_num")
                     metodo_pago = st.selectbox("Pago", ["Efectivo", "Transferencia", "Tarjeta", "Crédito"], key="comp_met")
                 with c_fields2:
                     ref_fact = st.text_input("Referencia", key="comp_ref")
