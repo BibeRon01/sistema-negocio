@@ -612,6 +612,15 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
         c1, c2 = st.columns(2)
         with c1:
             if st.button("💾 Guardar datos generales", key=f"crud_save_{nombre_tabla}_{fila_id}"):
+                if nombre_tabla == "productos":
+                    valido, msg_err = validar_unicidad_producto(
+                        nuevos_datos.get("nombre", ""),
+                        nuevos_datos.get("codigo", ""),
+                        ignorar_producto_id=fila_id
+                    )
+                    if not valido:
+                        st.error(msg_err)
+                        st.stop()
                 if actualizar(nombre_tabla, fila_id, nuevos_datos):
                     st.success("Registro actualizado.")
                     st.rerun()
@@ -2476,7 +2485,11 @@ def insertar(nombre_tabla: str, datos: dict) -> bool:
         invalidar_cache_tabla(nombre_tabla)
         return True
     except Exception as exc:
-        st.error(f"Error al insertar en {nombre_tabla}: {exc}")
+        exc_str = str(exc)
+        if "23505" in exc_str or "unique constraint" in exc_str.lower():
+            st.error("⚠️ **Error de Código Duplicado:** Ya existe un registro con este mismo código en la base de datos de esta empresa.")
+        else:
+            st.error(f"Error al insertar en {nombre_tabla}: {exc}")
         return False
 
 
@@ -2533,7 +2546,11 @@ def actualizar(nombre_tabla: str, fila_id: Any, datos: dict) -> bool:
             return True
         except Exception as exc:
             ultimo_error = exc
-    st.error(f"Error al actualizar en {nombre_tabla}: {ultimo_error}")
+    exc_str = str(ultimo_error) if ultimo_error else ""
+    if "23505" in exc_str or "unique constraint" in exc_str.lower():
+        st.error(f"⚠️ **Error de Código Duplicado:** Ya existe un registro con este mismo código en la base de datos de esta empresa.")
+    else:
+        st.error(f"Error al actualizar en {nombre_tabla}: {ultimo_error}")
     return False
 
 
@@ -2718,6 +2735,36 @@ def get_producto_por_nombre(nombre: str):
     if match.empty:
         return None
     return match.iloc[0]
+
+
+def validar_unicidad_producto(nombre: str, codigo: str, ignorar_producto_id: Any = None) -> tuple[bool, str]:
+    df = DATA.get("productos", pd.DataFrame())
+    if df.empty:
+        return True, ""
+    
+    nombre_norm = normalizar_texto(nombre)
+    codigo_norm = str(codigo).strip()
+    
+    tmp_df = df.copy()
+    if ignorar_producto_id is not None:
+        if "id" in tmp_df.columns:
+            tmp_df = tmp_df[tmp_df["id"].astype(str) != str(ignorar_producto_id)]
+            
+    # Validar duplicados de nombre
+    if "nombre" in tmp_df.columns:
+        for idx, row in tmp_df.iterrows():
+            n_existente = normalizar_texto(row.get("nombre"))
+            if n_existente == nombre_norm:
+                return False, f"⚠️ El nombre '{nombre}' ya está registrado en otro producto."
+                
+    # Validar duplicados de código
+    if codigo_norm and "codigo" in tmp_df.columns:
+        for idx, row in tmp_df.iterrows():
+            c_existente = str(row.get("codigo")).strip()
+            if c_existente == codigo_norm:
+                return False, f"⚠️ El código '{codigo}' ya está asignado al producto '{row.get('nombre')}'."
+                
+    return True, ""
 
 
 
@@ -6932,9 +6979,11 @@ elif menu == "Compras":
                 if not nombre_clean:
                     st.error("Debes poner nombre al producto.")
                     st.stop()
-                existente = get_producto_por_codigo(nuevo_codigo) if nuevo_codigo else None
-                if existente is None:
-                    existente = get_producto_por_nombre(nombre_clean)
+                valido, msg_err = validar_unicidad_producto(nombre_clean, nuevo_codigo)
+                if not valido:
+                    st.error(msg_err)
+                    st.stop()
+                existente = None
                 if existente is None:
                     payload = {
                         "fecha": ahora_str(),
