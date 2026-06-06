@@ -13921,8 +13921,12 @@ elif menu == "🔒 Mi Perfil":
     if not user:
         st.error("No hay sesión activa.")
     else:
-        st.write("Gestiona tu información de acceso personal.")
         user_id = user.get("id")
+        if not user_id or str(user_id).strip() == "None":
+            st.warning("⚠️ Estás conectado usando la cuenta maestra temporal 'admin'. Esta cuenta está configurada en los archivos del sistema (secrets.toml) y no se puede modificar desde aquí. Para editar tu usuario de administración principal de base de datos, por favor inicia sesión con tu usuario real (por ejemplo, 'nelly').")
+            st.stop()
+        
+        st.write("Gestiona tu información de acceso personal.")
         
         with st.form("form_mi_perfil"):
             new_nombre = st.text_input("Nombre Completo", value=str(user.get("nombre") or ""))
