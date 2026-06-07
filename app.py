@@ -2471,11 +2471,15 @@ def _leer_tabla_de_supabase(nombre_tabla: str, order_by: str = "id", tenant: str
     try:
         query = supabase.table(nombre_tabla).select("*")
         # ── Fase 4: Aislamiento por empresa ──────────────────────────────────────
-        if tenant and tenant != "global" and nombre_tabla in TABLAS_MULTI_TENANT:
+        if tenant and nombre_tabla in TABLAS_MULTI_TENANT:
             if nombre_tabla == "usuarios":
-                query = query.eq("email", tenant)
+                if tenant != "global":
+                    query = query.eq("email", tenant)
             else:
-                query = query.eq("empresa_id", tenant)
+                if tenant == "global":
+                    query = query.or_("empresa_id.eq.global,empresa_id.is.null")
+                else:
+                    query = query.eq("empresa_id", tenant)
         # ─────────────────────────────────────────────────────────────────────────
         try:
             resp = query.order(order_by).execute()
