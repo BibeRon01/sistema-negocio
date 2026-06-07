@@ -242,11 +242,15 @@ class WrappedQueryBuilder:
     def select(self, *args, **kwargs):
         builder = self.original_builder.select(*args, **kwargs)
         tenant = obtener_tenant_actual()
-        if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
+        if tenant and self.table_name in TABLAS_MULTI_TENANT:
             if self.table_name == "usuarios":
-                return builder.eq("email", tenant)
+                if tenant != "global":
+                    return builder.eq("email", tenant)
             else:
-                return builder.eq("empresa_id", tenant)
+                if tenant == "global":
+                    return builder.or_("empresa_id.eq.global,empresa_id.is.null")
+                else:
+                    return builder.eq("empresa_id", tenant)
         return builder
 
     def update(self, datos, *args, **kwargs):
@@ -4343,8 +4347,8 @@ def cuenta_por_metodo_pago(metodo_pago: str) -> str:
 
 def leer_actualizado(tabla: str) -> pd.DataFrame:
     try:
-        resp = supabase.table(tabla).select("*").execute()
-        return pd.DataFrame(resp.data or [])
+        tenant = obtener_tenant_actual()
+        return _leer_tabla_de_supabase(tabla, tenant=tenant)
     except Exception:
         return DATA.get(tabla, pd.DataFrame()).copy()
 
