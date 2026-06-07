@@ -1042,6 +1042,9 @@ def obtener_tenant_actual() -> str:
     username = str(usuario_data.get("usuario") or "").lower()
     # Fase 4: Definición de Super-Admins globales
     if username in ["admin", "nelly"]:
+        tenant_sel = st.session_state.get("superadmin_tenant_seleccionado")
+        if tenant_sel:
+            return tenant_sel
         return "global"
     # Si tiene un parent email (que es el username del dueño / tenant key de la empresa)
     parent = usuario_data.get("email") or ""
@@ -2038,13 +2041,63 @@ def agrupar_mensual(df: pd.DataFrame, columna_valor: str) -> pd.DataFrame:
 
 
 
+def obtener_fechas_periodo(opcion: str):
+    hoy = date.today()
+    if opcion == "Hoy":
+        return hoy, hoy
+    elif opcion == "Ayer":
+        ayer = hoy - timedelta(days=1)
+        return ayer, ayer
+    elif opcion == "Este Mes":
+        return hoy.replace(day=1), hoy
+    elif opcion == "Este Año":
+        return hoy.replace(month=1, day=1), hoy
+    elif opcion == "Diciembre 2025":
+        return date(2025, 12, 1), date(2025, 12, 31)
+    elif opcion == "Enero 2026":
+        return date(2026, 1, 1), date(2026, 1, 31)
+    elif opcion == "Febrero 2026":
+        return date(2026, 2, 1), date(2026, 2, 28)
+    elif opcion == "Marzo 2026":
+        return date(2026, 3, 1), date(2026, 3, 31)
+    elif opcion == "Abril 2026":
+        return date(2026, 4, 1), date(2026, 4, 30)
+    elif opcion == "Mayo 2026":
+        return date(2026, 5, 1), date(2026, 5, 31)
+    elif opcion == "Junio 2026":
+        return date(2026, 6, 1), date(2026, 6, 30)
+    return hoy.replace(day=1), hoy
+
+
 def rango_fechas_ui(key_base: str):
-    c1, c2 = st.columns(2)
-    with c1:
-        desde = st.date_input("Desde", value=date.today().replace(day=1), key=f"{key_base}_desde")
-    with c2:
-        hasta = st.date_input("Hasta", value=date.today(), key=f"{key_base}_hasta")
-    return desde, hasta
+    opciones = [
+        "Hoy",
+        "Ayer",
+        "Este Mes",
+        "Este Año",
+        "Diciembre 2025",
+        "Enero 2026",
+        "Febrero 2026",
+        "Marzo 2026",
+        "Abril 2026",
+        "Mayo 2026",
+        "Junio 2026",
+        "Personalizado"
+    ]
+    
+    opcion = st.selectbox("📅 Selecciona Período", opciones, index=2, key=f"{key_base}_periodo_sel") # index 2 is 'Este Mes'
+    
+    if opcion == "Personalizado":
+        c1, c2 = st.columns(2)
+        with c1:
+            desde = st.date_input("Desde", value=date.today().replace(day=1), key=f"{key_base}_desde")
+        with c2:
+            hasta = st.date_input("Hasta", value=date.today(), key=f"{key_base}_hasta")
+        return desde, hasta
+    else:
+        desde, hasta = obtener_fechas_periodo(opcion)
+        st.info(f"📅 Rango seleccionado: **Desde {desde.strftime('%d/%m/%Y')} hasta {hasta.strftime('%d/%m/%Y')}**")
+        return desde, hasta
 
 
 
@@ -5319,14 +5372,50 @@ st.sidebar.markdown(f"""
 <p style='margin: 2px 0 0 0; font-size: 13px; font-weight: 600; color: #4b5563; text-transform: uppercase; letter-spacing: 0.5px;'>💼 {cfg.get("negocio_nombre") or "Sistema de Negocio PRO"}</p>
 </div>
 """, unsafe_allow_html=True)
-# Fase 4: Badge empresa activa
-_badge_color = "#d4af37" if _tenant_actual == "global" else "#13783b"
-_badge_label = "👑 Super-Admin" if _tenant_actual == "global" else f"🏢 {(_tenant_actual or 'N/A').upper()}"
-st.sidebar.markdown(f"""
-<div style='background:rgba(0,0,0,0.08); border-radius:8px; padding:4px 10px; margin-bottom:4px; text-align:center; border:1px solid {_badge_color}33;'>
-<span style='font-size:11px; font-weight:700; color:{_badge_color}; letter-spacing:1px;'>{_badge_label}</span>
-</div>
-""", unsafe_allow_html=True)
+# Fase 4: Selector de empresa activa para Super-Admin
+usuario_sesion_str = str(st.session_state.get("usuario_data", {}).get("usuario") or "").lower()
+if usuario_sesion_str in ["admin", "nelly"]:
+    # Cargar las empresas del sistema para el selector
+    try:
+        cfgs = supabase.table("configuracion_sistema").select("propietario, negocio_nombre").execute().data or []
+    except Exception:
+        cfgs = []
+    
+    opciones = {"global": "👑 Super-Admin (Todas)"}
+    for c in cfgs:
+        prop = c.get("propietario")
+        nombre = c.get("negocio_nombre")
+        if prop and prop != "global":
+            opciones[prop] = f"🏢 {nombre or prop.upper()}"
+            
+    # Determinar el seleccionado actual
+    sel_idx = 0
+    keys_list = list(opciones.keys())
+    current_sel = st.session_state.get("superadmin_tenant_seleccionado", "global")
+    if current_sel in keys_list:
+        sel_idx = keys_list.index(current_sel)
+        
+    empresa_seleccionada = st.sidebar.selectbox(
+        "🏢 Empresa Activa",
+        options=keys_list,
+        format_func=lambda x: opciones[x],
+        index=sel_idx,
+        key="superadmin_tenant_selectbox"
+    )
+    
+    if empresa_seleccionada != current_sel:
+        st.session_state["superadmin_tenant_seleccionado"] = empresa_seleccionada
+        # Limpiar caché para que se recarguen los datos del nuevo tenant
+        st.session_state.pop("session_cache_tablas", None)
+        st.rerun()
+else:
+    _badge_color = "#13783b"
+    _badge_label = f"🏢 {(_tenant_actual or 'N/A').upper()}"
+    st.sidebar.markdown(f"""
+    <div style='background:rgba(0,0,0,0.08); border-radius:8px; padding:4px 10px; margin-bottom:4px; text-align:center; border:1px solid {_badge_color}33;'>
+    <span style='font-size:11px; font-weight:700; color:{_badge_color}; letter-spacing:1px;'>{_badge_label}</span>
+    </div>
+    """, unsafe_allow_html=True)
 st.sidebar.caption(f"👤 Usuario: {nombre_usuario_actual()}")
 if st.sidebar.button("🚪 Cerrar sesión"):
     cerrar_sesion()
