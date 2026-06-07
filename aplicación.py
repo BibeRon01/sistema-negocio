@@ -2041,63 +2041,13 @@ def agrupar_mensual(df: pd.DataFrame, columna_valor: str) -> pd.DataFrame:
 
 
 
-def obtener_fechas_periodo(opcion: str):
-    hoy = date.today()
-    if opcion == "Hoy":
-        return hoy, hoy
-    elif opcion == "Ayer":
-        ayer = hoy - timedelta(days=1)
-        return ayer, ayer
-    elif opcion == "Este Mes":
-        return hoy.replace(day=1), hoy
-    elif opcion == "Este Año":
-        return hoy.replace(month=1, day=1), hoy
-    elif opcion == "Diciembre 2025":
-        return date(2025, 12, 1), date(2025, 12, 31)
-    elif opcion == "Enero 2026":
-        return date(2026, 1, 1), date(2026, 1, 31)
-    elif opcion == "Febrero 2026":
-        return date(2026, 2, 1), date(2026, 2, 28)
-    elif opcion == "Marzo 2026":
-        return date(2026, 3, 1), date(2026, 3, 31)
-    elif opcion == "Abril 2026":
-        return date(2026, 4, 1), date(2026, 4, 30)
-    elif opcion == "Mayo 2026":
-        return date(2026, 5, 1), date(2026, 5, 31)
-    elif opcion == "Junio 2026":
-        return date(2026, 6, 1), date(2026, 6, 30)
-    return hoy.replace(day=1), hoy
-
-
 def rango_fechas_ui(key_base: str):
-    opciones = [
-        "Hoy",
-        "Ayer",
-        "Este Mes",
-        "Este Año",
-        "Diciembre 2025",
-        "Enero 2026",
-        "Febrero 2026",
-        "Marzo 2026",
-        "Abril 2026",
-        "Mayo 2026",
-        "Junio 2026",
-        "Personalizado"
-    ]
-    
-    opcion = st.selectbox("📅 Selecciona Período", opciones, index=2, key=f"{key_base}_periodo_sel") # index 2 is 'Este Mes'
-    
-    if opcion == "Personalizado":
-        c1, c2 = st.columns(2)
-        with c1:
-            desde = st.date_input("Desde", value=date.today().replace(day=1), key=f"{key_base}_desde")
-        with c2:
-            hasta = st.date_input("Hasta", value=date.today(), key=f"{key_base}_hasta")
-        return desde, hasta
-    else:
-        desde, hasta = obtener_fechas_periodo(opcion)
-        st.info(f"📅 Rango seleccionado: **Desde {desde.strftime('%d/%m/%Y')} hasta {hasta.strftime('%d/%m/%Y')}**")
-        return desde, hasta
+    c1, c2 = st.columns(2)
+    with c1:
+        desde = st.date_input("Desde", value=date.today(), key=f"{key_base}_desde")
+    with c2:
+        hasta = st.date_input("Hasta", value=date.today(), key=f"{key_base}_hasta")
+    return desde, hasta
 
 
 
@@ -2803,7 +2753,7 @@ if "pos_post_venta" not in st.session_state:
     st.session_state["pos_post_venta"] = None
 
 if "dash_desde" not in st.session_state:
-    st.session_state["dash_desde"] = date.today().replace(day=1)
+    st.session_state["dash_desde"] = date.today()
 if "dash_hasta" not in st.session_state:
     st.session_state["dash_hasta"] = date.today()
 
@@ -8805,7 +8755,7 @@ elif menu == "Estado de Resultados":
 
     c1, c2 = st.columns(2)
     with c1:
-        desde_er = st.date_input("Desde", value=date.today().replace(day=1), key="er_pro_desde")
+        desde_er = st.date_input("Desde", value=date.today(), key="er_pro_desde")
     with c2:
         hasta_er = st.date_input("Hasta", value=date.today(), key="er_pro_hasta")
 
@@ -8909,7 +8859,7 @@ elif menu == "Informes":
     # 2. FILTER CONTROLLER HEADER
     c_f1, c_f2, c_f3, c_f4 = st.columns([2, 2, 1.2, 1.8])
     with c_f1:
-        desde = st.date_input("Fecha desde", value=date.today().replace(day=1), key="inf_desde")
+        desde = st.date_input("Fecha desde", value=date.today(), key="inf_desde")
     with c_f2:
         hasta = st.date_input("Fecha hasta", value=date.today(), key="inf_hasta")
     with c_f3:
@@ -13130,7 +13080,7 @@ elif menu == "Distribución Beneficios":
 
     c1, c2 = st.columns(2)
     with c1:
-        desde_db = st.date_input("Desde", value=date.today().replace(day=1), key="dist_desde")
+        desde_db = st.date_input("Desde", value=date.today(), key="dist_desde")
     with c2:
         hasta_db = st.date_input("Hasta", value=date.today(), key="dist_hasta")
 
