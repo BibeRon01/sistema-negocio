@@ -13576,12 +13576,21 @@ elif menu == "Configuración":
                             "puede_anular": n_rol in ["gerente", "admin"]
                         }
                         try:
-                            supabase.table("usuarios").insert(new_user_payload).execute()
-                            st.success(f"¡Cuenta de empleado '{n_usuario}' creada exitosamente!")
-                            limpiar_cache_datos()
-                            st.rerun()
+                            # Verificar si ya existe el usuario antes de intentar insertarlo
+                            user_exists_check = supabase.table("usuarios").select("id").eq("usuario", n_usuario.strip().lower()).execute().data
+                            if user_exists_check:
+                                st.error(f"⚠️ El nombre de usuario '{n_usuario}' ya está registrado. Por favor, elige uno diferente.")
+                            else:
+                                supabase.table("usuarios").insert(new_user_payload).execute()
+                                st.success(f"¡Cuenta de empleado '{n_usuario}' creada exitosamente!")
+                                limpiar_cache_datos()
+                                st.rerun()
                         except Exception as exc:
-                            st.error(f"Error al crear cuenta: {exc}")
+                            exc_str = str(exc)
+                            if "23505" in exc_str or "unique constraint" in exc_str.lower():
+                                st.error(f"⚠️ El nombre de usuario '{n_usuario}' ya está registrado. Por favor, elige uno diferente.")
+                            else:
+                                st.error(f"Error al crear cuenta: {exc}")
 
 
 # =========================================================
@@ -13929,9 +13938,16 @@ elif menu == "🏢 Gestión de Empresas":
                                     "puede_eliminar": True,
                                     "puede_anular": True
                                 }
-                                supabase.table("usuarios").insert(new_user_payload).execute()
-                                st.success(f"🎉 ¡Usuario '{user_clean}' creado con éxito para '{cfg_sel.get('negocio_nombre')}'!")
-                                st.rerun()
+                                try:
+                                    supabase.table("usuarios").insert(new_user_payload).execute()
+                                    st.success(f"🎉 ¡Usuario '{user_clean}' creado con éxito para '{cfg_sel.get('negocio_nombre')}'!")
+                                    st.rerun()
+                                except Exception as exc:
+                                    exc_str = str(exc)
+                                    if "23505" in exc_str or "unique constraint" in exc_str.lower():
+                                        st.error(f"⚠️ El nombre de usuario '{user_clean}' ya está registrado. Por favor, elige uno diferente.")
+                                    else:
+                                        st.error(f"Error al crear cuenta: {exc}")
         except Exception as exc_usr_chk:
             pass
 
