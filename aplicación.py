@@ -13338,60 +13338,157 @@ elif menu == "Usuarios":
     if not es_admin() and not tiene_permiso("puede_configurar"):
         st.error("No tienes permiso para entrar aquí.")
     else:
-        with st.expander("➕ Crear / actualizar usuario", expanded=True):
+        df = DATA.get("usuarios", pd.DataFrame()).copy()
+        tab_list, tab_create, tab_edit = st.tabs(["👥 Lista de Usuarios", "➕ Crear Usuario", "✏️ Editar / Eliminar Usuario"])
+        
+        with tab_list:
+            if not df.empty:
+                df_friendly = df.copy().rename(columns={
+                    "usuario": "Usuario",
+                    "nombre": "Nombre Completo",
+                    "rol": "Rol",
+                    "activo": "Activo",
+                    "clave": "Contraseña"
+                })
+                cols_to_show = ["Usuario", "Nombre Completo", "Rol", "Contraseña", "Activo"]
+                cols_to_show = [c for c in cols_to_show if c in df_friendly.columns]
+                st.dataframe(df_friendly[cols_to_show], use_container_width=True)
+            else:
+                st.info("No hay usuarios registrados para tu empresa.")
+                
+        with tab_create:
             c1, c2 = st.columns(2)
             with c1:
-                nombre = st.text_input("Nombre", key="usr_nombre")
-                usuario = st.text_input("Usuario", key="usr_usuario")
-                clave = st.text_input("Clave", key="usr_clave")
-                rol = st.selectbox("Rol", ["admin", "gerente", "cajera"], key="usr_rol")
-                # Fase 4: Asignación de empresa (solo super-admin)
-                _tenant_actual = obtener_tenant_actual()
-                if _tenant_actual == "global":
-                    try:
-                        cfg_empresas = supabase.table("configuracion_sistema").select("propietario, negocio_nombre").execute().data or []
-                        opciones_emp = {"global": "👑 Super-Admin (Acceso a TODO)"}
-                        for e in cfg_empresas:
-                            if e.get("propietario"):
-                                opciones_emp[e["propietario"]] = f"🏢 {e.get('negocio_nombre')} [{e['propietario']}]"
-                        empresa_id = st.selectbox("Asignar a Empresa", list(opciones_emp.keys()), format_func=lambda x: opciones_emp[x], key="usr_empresa")
-                    except Exception:
-                        empresa_id = st.text_input("ID de Empresa (vacío o 'global' = Super-Admin)", key="usr_empresa")
-                else:
-                    empresa_id = _tenant_actual
+                n_nombre = st.text_input("Nombre Completo", key="new_usr_nombre")
+                n_usuario = st.text_input("Usuario de Acceso", key="new_usr_usuario")
+                n_clave = st.text_input("Contraseña / Clave", key="new_usr_clave")
+                n_rol = st.selectbox("Rol", ["admin", "gerente", "cajera"], key="new_usr_rol")
             with c2:
-                activo = st.checkbox("Activo", value=True, key="usr_activo")
-                puede_vender = st.checkbox("Puede vender", value=True, key="usr_pv")
-                puede_editar_ventas = st.checkbox("Puede editar ventas", key="usr_pev")
-                puede_eliminar = st.checkbox("Puede eliminar", key="usr_pel")
-                puede_anular = st.checkbox("Puede anular", key="usr_pan")
-                puede_ver_reportes = st.checkbox("Puede ver reportes", key="usr_pvr")
-                puede_registrar_compras = st.checkbox("Puede registrar compras", key="usr_prc")
-                puede_registrar_gastos = st.checkbox("Puede registrar gastos", key="usr_prg")
-                puede_configurar = st.checkbox("Puede configurar", key="usr_pcf")
-                puede_editar_todo = st.checkbox("Puede editar todo", key="usr_pet")
-                puede_ver_utilidad = st.checkbox("Puede ver utilidad", key="usr_pvu")
-            if st.button("Guardar usuario", key="btn_guardar_usuario"):
-                existentes = DATA.get("usuarios", pd.DataFrame()).copy()
-                if not limpiar_texto(usuario):
-                    st.error("Debes poner usuario.")
-                elif not limpiar_texto(clave):
-                    st.error("Debes poner clave.")
+                n_activo = st.checkbox("Usuario Activo", value=True, key="new_usr_activo")
+                n_pv = st.checkbox("Puede vender (POS)", value=True, key="new_usr_pv")
+                n_pev = st.checkbox("Puede editar ventas/facturas", key="new_usr_pev")
+                n_pel = st.checkbox("Puede eliminar registros", key="new_usr_pel")
+                n_pan = st.checkbox("Puede anular ventas/facturas", key="new_usr_pan")
+                n_pvr = st.checkbox("Puede ver reportes/dashboard", key="new_usr_pvr")
+                n_prc = st.checkbox("Puede registrar compras", key="new_usr_prc")
+                n_prg = st.checkbox("Puede registrar gastos", key="new_usr_prg")
+                n_pcf = st.checkbox("Puede modificar configuración", key="new_usr_pcf")
+                
+            if st.button("🚀 Crear Usuario", key="btn_crear_usuario_new", use_container_width=True):
+                user_clean = n_usuario.strip().lower()
+                name_clean = n_nombre.strip()
+                pass_clean = n_clave.strip()
+                if not user_clean or not pass_clean or not name_clean:
+                    st.error("Todos los campos obligatorios deben completarse.")
                 else:
-                    empresa_val = "" if empresa_id == "global" else (empresa_id or "")
-                    payload_usr = {"nombre": nombre, "usuario": usuario, "clave": clave, "rol": rol, "email": empresa_val, "activo": activo, "puede_vender": puede_vender, "puede_editar_ventas": puede_editar_ventas, "puede_eliminar": puede_eliminar, "puede_anular": puede_anular, "puede_ver_reportes": puede_ver_reportes, "puede_registrar_compras": puede_registrar_compras, "puede_registrar_gastos": puede_registrar_gastos, "puede_configurar": puede_configurar, "puede_editar_todo": puede_editar_todo, "puede_ver_utilidad": puede_ver_utilidad}
-                    if not existentes.empty and "usuario" in existentes.columns and normalizar_texto(usuario) in existentes["usuario"].astype(str).apply(normalizar_texto).tolist():
-                        fila = existentes[existentes["usuario"].astype(str).apply(normalizar_texto) == normalizar_texto(usuario)].iloc[0]
-                        actualizar("usuarios", fila["id"], payload_usr)
-                        st.success("Usuario actualizado.")
+                    user_exist = supabase.table("usuarios").select("id").eq("usuario", user_clean).execute().data
+                    if user_exist:
+                        st.error(f"⚠️ El nombre de usuario '{user_clean}' ya está registrado. Por favor, elige uno diferente.")
                     else:
-                        insertar("usuarios", payload_usr)
-                        st.success("Usuario creado.")
-                    st.rerun()
-        df = DATA.get("usuarios", pd.DataFrame()).copy()
-        if not df.empty:
-            st.dataframe(df, use_container_width=True)
-            render_crud_generico("usuarios", df, "🛠️ Editar / eliminar usuarios", excluir=["clave"])
+                        _tenant = obtener_tenant_actual()
+                        new_user_payload = {
+                            "usuario": user_clean,
+                            "nombre": name_clean,
+                            "clave": pass_clean,
+                            "rol": n_rol,
+                            "activo": n_activo,
+                            "email": "" if _tenant == "global" else _tenant,
+                            "puede_vender": n_pv,
+                            "puede_editar_ventas": n_pev,
+                            "puede_eliminar": n_pel,
+                            "puede_anular": n_pan,
+                            "puede_ver_reportes": n_pvr,
+                            "puede_registrar_compras": n_prc,
+                            "puede_registrar_gastos": n_prg,
+                            "puede_configurar": n_pcf
+                        }
+                        try:
+                            supabase.table("usuarios").insert(new_user_payload).execute()
+                            invalidar_cache_tabla("usuarios")
+                            st.success(f"🎉 ¡Usuario '{user_clean}' creado con éxito!")
+                            st.rerun()
+                        except Exception as exc:
+                            exc_str = str(exc)
+                            if "23505" in exc_str or "unique constraint" in exc_str.lower():
+                                st.error(f"⚠️ El nombre de usuario '{user_clean}' ya está registrado. Por favor, elige uno diferente.")
+                            else:
+                                st.error(f"Error al crear cuenta: {exc}")
+                                
+        with tab_edit:
+            if df.empty:
+                st.info("No hay usuarios registrados para gestionar.")
+            else:
+                user_options = []
+                user_map = {}
+                for _, u_row in df.iterrows():
+                    lbl = f"{u_row['usuario']} ({u_row['nombre']})"
+                    user_options.append(lbl)
+                    user_map[lbl] = u_row
+                
+                selected_lbl = st.selectbox("Selecciona el usuario a gestionar:", user_options, key="select_user_to_edit")
+                usr_sel = user_map[selected_lbl]
+                
+                c1e, c2e = st.columns(2)
+                with c1e:
+                    edit_username = st.text_input("Usuario de Acceso", value=usr_sel["usuario"], key="edit_usr_user")
+                    edit_name = st.text_input("Nombre Completo", value=usr_sel["nombre"], key="edit_usr_name")
+                    edit_pass = st.text_input("Contraseña / Clave", value=usr_sel["clave"], key="edit_usr_clave")
+                    edit_rol = st.selectbox("Rol", ["admin", "gerente", "cajera"], index=["admin", "gerente", "cajera"].index(usr_sel["rol"]) if usr_sel["rol"] in ["admin", "gerente", "cajera"] else 0, key="edit_usr_rol")
+                with c2e:
+                    edit_activo = st.checkbox("Usuario Activo", value=bool(usr_sel["activo"]), key="edit_usr_activo")
+                    edit_pv = st.checkbox("Puede vender (POS)", value=bool(usr_sel.get("puede_vender", True)), key="edit_usr_pv")
+                    edit_pev = st.checkbox("Puede editar ventas/facturas", value=bool(usr_sel.get("puede_editar_ventas", False)), key="edit_usr_pev")
+                    edit_pel = st.checkbox("Puede eliminar registros", value=bool(usr_sel.get("puede_eliminar", False)), key="edit_usr_pel")
+                    edit_pan = st.checkbox("Puede anular ventas/facturas", value=bool(usr_sel.get("puede_anular", False)), key="edit_usr_pan")
+                    edit_pvr = st.checkbox("Puede ver reportes/dashboard", value=bool(usr_sel.get("puede_ver_reportes", False)), key="edit_usr_pvr")
+                    edit_prc = st.checkbox("Puede registrar compras", value=bool(usr_sel.get("puede_registrar_compras", False)), key="edit_usr_prc")
+                    edit_prg = st.checkbox("Puede registrar gastos", value=bool(usr_sel.get("puede_registrar_gastos", False)), key="edit_usr_prg")
+                    edit_pcf = st.checkbox("Puede modificar configuración", value=bool(usr_sel.get("puede_configurar", False)), key="edit_usr_pcf")
+                
+                c_btn1, c_btn2 = st.columns(2)
+                with c_btn1:
+                    if st.button("💾 Guardar Cambios de Usuario", key="btn_save_user_changes", use_container_width=True):
+                        try:
+                            new_username = edit_username.strip().lower()
+                            if new_username != usr_sel["usuario"]:
+                                user_exist = supabase.table("usuarios").select("id").eq("usuario", new_username).execute().data
+                                if user_exist:
+                                    st.error(f"⚠️ El nombre de usuario '{new_username}' ya está registrado. Por favor, elige uno diferente.")
+                                    st.stop()
+                            
+                            payload = {
+                                "usuario": new_username,
+                                "nombre": edit_name.strip(),
+                                "clave": edit_pass.strip(),
+                                "rol": edit_rol,
+                                "activo": edit_activo,
+                                "puede_vender": edit_pv,
+                                "puede_editar_ventas": edit_pev,
+                                "puede_eliminar": edit_pel,
+                                "puede_anular": edit_pan,
+                                "puede_ver_reportes": edit_pvr,
+                                "puede_registrar_compras": edit_prc,
+                                "puede_registrar_gastos": edit_prg,
+                                "puede_configurar": edit_pcf
+                            }
+                            supabase.table("usuarios").update(payload).eq("id", usr_sel["id"]).execute()
+                            invalidar_cache_tabla("usuarios")
+                            st.success(f"🎉 ¡Usuario '{new_username}' actualizado con éxito!")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Error al actualizar usuario: {exc}")
+                with c_btn2:
+                    if st.button("🗑️ Eliminar Usuario", key="btn_delete_user_changes", use_container_width=True):
+                        if usr_sel["usuario"] == nombre_usuario_actual():
+                            st.error("⚠️ No puedes eliminar tu propio usuario con el que tienes sesión iniciada.")
+                        else:
+                            try:
+                                supabase.table("usuarios").delete().eq("id", usr_sel["id"]).execute()
+                                invalidar_cache_tabla("usuarios")
+                                st.success(f"🗑️ Usuario '{usr_sel['usuario']}' eliminado correctamente.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Error al eliminar usuario: {exc}")
 
 # =========================================================
 # CONFIGURACION
