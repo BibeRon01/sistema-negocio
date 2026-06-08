@@ -2474,10 +2474,10 @@ def leer_tabla(nombre_tabla: str, order_by: str = "id") -> pd.DataFrame:
     ahora = datetime.now()
     cache = st.session_state["session_cache_tablas"].get(cache_key)
 
-    # TTL de 30 segundos para evitar consultas redundantes de red
+    # TTL de 5 minutos (300 segundos) para evitar consultas redundantes de red
     if cache is not None:
         df, timestamp = cache
-        if (ahora - timestamp).total_seconds() < 30.0:
+        if (ahora - timestamp).total_seconds() < 300.0:
             return df.copy()
 
     # Si no hay caché válido, descargar de base de datos con filtro de tenant
@@ -12173,9 +12173,13 @@ elif menu == "POS":
                 if es_cobro and faltante > 0.001:
                     st.error("No puedes cobrar hasta que los pagos cuadren con el total real de la venta.")
                     st.stop()
-                if es_cobro and pago_credito > 0 and cliente_nombre == "Venta general":
-                    st.error("Para vender a crédito debes asignar un cliente.")
-                    st.stop()
+                if es_cobro and pago_credito > 0:
+                    temp_cliente = alias_cuenta.strip() if es_cuenta_editada and alias_cuenta.strip() else (st.session_state.get("pos_cuenta_abierta_nombre") if es_cuenta_editada else None)
+                    if not temp_cliente:
+                        temp_cliente = cliente_nombre
+                    if temp_cliente == "Venta general":
+                        st.error("Para vender a crédito debes asignar un cliente o definir un nombre/alias para la cuenta.")
+                        st.stop()
                 if not es_cobro and not es_cuenta_editada:
                     # Validación: no se puede guardar cuenta abierta sin identificación
                     nombre_alias_final = alias_cuenta.strip() if alias_cuenta else ""
