@@ -13335,8 +13335,8 @@ elif menu == "Activos Fijos":
 
 elif menu == "Usuarios":
     st.title("👤 Usuarios")
-    if not es_admin() and not tiene_permiso("puede_configurar"):
-        st.error("No tienes permiso para entrar aquí.")
+    if not es_admin():
+        st.error("No tienes permiso para entrar aquí. Solo el administrador de la empresa puede gestionar los usuarios.")
     else:
         df = DATA.get("usuarios", pd.DataFrame()).copy()
         tab_list, tab_create, tab_edit = st.tabs(["👥 Lista de Usuarios", "➕ Crear Usuario", "✏️ Editar / Eliminar Usuario"])
@@ -14402,10 +14402,13 @@ elif menu == "🔒 Mi Perfil":
         
         st.write("Gestiona tu información de acceso personal.")
         
+        if not es_admin():
+            st.info("ℹ️ Tu cuenta está administrada por el administrador de tu empresa. Si necesitas cambiar tu usuario o contraseña, por favor solicítalo a tu administrador.")
+            
         with st.form("form_mi_perfil"):
             new_nombre = st.text_input("Nombre Completo", value=str(user.get("nombre") or ""))
-            new_usuario = st.text_input("Nombre de Usuario", value=str(user.get("usuario") or ""))
-            new_clave = st.text_input("Nueva Contraseña", value=str(user.get("clave") or ""), type="password")
+            new_usuario = st.text_input("Nombre de Usuario", value=str(user.get("usuario") or ""), disabled=not es_admin())
+            new_clave = st.text_input("Nueva Contraseña", value=str(user.get("clave") or ""), type="password", disabled=not es_admin())
             
             if st.form_submit_button("💾 Guardar cambios"):
                 usr_clean = new_usuario.strip().lower()
@@ -14415,7 +14418,6 @@ elif menu == "🔒 Mi Perfil":
                 if not usr_clean or not name_clean or not clave_clean:
                     st.error("Todos los campos son obligatorios.")
                 else:
-                    # Validar si el nuevo usuario ya existe (y no es el actual del mismo ID)
                     try:
                         existentes = supabase.table("usuarios").select("*").eq("usuario", usr_clean).execute().data or []
                         existe_otro = any(str(u.get("id")) != str(user_id) for u in existentes)
@@ -14427,7 +14429,6 @@ elif menu == "🔒 Mi Perfil":
                     else:
                         payload = {"nombre": name_clean, "usuario": usr_clean, "clave": clave_clean}
                         if actualizar("usuarios", user_id, payload):
-                            # Actualizar la sesión en memoria
                             user.update(payload)
                             st.session_state["usuario_data"] = user
                             st.success("✅ Tus datos de perfil se actualizaron con éxito. Por favor recarga para ver los cambios.")
