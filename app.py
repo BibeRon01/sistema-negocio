@@ -11149,7 +11149,9 @@ elif menu == "POS":
                             supabase.table("detalle_venta").delete().eq("venta_id", str(v_id)).execute()
                             supabase.table("ventas").delete().eq("id", str(v_id)).execute()
                             registrar_auditoria("cuenta_abierta_cancelar", "ventas", f"venta_id={v_id} alias={alias}")
-                            st.success(f"Cuenta '{alias}' cancelada y productos devueltos al inventario.")
+                            st.toast(f"❌ Cuenta '{alias}' cancelada y productos devueltos.", icon="🗑️")
+                            invalidar_cache_tabla("ventas")
+                            invalidar_cache_tabla("productos")
                             DATA.update(cargar_datos())
                             st.rerun()
 
@@ -11189,6 +11191,8 @@ elif menu == "POS":
                                         participantes[pi]["pagado"] = False
                                         obs_data["participantes"] = participantes
                                         supabase.table("ventas").update({"observacion": json.dumps(obs_data, ensure_ascii=False)}).eq("id", str(v_id)).execute()
+                                        invalidar_cache_tabla("ventas")
+                                        invalidar_cache_tabla("caja")
                                         DATA.update(cargar_datos())
                                         st.toast(f"Pago de {p.get('nombre')} revertido.", icon="↩️")
                                         st.rerun()
@@ -11378,6 +11382,7 @@ elif menu == "POS":
                                                 st.success("Cuenta dividida correctamente.")
                                                 
                                             registrar_auditoria("cuenta_abierta_dividir", "ventas", f"venta_id_origen={v_id} venta_id_destino={new_v_id}")
+                                            invalidar_cache_tabla("ventas")
                                             DATA.update(cargar_datos())
                                             st.rerun()
                                         except Exception as ex:
@@ -11429,6 +11434,7 @@ elif menu == "POS":
                                         
                                         st.success("Cuentas fusionadas correctamente.")
                                         registrar_auditoria("cuenta_abierta_fusionar", "ventas", f"venta_id_destino={v_id} venta_id_absorbido={id_fusion}")
+                                        invalidar_cache_tabla("ventas")
                                         DATA.update(cargar_datos())
                                         st.rerun()
                                     except Exception as ex:
@@ -12028,6 +12034,8 @@ elif menu == "POS":
                                         participantes[pi]["pagado"] = False
                                         obs_data["participantes"] = participantes
                                         supabase.table("ventas").update({"observacion": json.dumps(obs_data, ensure_ascii=False)}).eq("id", str(v_id)).execute()
+                                        invalidar_cache_tabla("ventas")
+                                        invalidar_cache_tabla("caja")
                                         DATA.update(cargar_datos())
                                         st.toast(f"Pago de {p.get('nombre')} revertido.", icon="↩️")
                                         st.rerun()
@@ -12071,6 +12079,8 @@ elif menu == "POS":
                                                 participantes[pi]["pagado"] = True
                                                 obs_data["participantes"] = participantes
                                                 supabase.table("ventas").update({"observacion": json.dumps(obs_data, ensure_ascii=False)}).eq("id", str(v_id)).execute()
+                                                invalidar_cache_tabla("ventas")
+                                                invalidar_cache_tabla("caja")
                                                 DATA.update(cargar_datos())
                                                 st.toast(f"¡Pago de {p.get('nombre')} registrado!", icon="✅")
                                                 st.rerun()
@@ -12100,6 +12110,7 @@ elif menu == "POS":
                                 participantes.append({"nombre": n_n_p.strip(), "monto": float(n_m_p), "pagado": False})
                                 obs_data["participantes"] = participantes
                                 supabase.table("ventas").update({"observacion": json.dumps(obs_data, ensure_ascii=False)}).eq("id", str(v_id)).execute()
+                                invalidar_cache_tabla("ventas")
                                 DATA.update(cargar_datos())
                                 st.rerun()
                         st.markdown("---")
@@ -12375,7 +12386,6 @@ elif menu == "POS":
                                         "usuario": nombre_usuario_actual(),
                                     }).execute()
                                 registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={subtotal}")
-                                DATA.update(cargar_datos())
                                 if proceder_venta_normal:
                                     st.session_state["pos_post_venta"] = {
                                         "venta_id": str(venta_id),
@@ -12391,13 +12401,18 @@ elif menu == "POS":
                                     }
                             else:
                                 registrar_auditoria("cuenta_abierta_crear", "ventas", f"venta_id={venta_id} total={subtotal}")
-                                st.success(f"Cuenta abierta '{cliente_nombre_final}' guardada correctamente.")
+                                st.toast(f"📂 Cuenta abierta '{cliente_nombre_final}' guardada correctamente.", icon="📂")
                                 
                             st.session_state["pos_cuenta_abierta_id"] = None
                             st.session_state["pos_cuenta_abierta_nombre"] = None
                             st.session_state.pop("pos_edit_cuenta_alias", None)
                             st.session_state.pop("pos_new_cuenta_alias", None)
                             st.session_state["pos_carrito"] = []
+                            
+                            invalidar_cache_tabla("ventas")
+                            invalidar_cache_tabla("productos")
+                            invalidar_cache_tabla("caja")
+                            DATA.update(cargar_datos())
                             
                             if es_cobro and not proceder_venta_normal:
                                 st.toast("✅ Venta registrada (sin imprimir).", icon="💵")
