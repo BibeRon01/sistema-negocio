@@ -492,7 +492,7 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
         return
     if df is None or df.empty:
         return
-    excluir = set((excluir or []) + ["id"])
+    excluir = set((excluir or []) + ["id", "Código", "codigo_secuencial"])
     if nombre_tabla == "productos":
         excluir.add("imagen_url")
     if "identificación" in df.columns:
@@ -500,6 +500,9 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
     titulo = titulo or f"🛠️ Editar / eliminar en {nombre_tabla}"
     with st.expander(titulo, expanded=False):
         df_local = df.copy()
+        if "Código" not in df_local.columns:
+            df_local = agregar_columna_codigo_secuencial(df_local, nombre_tabla)
+            
         if "fecha" in df_local.columns:
             try:
                 df_local = df_local.sort_values("fecha", ascending=False)
@@ -508,7 +511,7 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
         opciones = []
         mapa = {}
         for _, row in df_local.iterrows():
-            row_id = valor_simple(row.get("id") or row.get("identificación"))
+            row_id = valor_simple(row.get("Código") or row.get("id") or row.get("identificación"))
             etiqueta_partes = [str(row_id)]
             for campo in ["nombre", "producto", "cliente_nombre", "proveedor", "concepto", "usuario", "metodo_pago", "metodo", "fecha", "total", "monto"]:
                 if campo in row.index and limpiar_texto(row.get(campo)):
@@ -644,6 +647,313 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
 # =========================================================
 def ahora_str() -> str:
     return date.today().isoformat()
+
+
+def agregar_columna_codigo_secuencial(df: pd.DataFrame, nombre_tabla: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+        
+    df = df.copy()
+    PREFIJOS = {
+        "productos": "PO",
+        "compras": "CP",
+        "ventas": "VT",
+        "clientes": "CL",
+        "proveedores": "PR",
+        "empleados": "EM",
+        "gastos": "GS",
+        "adelantos_empleados": "AE",
+        "perdidas": "PE",
+        "ajustes_inventario": "AI",
+        "conteo_inventario": "CI",
+        "cuentas_por_cobrar": "CC",
+        "caja": "CJ",
+        "movimientos_caja": "MC",
+        "cotizaciones": "CT",
+        "bancos": "BN"
+    }
+    prefijo = PREFIJOS.get(nombre_tabla)
+    if not prefijo:
+        return df
+
+    # Evitar duplicados
+    if "Código" in df.columns:
+        return df
+
+    sort_cols = []
+    for c in ["fecha", "created_at", "fecha_apertura", "id", "identificación"]:
+        if c in df.columns:
+            sort_cols.append(c)
+            
+    indices = {}
+    if sort_cols:
+        try:
+            df_sorted = df.sort_values(by=sort_cols, ascending=True)
+            col_id = "id" if "id" in df.columns else "identificación"
+            for idx, row_id in enumerate(df_sorted[col_id].tolist()):
+                indices[str(row_id)] = idx + 1
+        except Exception:
+            pass
+
+    codigos = []
+    col_id = "id" if "id" in df.columns else "identificación" if "identificación" in df.columns else None
+    
+    for _, row in df.iterrows():
+        row_id = str(row.get(col_id)) if col_id and row.get(col_id) is not None else ""
+        
+        # Intentar extraer de campos existentes
+        codigo_existente = None
+        if nombre_tabla == "productos" and "codigo" in row.index:
+            codigo_existente = row.get("codigo")
+        elif nombre_tabla == "compras" and "numero" in row.index:
+            codigo_existente = row.get("numero")
+        elif nombre_tabla == "ventas" and "numero_factura" in row.index:
+            codigo_existente = row.get("numero_factura")
+            
+        if codigo_existente and str(codigo_existente).strip():
+            c_str = str(codigo_existente).strip().upper()
+            if c_str.startswith(prefijo):
+                codigos.append(c_str)
+            else:
+                codigos.append(f"{prefijo}{c_str}")
+        else:
+            try:
+                if row_id.isdigit():
+                    codigos.append(f"{prefijo}{int(row_id):03d}")
+                else:
+                    idx_num = indices.get(row_id)
+                    if idx_num is not None:
+                        codigos.append(f"{prefijo}{idx_num:03d}")
+                    else:
+                        codigos.append(f"{prefijo}000")
+            except Exception:
+                codigos.append(f"{prefijo}000")
+                
+    df.insert(0, "Código", codigos)
+    return df
+
+
+def generar_codigo_secuencial(nombre_tabla: str) -> str:
+    PREFIJOS = {
+        "productos": "PO",
+        "compras": "CP",
+        "ventas": "VT",
+        "clientes": "CL",
+        "proveedores": "PR",
+        "empleados": "EM",
+        "gastos": "GS",
+        "adelantos_empleados": "AE",
+        "perdidas": "PE",
+        "ajustes_inventario": "AI",
+        "conteo_inventario": "CI",
+        "cuentas_por_cobrar": "CC",
+        "caja": "CJ",
+        "movimientos_caja": "MC",
+        "cotizaciones": "CT",
+        "bancos": "BN"
+    }
+    prefijo = PREFIJOS.get(nombre_tabla, "XX")
+    
+    try:
+        df = leer_tabla(nombre_tabla)
+    except Exception:
+        df = DATA.get(nombre_tabla, pd.DataFrame()).copy()
+
+    if df.empty:
+        return f"{prefijo}001"
+
+    if nombre_tabla == "productos" and "codigo" in df.columns:
+        max_num = 0
+        for val in df["codigo"].dropna().astype(str):
+            txt = val.strip().upper()
+            if txt.startswith("PO"):
+                num_part = txt.replace("PO", "")
+                if num_part.isdigit():
+                    max_num = max(max_num, int(num_part))
+        return f"PO{(max_num + 1):03d}"
+
+    if nombre_tabla == "compras" and "numero" in df.columns:
+        max_num = 0
+        for val in df["numero"].dropna().astype(str):
+            txt = val.strip().upper()
+            if txt.startswith("CP"):
+                num_part = txt.replace("CP", "")
+                if num_part.isdigit():
+                    max_num = max(max_num, int(num_part))
+        return f"CP{(max_num + 1):03d}"
+
+    if nombre_tabla == "ventas" and "numero_factura" in df.columns:
+        max_num = 0
+        for val in df["numero_factura"].dropna().astype(str):
+            txt = val.strip().upper()
+            if txt.startswith("VT"):
+                num_part = txt.replace("VT", "")
+                if num_part.isdigit():
+                    max_num = max(max_num, int(num_part))
+        return f"VT{(max_num + 1):03d}"
+
+    col_id = "id" if "id" in df.columns else "identificación" if "identificación" in df.columns else None
+    if col_id:
+        ids = df[col_id].dropna().tolist()
+        numeric_ids = []
+        for x in ids:
+            try:
+                numeric_ids.append(int(x))
+            except Exception:
+                pass
+        if numeric_ids:
+            return f"{prefijo}{(max(numeric_ids) + 1):03d}"
+        
+    return f"{prefijo}{(len(df) + 1):03d}"
+
+
+def generar_codigo_producto() -> str:
+    return generar_codigo_secuencial("productos")
+
+
+def obtener_historial_inventario_completo() -> pd.DataFrame:
+    try:
+        prods = leer_tabla("productos")
+    except Exception:
+        prods = DATA.get("productos", pd.DataFrame()).copy()
+
+    name_to_code = {}
+    if not prods.empty:
+        for _, r in prods.iterrows():
+            name = str(r.get("nombre") or "").lower().strip()
+            code = r.get("Código") or r.get("codigo") or ""
+            if name:
+                name_to_code[name] = str(code).strip()
+
+    try:
+        movs = leer_tabla("movimientos")
+    except Exception:
+        movs = pd.DataFrame()
+        
+    try:
+        perd = leer_tabla("perdidas")
+    except Exception:
+        perd = pd.DataFrame()
+        
+    try:
+        ajustes = leer_tabla("ajustes_inventario")
+    except Exception:
+        ajustes = pd.DataFrame()
+        
+    try:
+        conteos = leer_tabla("conteo_inventario")
+    except Exception:
+        conteos = pd.DataFrame()
+
+    hist_rows = []
+
+    # 1. Compras y Ventas
+    if not movs.empty:
+        for _, row in movs.iterrows():
+            tipo = row.get("tipo_movimiento")
+            tipo_friendly = "Compra" if tipo == "entrada_compra" else "Venta (POS)" if tipo == "salida_venta" else "Reversa Venta" if tipo == "reversa_venta" else str(tipo)
+            p_name = row.get("producto") or ""
+            p_code = name_to_code.get(p_name.lower().strip(), "")
+            cant = float(row.get("cantidad") or 0.0)
+            costo = float(row.get("costo_unitario") or 0.0)
+            
+            hist_rows.append({
+                "Fecha": row.get("fecha"),
+                "Código": p_code,
+                "Producto": p_name,
+                "Movimiento": tipo_friendly,
+                "Cantidad": cant,
+                "Costo Unitario": costo,
+                "Total (Costo)": cant * costo,
+                "Usuario": row.get("usuario") or "",
+                "Observación": row.get("observacion") or ""
+            })
+
+    # 2. Pérdidas
+    if not perd.empty:
+        for _, row in perd.iterrows():
+            if not bool(row.get("anulado", False)):
+                p_name = row.get("producto") or ""
+                p_code = name_to_code.get(p_name.lower().strip(), "")
+                cant = -abs(float(row.get("cantidad") or 0.0))
+                costo = float(row.get("costo_unitario") or 0.0)
+                
+                hist_rows.append({
+                    "Fecha": row.get("fecha"),
+                    "Código": p_code,
+                    "Producto": p_name,
+                    "Movimiento": f"Pérdida ({row.get('tipo_perdida') or 'general'})",
+                    "Cantidad": cant,
+                    "Costo Unitario": costo,
+                    "Total (Costo)": cant * costo,
+                    "Usuario": row.get("usuario") or "",
+                    "Observación": row.get("observacion") or ""
+                })
+
+    # 3. Ajustes
+    if not ajustes.empty:
+        for _, row in ajustes.iterrows():
+            qty = float(row.get("cantidad") or 0.0)
+            p_origen = row.get("producto_origen") or ""
+            p_destino = row.get("producto_destino") or ""
+            tipo_aj = row.get("tipo_ajuste") or "Ajuste"
+            
+            if p_origen:
+                p_code = name_to_code.get(p_origen.lower().strip(), "")
+                costo = float(row.get("costo_origen") or 0.0)
+                hist_rows.append({
+                    "Fecha": row.get("fecha"),
+                    "Código": p_code,
+                    "Producto": p_origen,
+                    "Movimiento": f"Ajuste ({tipo_aj}) - Origen",
+                    "Cantidad": qty,
+                    "Costo Unitario": costo,
+                    "Total (Costo)": qty * costo,
+                    "Usuario": row.get("usuario") or "",
+                    "Observación": f"Traspaso a {p_destino}. " + str(row.get("observacion") or "")
+                })
+            if p_destino:
+                p_code = name_to_code.get(p_destino.lower().strip(), "")
+                costo = float(row.get("costo_destino") or 0.0)
+                hist_rows.append({
+                    "Fecha": row.get("fecha"),
+                    "Código": p_code,
+                    "Producto": p_destino,
+                    "Movimiento": f"Ajuste ({tipo_aj}) - Destino",
+                    "Cantidad": -qty,
+                    "Costo Unitario": costo,
+                    "Total (Costo)": -qty * costo,
+                    "Usuario": row.get("usuario") or "",
+                    "Observación": f"Traspaso desde {p_origen}. " + str(row.get("observacion") or "")
+                })
+
+    # 4. Conteos
+    if not conteos.empty:
+        for _, row in conteos.iterrows():
+            if bool(row.get("aplicado", False)):
+                p_name = row.get("producto") or ""
+                p_code = name_to_code.get(p_name.lower().strip(), "")
+                dif = float(row.get("diferencia") or 0.0)
+                
+                hist_rows.append({
+                    "Fecha": row.get("fecha_aplicacion") or row.get("fecha"),
+                    "Código": p_code,
+                    "Producto": p_name,
+                    "Movimiento": "Conteo Aprobado",
+                    "Cantidad": dif,
+                    "Costo Unitario": 0.0,
+                    "Total (Costo)": 0.0,
+                    "Usuario": row.get("usuario") or "",
+                    "Observación": f"Conteo físico. " + str(row.get("observacion") or "")
+                })
+
+    if not hist_rows:
+        return pd.DataFrame()
+
+    df_hist = pd.DataFrame(hist_rows)
+    df_hist["Fecha"] = pd.to_datetime(df_hist["Fecha"], errors="coerce")
+    df_hist = df_hist.sort_values(by="Fecha", ascending=False).reset_index(drop=True)
+    return df_hist
 
 
 
@@ -2482,6 +2792,7 @@ def leer_tabla(nombre_tabla: str, order_by: str = "id") -> pd.DataFrame:
 
     # Si no hay caché válido, descargar de base de datos con filtro de tenant
     df = _leer_tabla_de_supabase(nombre_tabla, order_by, tenant=tenant)
+    df = agregar_columna_codigo_secuencial(df, nombre_tabla)
     st.session_state["session_cache_tablas"][cache_key] = (df, ahora)
     return df.copy()
 
@@ -3862,8 +4173,8 @@ def lanzar_impresion_navegador(html_doc: str):
 
 def generar_numero_factura_pos() -> str:
     """
-    Genera una secuencia limpia de factura:
-    FAC-00001, FAC-00002, FAC-00003...
+    Genera una secuencia limpia de factura con prefijo VT:
+    VT001, VT002, VT003...
     """
     try:
         ventas = leer_tabla("ventas")
@@ -3875,7 +4186,14 @@ def generar_numero_factura_pos() -> str:
     if not ventas.empty and "numero_factura" in ventas.columns:
         for val in ventas["numero_factura"].dropna().astype(str):
             txt = val.strip().upper()
-            if txt.startswith("FAC-"):
+            if txt.startswith("VT"):
+                num_part = txt.replace("VT", "")
+                if num_part.isdigit():
+                    try:
+                        max_num = max(max_num, int(num_part))
+                    except Exception:
+                        pass
+            elif txt.startswith("FAC-"):
                 num_part = txt.replace("FAC-", "")
                 if num_part.isdigit():
                     try:
@@ -3888,13 +4206,13 @@ def generar_numero_factura_pos() -> str:
                 except Exception:
                     pass
 
-    return f"FAC-{(max_num + 1):05d}"
+    return f"VT{(max_num + 1):03d}"
 
 
 def generar_numero_compra() -> str:
     """
-    Genera una secuencia limpia de compras:
-    COM-00001, COM-00002...
+    Genera una secuencia limpia de compras con prefijo CP:
+    CP001, CP002, CP003...
     """
     try:
         compras = leer_tabla("compras")
@@ -3906,7 +4224,14 @@ def generar_numero_compra() -> str:
     if not compras.empty and "numero" in compras.columns:
         for val in compras["numero"].dropna().astype(str):
             txt = val.strip().upper()
-            if txt.startswith("COM-"):
+            if txt.startswith("CP"):
+                num_part = txt.replace("CP", "")
+                if num_part.isdigit():
+                    try:
+                        max_num = max(max_num, int(num_part))
+                    except Exception:
+                        pass
+            elif txt.startswith("COM-"):
                 num_part = txt.replace("COM-", "")
                 if num_part.isdigit():
                     try:
@@ -3919,7 +4244,7 @@ def generar_numero_compra() -> str:
                 except Exception:
                     pass
 
-    return f"COM-{(max_num + 1):05d}"
+    return f"CP{(max_num + 1):03d}"
 
 def mostrar_factura_pos(post_venta: dict):
     """
@@ -5387,6 +5712,7 @@ menu_base = [
     "Clientes",
     "Proveedores",
     "Inventario Actual",
+    "Historial de Inventario",
     "Conteo Inventario",
     "Ajustes Inventario",
     "Ventas",
@@ -5434,7 +5760,7 @@ else:
         if tiene_permiso("puede_vender"):
             menu_opciones += ["Caja", "POS", "Ventas", "Créditos"]
         if tiene_permiso("puede_ver_reportes"):
-            menu_opciones += ["Clientes", "Créditos", "Inventario Actual", "Conteo Inventario"]
+            menu_opciones += ["Clientes", "Créditos", "Inventario Actual", "Historial de Inventario", "Conteo Inventario"]
     menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
 
 # Seguridad: Dinero Real solo para administrador
@@ -5774,6 +6100,11 @@ elif menu == "Productos":
                 errores = 0
                 filas_con_error = []  # Reporte detallado de fallos
 
+                base_codigo_gen = generar_codigo_producto()
+                prefix_part = "PO"
+                num_part = base_codigo_gen.replace(prefix_part, "")
+                next_num = int(num_part) if num_part.isdigit() else 1
+
                 for i, row in df_preview.iterrows():
                     nombre = ""
                     try:
@@ -5782,6 +6113,10 @@ elif menu == "Productos":
                             continue  # Fila vacía, se ignora sin contar
 
                         codigo = limpiar_texto(row.get("codigo"))
+                        if not codigo:
+                            codigo = f"{prefix_part}{next_num:03d}"
+                            next_num += 1
+                        
                         categoria = limpiar_texto(row.get("categoria"))
                         stock = float(limpiar_numero(row.get("stock")) or 0)
                         costo = float(limpiar_numero(row.get("costo")) or 0)
@@ -6062,6 +6397,65 @@ elif menu == "Productos":
             mask = df.astype(str).apply(lambda col: col.str.contains(txt, case=False, na=False)).any(axis=1)
             df = df[mask]
         st.dataframe(df, use_container_width=True)
+        
+        # Módulo de Eliminación Múltiple de Productos
+        with st.expander("🗑️ Eliminación Múltiple de Productos", expanded=False):
+            st.write("Selecciona las casillas de los productos que deseas eliminar y haz clic en **Eliminar seleccionados**:")
+            df_del_sel = df.copy()
+            df_edit_cols = ["Código" if "Código" in df_del_sel.columns else "codigo", "nombre", "categoria", "precio"]
+            df_edit_cols = [c for c in df_edit_cols if c in df_del_sel.columns]
+            
+            # We need ID column to perform deletion but we want to hide it
+            has_id = "id" in df_del_sel.columns
+            if has_id:
+                df_edit = df_del_sel[["id"] + df_edit_cols].copy()
+            else:
+                df_edit = df_del_sel[df_edit_cols].copy()
+                
+            df_edit.insert(0, "Seleccionar", False)
+            
+            edited_df = st.data_editor(
+                df_edit,
+                column_config={
+                    "Seleccionar": st.column_config.CheckboxColumn(
+                        "🗑️",
+                        help="Selecciona para eliminar",
+                        default=False,
+                    ),
+                    "id": None, # Hide ID
+                },
+                disabled=df_edit_cols + (["id"] if has_id else []),
+                use_container_width=True,
+                key="prod_bulk_del_editor"
+            )
+            
+            selected_rows = edited_df[edited_df["Seleccionar"] == True]
+            if not selected_rows.empty:
+                st.warning(f"⚠️ Has seleccionado **{len(selected_rows)}** productos para eliminar.")
+                confirm_del = st.checkbox("Confirmar que deseo eliminar permanentemente estos productos", key="confirm_bulk_del_check")
+                if confirm_del:
+                    if st.button("🗑️ Eliminar seleccionados", key="btn_bulk_delete_confirm", type="primary"):
+                        exitos = 0
+                        errores = 0
+                        for _, row in selected_rows.iterrows():
+                            # Find ID in original df or row
+                            pid = row.get("id")
+                            if not pid and "id" in df_del_sel.columns:
+                                # Fallback by index or matching columns
+                                pass
+                            if pid and eliminar("productos", pid):
+                                exitos += 1
+                            else:
+                                errores += 1
+                        if exitos > 0:
+                            st.success(f"Se eliminaron {exitos} productos.")
+                        if errores > 0:
+                            st.error(f"No se pudieron eliminar {errores} productos.")
+                        limpiar_cache_datos()
+                        st.rerun()
+            else:
+                st.info("No has seleccionado ningún producto para eliminar.")
+                
         descargar_archivos(df, "productos")
         render_crud_generico("productos", df, "🛠️ Editar / eliminar productos")
     else:
@@ -6127,18 +6521,81 @@ elif menu == "Inventario Actual":
                 st.success(f"Inventario actualizado: {procesados} productos.")
                 st.rerun()
 
-    invent = DATA["inventario_actual"].copy()
-    if not invent.empty:
-        st.subheader("📋 Inventario guardado")
-        d1, d2 = rango_fechas_ui("inventario_actual")
-        invent = filtrar_por_fechas(invent, d1, d2)
-        txt = st.text_input("Buscar en inventario actual", key="buscar_inv_actual")
-        invent = buscar_df(invent, txt)
-        st.dataframe(invent, use_container_width=True)
-        descargar_archivos(invent, "inventario_actual")
-        render_crud_generico("inventario_actual", invent, "🛠️ Editar / eliminar inventario actual")
+    prods = DATA["productos"].copy()
+    if not prods.empty:
+        if "usar_en_inventario" in prods.columns:
+            prods = prods[prods["usar_en_inventario"] == True]
+            
+        prods_display = pd.DataFrame()
+        prods_display["Código"] = prods["Código"] if "Código" in prods.columns else prods.get("codigo", "")
+        prods_display["Producto"] = prods["nombre"]
+        
+        existencia_col = "stock" if "stock" in prods.columns else "existencia" if "existencia" in prods.columns else "cantidad"
+        prods_display["Existencia Actual"] = prods[existencia_col].fillna(0.0).astype(float)
+        prods_display["Costo Unitario"] = prods["costo"].fillna(0.0).astype(float)
+        prods_display["Precio Venta"] = prods["precio"].fillna(0.0).astype(float)
+        prods_display["Valor Inventario"] = prods_display["Existencia Actual"] * prods_display["Costo Unitario"]
+        
+        prods_display = prods_display.sort_values("Producto")
+        
+        txt_search = st.text_input("Buscar producto en inventario", key="buscar_inv_actual_realtime")
+        if txt_search:
+            mask = prods_display.astype(str).apply(lambda col: col.str.contains(txt_search, case=False, na=False)).any(axis=1)
+            prods_display = prods_display[mask]
+            
+        st.subheader("📋 Existencias en Tiempo Real (Fotografía Actual)")
+        st.dataframe(prods_display, use_container_width=True)
+        
+        total_valor_inv = prods_display["Valor Inventario"].sum()
+        st.metric("💰 Valor Total del Inventario (Costo)", f"RD$ {total_valor_inv:,.2f}")
+        
+        descargar_archivos(prods_display, "inventario_actual_realtime")
     else:
-        st.info("No hay inventario actual registrado.")
+        st.info("No hay productos registrados en el catálogo de inventario.")
+
+
+# =========================================================
+# HISTORIAL DE INVENTARIO
+# =========================================================
+elif menu == "Historial de Inventario":
+    st.title("📜 Historial de Inventario")
+    st.caption("Consulta el registro histórico detallado de movimientos de inventario: Compras, Ventas, Pérdidas, Ajustes y Conteos.")
+
+    df_hist = obtener_historial_inventario_completo()
+    
+    if not df_hist.empty:
+        # Renombrar para compatibilidad con filtros
+        df_hist = df_hist.rename(columns={"Fecha": "fecha"})
+        
+        # Filtros de fecha
+        d1, d2 = rango_fechas_ui("historial_inventario")
+        df_hist = filtrar_por_fechas(df_hist, d1, d2)
+        
+        # Filtro de tipo de movimiento
+        tipos_disponibles = ["Todos"] + sorted(df_hist["Movimiento"].unique().tolist()) if "Movimiento" in df_hist.columns else ["Todos"]
+        tipo_sel = st.selectbox("Filtrar por tipo de movimiento", tipos_disponibles, key="filtro_hist_tipo")
+        if tipo_sel != "Todos":
+            df_hist = df_hist[df_hist["Movimiento"] == tipo_sel]
+            
+        # Filtro de texto
+        txt_search = st.text_input("Buscar por producto, observación o usuario", key="buscar_hist_inv")
+        if txt_search:
+            df_hist = buscar_df(df_hist, txt_search)
+            
+        if not df_hist.empty:
+            # Mostrar tabla con formato amigable
+            df_display = df_hist.copy()
+            df_display["fecha"] = df_display["fecha"].dt.strftime("%Y-%m-%d %H:%M:%S")
+            df_display = df_display.rename(columns={"fecha": "Fecha"})
+            
+            st.dataframe(df_display, use_container_width=True)
+            
+            # Botones de descarga de archivos
+            descargar_archivos(df_hist.rename(columns={"fecha": "Fecha"}), "historial_inventario")
+        else:
+            st.info("No hay movimientos que coincidan con los filtros seleccionados.")
+    else:
+        st.info("No se han registrado movimientos de inventario en el sistema.")
 
 
 # =========================================================
@@ -6173,28 +6630,28 @@ elif menu == "Conteo Inventario":
                     step=1.0,
                     value=float(existencia_sistema_manual),
                     disabled=True,
-                    key="conteo_manual_existencia_sistema",
+                    key=f"conteo_manual_existencia_sistema_{producto_manual}",
                 )
                 existencia_fisica_manual = st.number_input(
                     "Existencia física real",
                     min_value=0.0,
                     step=1.0,
-                    value=float(existencia_sistema_manual),
-                    key="conteo_manual_existencia_fisica",
+                    value=0.0,
+                    key=f"conteo_manual_existencia_fisica_{producto_manual}",
                 )
 
             diferencia_manual = float(existencia_fisica_manual) - float(existencia_sistema_manual)
             if diferencia_manual == 0:
-                estado_manual = "cuadrado"
+                estado_manual = "Cuadrado"
             elif diferencia_manual < 0:
-                estado_manual = "faltante"
+                estado_manual = "Faltante"
             else:
-                estado_manual = "sobrante"
+                estado_manual = "Sobrante"
 
             with c3:
-                st.metric("Diferencia", f"{diferencia_manual:,.2f}")
-                st.text_input("Estado", value=estado_manual, disabled=True, key="conteo_manual_estado")
-                observacion_manual = st.text_area("Observación", key="conteo_manual_obs")
+                st.metric("Diferencia", f"{diferencia_manual:+.2f}")
+                st.text_input("Estado", value=estado_manual, disabled=True, key=f"conteo_manual_estado_{producto_manual}")
+                observacion_manual = st.text_area("Observación", key=f"conteo_manual_obs_{producto_manual}")
 
             if st.button("Guardar conteo manual", key="btn_guardar_conteo_manual"):
                 ok = insertar(
@@ -6205,7 +6662,7 @@ elif menu == "Conteo Inventario":
                         "existencia_sistema": float(existencia_sistema_manual),
                         "existencia_fisica": float(existencia_fisica_manual),
                         "diferencia": float(diferencia_manual),
-                        "estado": estado_manual,
+                        "estado": estado_manual.lower(),
                         "observacion": observacion_manual,
                     },
                 )
@@ -6778,18 +7235,8 @@ elif menu == "Ventas":
 
                     if st.button("💾 Guardar edición completa", key="btn_guardar_edicion_completa"):
                         try:
-                            detalle_original = detalle_df.to_dict("records")
-
-                            # 1. devolver inventario viejo
-                            for item in detalle_original:
-                                prod_id = item.get("producto_id")
-                                cant_old = float(limpiar_numero(item.get("cantidad")) or 0)
-                                if prod_id:
-                                    prod_match = productos_df[productos_df["id"].astype(str) == str(prod_id)] if not productos_df.empty and "id" in productos_df.columns else pd.DataFrame()
-                                    if not prod_match.empty:
-                                        prod_row = prod_match.iloc[0]
-                                        stock_actual = obtener_existencia_producto(prod_row)
-                                        actualizar_existencia_producto(prod_row, stock_actual + cant_old)
+                            # 1. devolver inventario viejo y registrar movimientos usando helper oficial
+                            revertir_inventario_de_venta(venta_id)
 
                             # 2. borrar detalle viejo
                             supabase.table("detalle_venta").delete().eq("venta_id", str(venta_id)).execute()
@@ -6805,15 +7252,22 @@ elif menu == "Ventas":
 
                                 prod_id = item.get("producto_id")
                                 cant_new = float(item.get("cantidad") or 0)
-                                nuevo_total += float(item.get("total_linea") or item.get("total_linea") or item.get("linea_total") or 0)
+                                total_l = float(item.get("total_linea") or 0)
+                                nuevo_total += total_l
                                 nueva_ganancia += float(item.get("ganancia_linea") or 0)
 
                                 if prod_id:
-                                    prod_match = productos_df[productos_df["id"].astype(str) == str(prod_id)] if not productos_df.empty and "id" in productos_df.columns else pd.DataFrame()
-                                    if not prod_match.empty:
-                                        prod_row = prod_match.iloc[0]
-                                        stock_actual = obtener_existencia_producto(prod_row)
-                                        actualizar_existencia_producto(prod_row, stock_actual - cant_new)
+                                    prod = refrescar_producto_por_id(prod_id)
+                                    if prod is not None:
+                                        stock_actual = float(obtener_existencia_producto(prod))
+                                        nueva_cant = max(stock_actual - cant_new, 0.0)
+                                        actualizar_existencia_producto(prod, nueva_cant)
+                                        
+                                        prod_sync = refrescar_producto_por_id(prod_id)
+                                        if prod_sync is None:
+                                            prod_sync = prod
+                                        sincronizar_producto_inventario(prod_sync, ahora_str(), f"Salida por edicion venta {venta_id}")
+                                        registrar_movimiento_inventario(prod_id, obtener_nombre_producto(prod_sync), "salida_venta", "ventas", venta_id, -cant_new, float(item.get("costo_unitario") or 0), "Ajuste por edición de venta")
 
                             # 4. actualizar venta
                             supabase.table("ventas").update(json_safe_payload({
@@ -6825,12 +7279,56 @@ elif menu == "Ventas":
 
                             # 5. actualizar pagos si existe registro
                             try:
-                                supabase.table("ventas_pagos").update({
-                                    "metodo_pago": metodo_pago_nuevo,
-                                    "monto": float(nuevo_total),
-                                }).eq("venta_id", str(venta_id)).execute()
+                                supabase.table("ventas_pagos").delete().eq("venta_id", str(venta_id)).execute()
                             except Exception:
                                 pass
+
+                            try:
+                                supabase.table("ventas_pagos").insert(json_safe_payload({
+                                    "venta_id": str(venta_id),
+                                    "metodo": metodo_pago_nuevo,
+                                    "monto": float(nuevo_total),
+                                    "usuario": nombre_usuario_actual(),
+                                    "caja_id": str(venta_row.get("caja_id")),
+                                    "dia_operativo": ahora_str(),
+                                })).execute()
+                            except Exception:
+                                pass
+
+                            try:
+                                reconstruir_movimientos_caja_desde_ventas_pagos(venta_id)
+                            except Exception:
+                                pass
+
+                            # 6. Sincronizar cuentas por cobrar (cxc)
+                            if metodo_pago_nuevo == "credito":
+                                try:
+                                    cxc_exists = supabase.table("cuentas_por_cobrar").select("*").eq("venta_id", str(venta_id)).execute().data or []
+                                    if cxc_exists:
+                                        cxc_id = cxc_exists[0]["id"]
+                                        actualizar("cuentas_por_cobrar", cxc_id, {
+                                            "monto_original": float(nuevo_total),
+                                            "saldo_pendiente": float(nuevo_total),
+                                            "estado": "pendiente"
+                                        })
+                                    else:
+                                        supabase.table("cuentas_por_cobrar").insert({
+                                            "cliente_id": venta_row.get("cliente_id"),
+                                            "cliente_nombre": venta_row.get("cliente_nombre") or "Venta general",
+                                            "venta_id": str(venta_id),
+                                            "monto_original": float(nuevo_total),
+                                            "monto_abonado": 0,
+                                            "saldo_pendiente": float(nuevo_total),
+                                            "estado": "pendiente",
+                                            "usuario": nombre_usuario_actual(),
+                                        }).execute()
+                                except Exception:
+                                    pass
+                            else:
+                                try:
+                                    supabase.table("cuentas_por_cobrar").delete().eq("venta_id", str(venta_id)).execute()
+                                except Exception:
+                                    pass
 
                             st.success("Venta editada completamente.")
                             st.rerun()
@@ -7203,6 +7701,48 @@ elif menu == "Compras":
                     if st.button("➕", key="btn_comp_trigger_add_prod", help="Crear producto nuevo", use_container_width=True):
                         dialog_crear_producto_compra()
                 
+                with st.expander("🧮 Calculadora de Compra por Cajas (Automática)", expanded=False):
+                    st.caption("Digita la cantidad de cajas, unidades por caja y costo total. El sistema calculará el costo unitario de forma automática.")
+                    
+                    prod_lista_calc = [""] + sorted(productos_df["nombre"].dropna().unique().tolist()) if not productos_df.empty else [""]
+                    prod_calc_sel = st.selectbox("Seleccione el Producto a comprar", prod_lista_calc, key="comp_calc_prod")
+                    
+                    cc1, cc2 = st.columns(2)
+                    with cc1:
+                        cajas_val = st.number_input("Cantidad de cajas", min_value=1.0, value=1.0, step=1.0, key="comp_calc_cajas")
+                        uds_caja_val = st.number_input("Unidades por caja", min_value=1.0, value=24.0, step=1.0, key="comp_calc_uds")
+                    with cc2:
+                        costo_total_val = st.number_input("Costo total de la compra (RD$)", min_value=0.0, value=0.0, step=100.0, key="comp_calc_costo_total")
+                    
+                    total_unidades = float(cajas_val * uds_caja_val)
+                    costo_caja = float(costo_total_val / cajas_val) if cajas_val > 0 else 0.0
+                    costo_unidad = float(costo_total_val / total_unidades) if total_unidades > 0 else 0.0
+                    
+                    st.markdown("---")
+                    st.markdown(f"**Resultados del cálculo:**")
+                    st.write(f"- 📦 **Total de unidades compradas:** {total_unidades:,.0f} uds.")
+                    st.write(f"- 💵 **Costo por caja:** RD$ {costo_caja:,.2f}")
+                    st.write(f"- 🪙 **Costo por unidad:** RD$ {costo_unidad:,.2f}")
+                    
+                    if st.button("📥 Cargar al carrito desde calculadora", key="btn_comp_calc_add", use_container_width=True):
+                        if not prod_calc_sel:
+                            st.error("Por favor seleccione un producto.")
+                        elif costo_total_val <= 0:
+                            st.error("El costo total de la compra debe ser mayor a 0.")
+                        else:
+                            p_row_calc = productos_df[productos_df["nombre"] == prod_calc_sel].iloc[0]
+                            st.session_state["compra_carrito"].append({
+                                "producto_id": str(p_row_calc["id"]),
+                                "codigo": p_row_calc.get("codigo") or "SIN CODIGO",
+                                "nombre": prod_calc_sel,
+                                "cantidad": float(total_unidades),
+                                "costo_unitario": float(costo_unidad),
+                                "cajas": float(cajas_val),
+                                "unidades_por_caja": float(uds_caja_val)
+                            })
+                            st.toast(f"✅ Agregado: {prod_calc_sel} ({total_unidades:,.0f} uds)")
+                            st.rerun()
+                
                 # Procesar código rápido de barra ingresado
                 if codigo_quick.strip():
                     codigo_clean = codigo_quick.strip()
@@ -7358,6 +7898,15 @@ elif menu == "Compras":
                             p_costo = item["costo_unitario"]
                             p_nom = item["nombre"]
                             
+                            p_cajas = item.get("cajas")
+                            p_uds_caja = item.get("unidades_por_caja")
+                            if p_cajas and p_uds_caja:
+                                p_desc = f"Compra de {p_cajas:.0f} cajas de {p_uds_caja:.0f} uds. Costo/caja: RD$ {p_costo * p_uds_caja:,.2f}."
+                                if desc_fact.strip():
+                                    p_desc += f" - {desc_fact.strip()}"
+                            else:
+                                p_desc = desc_fact.strip() or f"Compra de {p_nom}"
+                            
                             p_rows = productos_df[productos_df["id"].astype(str) == str(p_id)]
                             if not p_rows.empty:
                                 p_row = p_rows.iloc[0]
@@ -7368,7 +7917,7 @@ elif menu == "Compras":
                                     fecha_compra=str(fecha_fact),
                                     proveedor=proveedor_sel,
                                     numero=num_fact.strip(),
-                                    descripcion=desc_fact.strip() or f"Compra de {p_nom}",
+                                    descripcion=p_desc,
                                     metodo=metodo_pago.lower()
                                 )
                                 if ok:
@@ -7486,6 +8035,8 @@ elif menu == "Catálogo de Gastos":
 # =========================================================
 elif menu == "Gastos":
     st.title("💸 Gastos")
+    next_gasto_id = generar_codigo_secuencial("gastos")
+    st.caption(f"Identificador del próximo gasto: **{next_gasto_id}**")
 
     catalogo = DATA["catalogo_gastos"].copy()
     if not catalogo.empty and "activo" in catalogo.columns:
@@ -7589,7 +8140,8 @@ elif menu == "Gastos":
 # =========================================================
 elif menu == "Empleados":
     st.title("👥 Empleados")
-    st.caption("Este módulo es solo para registrar datos del empleado. Para pagar quincenas, comisiones o bonos usa el menú Pagos Empleados.")
+    next_emp_id = generar_codigo_secuencial("empleados")
+    st.caption(f"Identificador del próximo empleado: **{next_emp_id}**. Este módulo es solo para registrar datos del empleado. Para pagar quincenas, comisiones o bonos usa el menú Pagos Empleados.")
 
     with st.expander("📥 Subir Excel / CSV de empleados"):
         st.write("Columnas esperadas: nombre, puesto, sueldo, tipo_salario, frecuencia_pago. Activo opcional.")
@@ -11198,11 +11750,12 @@ elif menu == "POS":
                                         st.rerun()
                                 else:
                                     with pc3.popover("💵 Cobrar", use_container_width=True):
-                                        met_pago = st.selectbox("Método", ["efectivo", "tarjeta", "transferencia"], key=f"pop_met_{v_id}_{pi}")
+                                        monto_cobrar = st.number_input("Monto (RD$)", min_value=0.01, max_value=float(p.get("monto") or 0.01), value=float(p.get("monto") or 0.01), key=f"pop_monto_{v_id}_{pi}")
+                                        met_pago = st.selectbox("Método", ["efectivo", "tarjeta", "transferencia", "credito"], key=f"pop_met_{v_id}_{pi}")
                                         if st.button("Confirmar", key=f"pop_btn_{v_id}_{pi}", use_container_width=True, type="primary"):
-                                            monto_part = float(p.get("monto", 0))
+                                            monto_part = float(monto_cobrar)
                                             try:
-                                                # 1. Registrar pago
+                                                # 1. Registrar pago en ventas_pagos
                                                 supabase.table("ventas_pagos").insert({
                                                     "venta_id": str(v_id),
                                                     "metodo": met_pago,
@@ -11212,20 +11765,33 @@ elif menu == "POS":
                                                     "dia_operativo": ahora_str(),
                                                 }).execute()
                                                 
-                                                # 2. Registrar movimiento de caja
-                                                supabase.table("movimientos_caja").insert({
-                                                    "fecha": datetime.now().isoformat(),
-                                                    "dia_operativo": ahora_str(),
-                                                    "caja_id": str(c_row.get("caja_id")),
-                                                    "tipo_movimiento": "entrada",
-                                                    "origen": "venta",
-                                                    "referencia_id": str(v_id),
-                                                    "metodo_pago": met_pago,
-                                                    "monto": monto_part,
-                                                    "descripcion": f"Pago parcial {p.get('nombre')} en {alias}",
-                                                    "usuario": nombre_usuario_actual(),
-                                                    "anulado": False,
-                                                }).execute()
+                                                # 2. Registrar movimiento de caja si no es crédito
+                                                if met_pago != "credito":
+                                                    supabase.table("movimientos_caja").insert({
+                                                        "fecha": datetime.now().isoformat(),
+                                                        "dia_operativo": ahora_str(),
+                                                        "caja_id": str(c_row.get("caja_id")),
+                                                        "tipo_movimiento": "entrada",
+                                                        "origen": "venta",
+                                                        "referencia_id": str(v_id),
+                                                        "metodo_pago": met_pago,
+                                                        "monto": monto_part,
+                                                        "descripcion": f"Pago parcial {p.get('nombre')} en {alias}",
+                                                        "usuario": nombre_usuario_actual(),
+                                                        "anulado": False,
+                                                    }).execute()
+                                                else:
+                                                    # Si es crédito, registrar en cuentas_por_cobrar
+                                                    supabase.table("cuentas_por_cobrar").insert({
+                                                        "cliente_id": None,
+                                                        "cliente_nombre": f"{alias} - {p.get('nombre')}",
+                                                        "venta_id": str(v_id),
+                                                        "monto_original": monto_part,
+                                                        "monto_abonado": 0.0,
+                                                        "saldo_pendiente": monto_part,
+                                                        "estado": "pendiente",
+                                                        "usuario": nombre_usuario_actual(),
+                                                    }).execute()
                                                 
                                                 # Registrar auditoría
                                                 registrar_auditoria_pro(
@@ -11233,12 +11799,22 @@ elif menu == "POS":
                                                     modulo="POS",
                                                     descripcion=f"Pago parcial de RD$ {monto_part:,.2f} ({met_pago}) registrado para {p.get('nombre')} en cuenta '{alias}'",
                                                     nivel_riesgo="bajo",
-                                                    impacto_economico=monto_part
+                                                    impacto_economico=monto_part if met_pago != "credito" else 0.0
                                                 )
                                                 
-                                                participantes[pi]["pagado"] = True
+                                                nuevo_monto_restante = float(p.get("monto", 0)) - monto_part
+                                                if nuevo_monto_restante <= 0.001:
+                                                    participantes[pi]["pagado"] = True
+                                                    participantes[pi]["monto"] = 0.0
+                                                else:
+                                                    participantes[pi]["monto"] = nuevo_monto_restante
+                                                    participantes[pi]["pagado"] = False
+                                                    
                                                 obs_data["participantes"] = participantes
                                                 supabase.table("ventas").update({"observacion": json.dumps(obs_data, ensure_ascii=False)}).eq("id", str(v_id)).execute()
+                                                
+                                                invalidar_cache_tabla("ventas")
+                                                invalidar_cache_tabla("caja")
                                                 DATA.update(cargar_datos())
                                                 st.toast(f"¡Pago de {p.get('nombre')} de RD$ {monto_part:,.2f} registrado!", icon="✅")
                                                 st.rerun()
@@ -12117,6 +12693,9 @@ elif menu == "POS":
                 except Exception:
                     pass
                 
+                if not pagos_cuadran:
+                    st.info(f"💡 **Monto pendiente a saldar hoy: RD$ {total_real_pendiente:,.2f}**. Registra cómo se pagará este monto usando las casillas de Efectivo, Tarjeta, etc., para habilitar el botón **Cobrar y Cerrar Cuenta**.")
+
                 ec_1, ec_2, ec_3 = st.columns(3)
                 with ec_1:
                     guardar_cambios = st.button("💾 Guardar Cambios", key="btn_pos_guardar_cambios_abierta")
@@ -12129,6 +12708,7 @@ elif menu == "POS":
                     st.session_state["pos_cuenta_abierta_id"] = None
                     st.session_state["pos_cuenta_abierta_nombre"] = None
                     st.session_state["pos_carrito"] = []
+                    st.session_state["pos_nuevo_cuenta_participantes"] = []
                     st.session_state.pop("pos_edit_cuenta_alias", None)
                     st.session_state.pop("pos_new_cuenta_alias", None)
                     st.rerun()
@@ -12144,6 +12724,35 @@ elif menu == "POS":
                     st.session_state["pos_new_cuenta_alias"] = default_alias
                     st.session_state["_last_cliente_nombre_pos"] = cliente_nombre
                 alias_cuenta = st.text_input("Alias / Nombre de la cuenta (Solo para Guardar como Cuenta Abierta)", value=st.session_state.get("pos_new_cuenta_alias", ""), key="pos_new_cuenta_alias")
+                
+                if "pos_nuevo_cuenta_participantes" not in st.session_state:
+                    st.session_state["pos_nuevo_cuenta_participantes"] = []
+                
+                # Gestión de participantes para nueva cuenta abierta
+                with st.expander(f"👥 Participantes de esta nueva cuenta ({len(st.session_state['pos_nuevo_cuenta_participantes'])})", expanded=True):
+                    if st.session_state["pos_nuevo_cuenta_participantes"]:
+                        for pi, p in enumerate(st.session_state["pos_nuevo_cuenta_participantes"]):
+                            pcol1, pcol2, pcol3 = st.columns([3, 2, 1])
+                            pcol1.markdown(f"👤 **{p.get('nombre')}**")
+                            pcol2.markdown(f"RD$ {float(p.get('monto', 0)):,.2f}")
+                            if pcol3.button("🗑️", key=f"btn_pos_new_del_part_{pi}", use_container_width=True):
+                                st.session_state["pos_nuevo_cuenta_participantes"].pop(pi)
+                                st.rerun()
+                    else:
+                        st.caption("No hay participantes asignados aún.")
+                    
+                    st.markdown("**Agregar participante:**")
+                    npa1, npa2, npa3 = st.columns([3, 2, 1])
+                    n_n_p = npa1.text_input("Nombre de la persona", key="pos_nuevo_p_nombre_temp", placeholder="Ej: Juan...")
+                    n_m_p = npa2.number_input("Monto asignado (RD$)", min_value=0.0, step=50.0, key="pos_nuevo_p_monto_temp")
+                    if npa3.button("➕ Agregar", key="pos_btn_add_part_temp", use_container_width=True):
+                        if not n_n_p.strip():
+                            st.error("Indique un nombre.")
+                        elif n_m_p <= 0:
+                            st.error("Monto mayor a 0.")
+                        else:
+                            st.session_state["pos_nuevo_cuenta_participantes"].append({"nombre": n_n_p.strip(), "monto": float(n_m_p), "pagado": False})
+                            st.rerun()
                 
                 # Popover para apertura de gaveta sin venta
                 with st.popover("🔑 Abrir Gaveta (Sin Venta)", use_container_width=True):
@@ -12220,8 +12829,14 @@ elif menu == "POS":
                                 payload_base["tipo_comprobante"] = tipo_comp
                                 payload_base["rnc_cliente"] = rnc_cliente_ui.strip()
         
+                            ncf_final = ncf_generado
                             if es_cuenta_editada:
                                 venta_id = st.session_state["pos_cuenta_abierta_id"]
+                                db_venta = supabase.table("ventas").select("numero_factura", "ncf").eq("id", str(venta_id)).execute().data or [{}]
+                                factura_final = db_venta[0].get("numero_factura") or f"FAC-{str(venta_id)[:8]}"
+                                if not ncf_final:
+                                    ncf_final = db_venta[0].get("ncf") or ""
+                                
                                 restaurar_inventario_venta(venta_id)
                                 supabase.table("detalle_venta").delete().eq("venta_id", str(venta_id)).execute()
                                 metodo_pago_final = "abierta" if estado_final == "abierta" else ("mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"))
@@ -12231,6 +12846,7 @@ elif menu == "POS":
                                 supabase.table("ventas").update(json_safe_payload(payload_upd)).eq("id", str(venta_id)).execute()
                                 venta_resp_data = [{"id": venta_id}]
                             else:
+                                factura_final = numero_factura_pos
                                 metodo_pago_final = "abierta" if estado_final == "abierta" else ("mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"))
                                 cliente_nombre_final = alias_cuenta if (estado_final == "abierta" and alias_cuenta) else cliente_nombre
                                 
@@ -12245,7 +12861,7 @@ elif menu == "POS":
                                     "numero_factura": numero_factura_pos,
                                     "tipo_venta": "POS",
                                     "anulado": False,
-                                    "observacion": json.dumps({"participantes": [], "descuento": descuento_global, "recargo": recargo, "nota_factura": nota_factura})
+                                    "observacion": json.dumps({"participantes": st.session_state.get("pos_nuevo_cuenta_participantes", []), "descuento": descuento_global, "recargo": recargo, "nota_factura": nota_factura})
                                 }
                                 # ncf y tipo_comprobante ya van en payload_base si se generaron
                                 venta_resp = supabase.table("ventas").insert(json_safe_payload(payload_ins)).execute()
@@ -12390,16 +13006,16 @@ elif menu == "POS":
                                         "usuario": nombre_usuario_actual(),
                                     }).execute()
                                 registrar_auditoria("venta_pos", "ventas", f"venta_id={venta_id} total={subtotal}")
-                                if proceder_venta_normal:
+                                if es_cobro:
                                     st.session_state["pos_post_venta"] = {
                                         "venta_id": str(venta_id),
-                                        "numero_factura": numero_factura_pos,
+                                        "numero_factura": factura_final,
                                         "total": float(subtotal),
                                         "total_real": float(subtotal),
                                         "cambio": float(cambio),
                                         "cliente_nombre": cliente_nombre_final,
-                                        "metodo_pago": "mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"),
-                                        "ncf": ncf_generado,
+                                        "metodo_pago": metodo_pago_final,
+                                        "ncf": ncf_final,
                                         "nota": nota_factura or "",
                                         "items": [dict(x) for x in carrito],
                                     }
@@ -12409,6 +13025,7 @@ elif menu == "POS":
                                 
                             st.session_state["pos_cuenta_abierta_id"] = None
                             st.session_state["pos_cuenta_abierta_nombre"] = None
+                            st.session_state["pos_nuevo_cuenta_participantes"] = []
                             st.session_state.pop("pos_edit_cuenta_alias", None)
                             st.session_state.pop("pos_new_cuenta_alias", None)
                             st.session_state["pos_carrito"] = []
@@ -12663,6 +13280,8 @@ elif menu == "Dinero Real":
 # =========================================================
 elif menu == "Clientes":
     st.title("👥 Clientes")
+    next_cli_id = generar_codigo_secuencial("clientes")
+    st.caption(f"Identificador del próximo cliente: **{next_cli_id}**")
     with st.expander("➕ Agregar cliente", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
@@ -12690,6 +13309,8 @@ elif menu == "Clientes":
 # =========================================================
 elif menu == "Proveedores":
     st.title("🚚 Proveedores")
+    next_prov_id = generar_codigo_secuencial("proveedores")
+    st.caption(f"Identificador del próximo proveedor: **{next_prov_id}**")
     with st.expander("➕ Agregar proveedor", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
