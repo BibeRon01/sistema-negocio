@@ -403,9 +403,180 @@ def cerrar_sesion():
 def puede_editar_global() -> bool:
     return es_admin() or tiene_permiso("puede_editar_todo")
 
-
 def puede_ver_utilidad_global() -> bool:
     return es_admin() or tiene_permiso("puede_ver_utilidad")
+
+# =========================================================
+# PERMISOS GRANULARES POR MÓDULO Y ACCIÓN
+# =========================================================
+
+# --- POS / Ventas ---
+def puede_vender() -> bool:
+    return es_admin() or tiene_permiso("puede_vender")
+
+def puede_abrir_caja() -> bool:
+    return es_admin() or tiene_permiso("puede_abrir_caja") or tiene_permiso("puede_vender")
+
+def puede_cerrar_caja() -> bool:
+    return es_admin() or tiene_permiso("puede_cerrar_caja") or tiene_permiso("puede_vender")
+
+def puede_ver_ventas_propias() -> bool:
+    return es_admin() or tiene_permiso("puede_ver_ventas_propias") or tiene_permiso("puede_vender")
+
+def puede_ver_todas_ventas() -> bool:
+    return es_admin() or tiene_permiso("puede_ver_todas_ventas") or tiene_permiso("puede_ver_reportes")
+
+def puede_editar_ventas() -> bool:
+    return es_admin() or tiene_permiso("puede_editar_ventas") or tiene_permiso("puede_editar_todo")
+
+def puede_anular_ventas() -> bool:
+    return es_admin() or tiene_permiso("puede_anular") or tiene_permiso("puede_editar_todo")
+
+def puede_eliminar_ventas() -> bool:
+    return es_admin() or tiene_permiso("puede_eliminar") or tiene_permiso("puede_editar_todo")
+
+# --- Compras ---
+def puede_registrar_compras() -> bool:
+    return es_admin() or tiene_permiso("puede_registrar_compras")
+
+def puede_ver_compras() -> bool:
+    return es_admin() or tiene_permiso("puede_ver_compras") or tiene_permiso("puede_registrar_compras") or tiene_permiso("puede_ver_reportes")
+
+def puede_editar_compras() -> bool:
+    return es_admin() or tiene_permiso("puede_editar_compras") or tiene_permiso("puede_editar_todo")
+
+def puede_eliminar_compras() -> bool:
+    return es_admin() or tiene_permiso("puede_eliminar_compras") or tiene_permiso("puede_eliminar")
+
+def puede_aprobar_compras() -> bool:
+    return es_admin() or tiene_permiso("puede_aprobar_compras") or tiene_permiso("puede_editar_todo")
+
+# --- Gastos ---
+def puede_registrar_gastos() -> bool:
+    return es_admin() or tiene_permiso("puede_registrar_gastos")
+
+def puede_ver_gastos() -> bool:
+    return es_admin() or tiene_permiso("puede_ver_gastos") or tiene_permiso("puede_registrar_gastos") or tiene_permiso("puede_ver_reportes")
+
+def puede_editar_gastos() -> bool:
+    return es_admin() or tiene_permiso("puede_editar_gastos") or tiene_permiso("puede_editar_todo")
+
+def puede_eliminar_gastos() -> bool:
+    return es_admin() or tiene_permiso("puede_eliminar_gastos") or tiene_permiso("puede_eliminar")
+
+# --- Inventario ---
+def puede_ver_inventario() -> bool:
+    return es_admin() or tiene_permiso("puede_ver_inventario") or tiene_permiso("puede_ver_reportes")
+
+def puede_registrar_conteo() -> bool:
+    return es_admin() or tiene_permiso("puede_registrar_conteo")
+
+def puede_aplicar_ajuste_inventario() -> bool:
+    return es_admin() or tiene_permiso("puede_aplicar_ajuste_inventario") or tiene_permiso("puede_editar_todo")
+
+def puede_editar_inventario() -> bool:
+    return es_admin() or tiene_permiso("puede_editar_inventario") or tiene_permiso("puede_editar_todo")
+
+# --- Pérdidas ---
+def puede_reportar_perdidas() -> bool:
+    return es_admin() or tiene_permiso("puede_reportar_perdidas")
+
+def puede_ver_perdidas() -> bool:
+    return es_admin() or tiene_permiso("puede_ver_perdidas") or tiene_permiso("puede_reportar_perdidas") or tiene_permiso("puede_ver_reportes")
+
+def puede_aprobar_perdidas() -> bool:
+    return es_admin() or tiene_permiso("puede_aprobar_perdidas") or tiene_permiso("puede_editar_todo")
+
+def puede_debitar_perdidas() -> bool:
+    return es_admin() or tiene_permiso("puede_debitar_perdidas") or tiene_permiso("puede_editar_todo")
+
+def puede_editar_perdidas() -> bool:
+    return es_admin() or tiene_permiso("puede_editar_perdidas") or tiene_permiso("puede_editar_todo")
+
+def puede_eliminar_perdidas() -> bool:
+    return es_admin() or tiene_permiso("puede_eliminar_perdidas") or tiene_permiso("puede_eliminar")
+
+# --- Productos ---
+def puede_ver_productos() -> bool:
+    return es_admin() or tiene_permiso("puede_ver_productos") or tiene_permiso("puede_vender") or tiene_permiso("puede_ver_reportes")
+
+def puede_crear_productos() -> bool:
+    return es_admin() or tiene_permiso("puede_crear_productos") or tiene_permiso("puede_editar_todo")
+
+def puede_editar_productos() -> bool:
+    return es_admin() or tiene_permiso("puede_editar_productos") or tiene_permiso("puede_editar_todo")
+
+def puede_eliminar_productos() -> bool:
+    return es_admin() or tiene_permiso("puede_eliminar_productos") or tiene_permiso("puede_eliminar")
+
+
+def render_checkboxes_permisos(key_prefix: str, defaults_dict: dict = None) -> dict:
+    if defaults_dict is None:
+        defaults_dict = {}
+    permisos = {}
+    with st.expander("📦 POS / Ventas", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            permisos["puede_vender"] = st.checkbox("Puede vender (POS)", value=bool(defaults_dict.get("puede_vender", True)), key=f"{key_prefix}_pv")
+            permisos["puede_abrir_caja"] = st.checkbox("Puede abrir caja", value=bool(defaults_dict.get("puede_abrir_caja", True)), key=f"{key_prefix}_pab")
+            permisos["puede_cerrar_caja"] = st.checkbox("Puede cerrar caja", value=bool(defaults_dict.get("puede_cerrar_caja", True)), key=f"{key_prefix}_pce")
+            permisos["puede_ver_ventas_propias"] = st.checkbox("Puede ver ventas propias", value=bool(defaults_dict.get("puede_ver_ventas_propias", True)), key=f"{key_prefix}_pvp")
+        with c2:
+            permisos["puede_ver_todas_ventas"] = st.checkbox("Puede ver todas las ventas", value=bool(defaults_dict.get("puede_ver_todas_ventas", False)), key=f"{key_prefix}_pvt")
+            permisos["puede_editar_ventas"] = st.checkbox("Puede editar ventas/facturas", value=bool(defaults_dict.get("puede_editar_ventas", False)), key=f"{key_prefix}_pev")
+            permisos["puede_anular"] = st.checkbox("Puede anular ventas/facturas", value=bool(defaults_dict.get("puede_anular", False)), key=f"{key_prefix}_pan")
+            permisos["puede_eliminar"] = st.checkbox("Puede eliminar ventas/facturas", value=bool(defaults_dict.get("puede_eliminar", False)), key=f"{key_prefix}_pel")
+    with st.expander("🛒 Compras", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            permisos["puede_registrar_compras"] = st.checkbox("Puede registrar compras", value=bool(defaults_dict.get("puede_registrar_compras", False)), key=f"{key_prefix}_prc")
+            permisos["puede_ver_compras"] = st.checkbox("Puede ver compras", value=bool(defaults_dict.get("puede_ver_compras", False)), key=f"{key_prefix}_pvc")
+            permisos["puede_editar_compras"] = st.checkbox("Puede editar compras", value=bool(defaults_dict.get("puede_editar_compras", False)), key=f"{key_prefix}_pec")
+        with c2:
+            permisos["puede_eliminar_compras"] = st.checkbox("Puede eliminar compras", value=bool(defaults_dict.get("puede_eliminar_compras", False)), key=f"{key_prefix}_pelc")
+            permisos["puede_aprobar_compras"] = st.checkbox("Puede aprobar compras", value=bool(defaults_dict.get("puede_aprobar_compras", False)), key=f"{key_prefix}_pac")
+    with st.expander("💰 Gastos", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            permisos["puede_registrar_gastos"] = st.checkbox("Puede registrar gastos", value=bool(defaults_dict.get("puede_registrar_gastos", False)), key=f"{key_prefix}_prg")
+            permisos["puede_ver_gastos"] = st.checkbox("Puede ver gastos", value=bool(defaults_dict.get("puede_ver_gastos", False)), key=f"{key_prefix}_pvg")
+        with c2:
+            permisos["puede_editar_gastos"] = st.checkbox("Puede editar gastos", value=bool(defaults_dict.get("puede_editar_gastos", False)), key=f"{key_prefix}_peg")
+            permisos["puede_eliminar_gastos"] = st.checkbox("Puede eliminar gastos", value=bool(defaults_dict.get("puede_eliminar_gastos", False)), key=f"{key_prefix}_pelg")
+    with st.expander("📊 Inventario", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            permisos["puede_ver_inventario"] = st.checkbox("Puede ver inventario", value=bool(defaults_dict.get("puede_ver_inventario", False)), key=f"{key_prefix}_pvi")
+            permisos["puede_registrar_conteo"] = st.checkbox("Puede registrar conteo de inventario", value=bool(defaults_dict.get("puede_registrar_conteo", False)), key=f"{key_prefix}_prco")
+        with c2:
+            permisos["puede_aplicar_ajuste_inventario"] = st.checkbox("Puede aplicar ajustes de inventario", value=bool(defaults_dict.get("puede_aplicar_ajuste_inventario", False)), key=f"{key_prefix}_paai")
+            permisos["puede_editar_inventario"] = st.checkbox("Puede editar inventario", value=bool(defaults_dict.get("puede_editar_inventario", False)), key=f"{key_prefix}_pein")
+    with st.expander("📉 Pérdidas", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            permisos["puede_reportar_perdidas"] = st.checkbox("Puede reportar pérdidas", value=bool(defaults_dict.get("puede_reportar_perdidas", False)), key=f"{key_prefix}_prp")
+            permisos["puede_ver_perdidas"] = st.checkbox("Puede ver historial de pérdidas", value=bool(defaults_dict.get("puede_ver_perdidas", False)), key=f"{key_prefix}_pvp_l")
+            permisos["puede_editar_perdidas"] = st.checkbox("Puede editar pérdidas", value=bool(defaults_dict.get("puede_editar_perdidas", False)), key=f"{key_prefix}_pepl")
+        with c2:
+            permisos["puede_aprobar_perdidas"] = st.checkbox("Puede aprobar pérdidas", value=bool(defaults_dict.get("puede_aprobar_perdidas", False)), key=f"{key_prefix}_papl")
+            permisos["puede_debitar_perdidas"] = st.checkbox("Puede descontar pérdidas de inventario", value=bool(defaults_dict.get("puede_debitar_perdidas", False)), key=f"{key_prefix}_pdpl")
+            permisos["puede_eliminar_perdidas"] = st.checkbox("Puede eliminar pérdidas", value=bool(defaults_dict.get("puede_eliminar_perdidas", False)), key=f"{key_prefix}_peel")
+    with st.expander("🏷️ Productos", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            permisos["puede_ver_productos"] = st.checkbox("Puede ver catálogo de productos", value=bool(defaults_dict.get("puede_ver_productos", False)), key=f"{key_prefix}_pvpr")
+            permisos["puede_crear_productos"] = st.checkbox("Puede crear productos", value=bool(defaults_dict.get("puede_crear_productos", False)), key=f"{key_prefix}_pcpr")
+        with c2:
+            permisos["puede_editar_productos"] = st.checkbox("Puede editar productos", value=bool(defaults_dict.get("puede_editar_productos", False)), key=f"{key_prefix}_pepr")
+            permisos["puede_eliminar_productos"] = st.checkbox("Puede eliminar productos", value=bool(defaults_dict.get("puede_eliminar_productos", False)), key=f"{key_prefix}_pelpr")
+    with st.expander("📈 Reportes / Configuración / Otros", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            permisos["puede_ver_dashboard"] = st.checkbox("Puede ver dashboard principal", value=bool(defaults_dict.get("puede_ver_dashboard", False)), key=f"{key_prefix}_pvdb")
+            permisos["puede_ver_reportes"] = st.checkbox("Puede ver reportes contables/generales", value=bool(defaults_dict.get("puede_ver_reportes", False)), key=f"{key_prefix}_pvr_g")
+        with c2:
+            permisos["puede_configurar"] = st.checkbox("Puede modificar configuración del sistema", value=bool(defaults_dict.get("puede_configurar", False)), key=f"{key_prefix}_pcfg")
+    return permisos
 
 
 def valor_simple(valor: Any):
@@ -3387,22 +3558,29 @@ def obtener_existencia_desde_inventario(producto: str) -> float:
         return float(obtener_existencia_producto(prod))
     return 0.0
 
-def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdida, observacion="") -> bool:
+def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdida, observacion="", estado="pendiente", hora=None, reportado_por=None, persona_involucrada=None) -> bool:
     cantidad = float(cantidad)
     costo_unitario = float(costo_unitario)
     valor = cantidad * costo_unitario
-    return insertar(
-        "perdidas",
-        {
-            "fecha": str(fecha_mov),
-            "producto": limpiar_texto(producto),
-            "cantidad": cantidad,
-            "costo_unitario": costo_unitario,
-            "valor": valor,
-            "tipo_perdida": tipo_perdida,
-            "observacion": observacion,
-        },
-    )
+    payload = {
+        "fecha": str(fecha_mov),
+        "producto": limpiar_texto(producto),
+        "cantidad": cantidad,
+        "costo_unitario": costo_unitario,
+        "valor": valor,
+        "tipo_perdida": tipo_perdida,
+        "observacion": observacion,
+        "estado": estado,
+    }
+    if hora is not None:
+        payload["hora"] = hora
+    if reportado_por is not None:
+        payload["reportado_por"] = reportado_por
+    else:
+        payload["reportado_por"] = nombre_usuario_actual()
+    if persona_involucrada is not None:
+        payload["persona_involucrada"] = persona_involucrada
+    return insertar("perdidas", payload)
 
 
 
@@ -5713,29 +5891,56 @@ menu_base = [
 if obtener_tenant_actual() == "global":
     menu_base.append("🏢 Gestión de Empresas")
 
-if es_admin() or tiene_permiso("puede_configurar"):
+if es_admin():
     menu_opciones = ["Dashboard", "Caja", "Dinero Real"] + [m for m in menu_base if m not in ["Dashboard", "Caja", "Dinero Real", "Cierre de Caja"]]
 else:
     menu_opciones = []
-    if es_cajera():
-        # BLOQUEO DE SEGURIDAD ESTRICTO PARA CAJERA
-        menu_opciones = ["Caja", "POS", "Clientes", "Créditos"]
-        st.markdown(
-            """
-            <style>
-                /* Ocultar elementos innecesarios del sidebar para la cajera */
-                [data-testid="stSidebarNav"] {display: none;}
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        if tiene_permiso("puede_vender"):
-            menu_opciones += ["Caja", "POS", "Ventas", "Créditos"]
-        if tiene_permiso("puede_ver_reportes"):
-            menu_opciones += ["Clientes", "Créditos", "Inventario Actual", "Historial de Inventario", "Conteo Inventario"]
-        if tiene_permiso("puede_editar_todo"):
-            menu_opciones += ["Pérdidas"]
+    # POS / Ventas / Caja
+    if puede_vender():
+        menu_opciones += ["Caja", "POS"]
+    if puede_ver_ventas_propias() or puede_ver_todas_ventas():
+        menu_opciones += ["Ventas"]
+    if puede_vender() or puede_ver_ventas_propias():
+        menu_opciones += ["Clientes", "Créditos"]
+    if puede_cerrar_caja():
+        menu_opciones += ["Cierre de Caja"]
+    # Productos
+    if puede_ver_productos():
+        menu_opciones += ["Productos"]
+    # Compras
+    if puede_ver_compras() or puede_registrar_compras():
+        menu_opciones += ["Compras", "Proveedores"]
+    # Gastos
+    if puede_ver_gastos() or puede_registrar_gastos():
+        menu_opciones += ["Gastos", "Catálogo de Gastos"]
+    # Inventario
+    if puede_ver_inventario():
+        menu_opciones += ["Inventario Actual", "Historial de Inventario"]
+    if puede_registrar_conteo():
+        menu_opciones += ["Conteo Inventario"]
+    if puede_aplicar_ajuste_inventario() or puede_editar_inventario():
+        menu_opciones += ["Ajustes Inventario"]
+    # Pérdidas
+    if puede_reportar_perdidas() or puede_ver_perdidas() or puede_aprobar_perdidas():
+        menu_opciones += ["Pérdidas"]
+    # Reportes / Dashboard / Contabilidad básica
+    if tiene_permiso("puede_ver_dashboard") or tiene_permiso("puede_ver_reportes"):
+        menu_opciones += ["Dashboard", "Informes", "Estado de Resultados"]
+    # Configuración / Usuarios / Empleados
+    if tiene_permiso("puede_configurar"):
+        menu_opciones += ["Configuración", "Usuarios", "Empleados", "Pagos Empleados", "Activos Fijos", "Capital Base"]
+
+    st.markdown(
+        """
+        <style>
+            /* Ocultar elementos innecesarios del sidebar para no-admins */
+            [data-testid="stSidebarNav"] {display: none;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    # Ordenar y filtrar usando menu_base para mantener la consistencia del orden visual
+    menu_opciones = [m for m in menu_base if m in menu_opciones]
     menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
 
 # Seguridad: Dinero Real solo para administrador
@@ -8421,178 +8626,291 @@ elif menu == "Pagos Empleados":
 # PÉRDIDAS
 # =========================================================
 elif menu == "Pérdidas":
-    st.title("📉 Pérdidas")
-    st.caption("Puedes guardar la pérdida sola o guardarla y descontarla del inventario. Si la guardaste sola, luego puedes aplicarla al inventario desde el historial.")
+    st.title("📉 Pérdidas de Mercancía")
+    st.caption("Módulo de reporte, revisión y descargo de pérdidas de mercancía en inventario.")
 
     productos_lista = DATA["productos"]["nombre"].astype(str).tolist() if not DATA["productos"].empty and "nombre" in DATA["productos"].columns else []
 
-    with st.expander("➕ Registrar pérdida de mercancía", expanded=True):
-        c1, c2 = st.columns(2)
+    tab_reportar, tab_historial = st.tabs(["📝 Reportar Pérdida", "🛡️ Aprobación & Historial"])
 
-        with c1:
-            fecha = st.date_input("Fecha", value=date.today(), key="perd_fecha")
-            producto = st.selectbox("Producto", productos_lista, key="perd_prod") if productos_lista else st.text_input("Producto", key="perd_prod_txt")
-            existencia_actual = obtener_existencia_desde_inventario(producto) if producto else 0.0
-            st.number_input(
-                "Existencia actual en inventario",
-                value=float(existencia_actual),
-                step=1.0,
-                disabled=True,
-                key=f"perd_existencia_actual_{normalizar_texto(producto)}"
-            )
-            cantidad = st.number_input("Cantidad perdida", min_value=0.0, step=1.0, key="perd_cant")
-
-        with c2:
-            costo_auto = obtener_costo_desde_inventario(producto) if producto else 0.0
-            costo_unitario = st.number_input(
-                "Costo unitario según inventario",
-                min_value=0.0,
-                step=1.0,
-                value=float(costo_auto),
-                key=f"perd_costo_auto_{normalizar_texto(producto)}"
-            )
-            if costo_auto <= 0:
-                st.warning("No encontré costo para este producto en Inventario Actual ni en Productos. Revisa que el costo esté guardado.")
-
-            tipo_perdida = st.selectbox("Tipo de pérdida", ["mercancia", "vencimiento", "rotura", "ajuste_mercancia", "otro"], key="perd_tipo")
-            valor_perdida = float(cantidad) * float(costo_unitario)
-            st.metric("Valor de la pérdida", f"RD$ {valor_perdida:,.2f}")
-            observacion = st.text_area("Observación", key="perd_obs")
-
-        nueva_existencia = max(float(existencia_actual) - float(cantidad), 0.0)
-        st.info(f"Si aplicas al inventario, la existencia bajará de {existencia_actual:,.0f} a {nueva_existencia:,.0f}.")
-
-        b1, b2 = st.columns(2)
-
-        with b1:
-            if st.button("💾 Guardar pérdida solamente", key="btn_guardar_perdida_sola"):
-                if not limpiar_texto(producto):
-                    st.error("Debes seleccionar un producto.")
-                elif cantidad <= 0:
-                    st.error("La cantidad perdida debe ser mayor que cero.")
-                elif costo_unitario <= 0:
-                    st.error("El costo unitario no puede ser cero. Revisa el costo en Inventario Actual o Productos.")
-                else:
-                    obs_final = (observacion or "") + " | Pendiente de descontar inventario"
-                    if registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, obs_final):
-                        st.success("Pérdida guardada. Queda pendiente de descontar inventario.")
-                        st.rerun()
-
-        with b2:
-            if st.button("📉 Guardar pérdida y descontar inventario", key="btn_guardar_perdida_descontar"):
-                if not limpiar_texto(producto):
-                    st.error("Debes seleccionar un producto.")
-                elif cantidad <= 0:
-                    st.error("La cantidad perdida debe ser mayor que cero.")
-                elif costo_unitario <= 0:
-                    st.error("El costo unitario no puede ser cero. Revisa el costo en Inventario Actual o Productos.")
-                elif cantidad > existencia_actual:
-                    st.error("La cantidad perdida no puede ser mayor que la existencia actual.")
-                else:
-                    obs_final = (observacion or "") + f" | Inventario descontado. Cantidad perdida: {cantidad}"
-                    ok_perdida = registrar_perdida(fecha, producto, cantidad, costo_unitario, tipo_perdida, obs_final)
-
-                    fila_prod = get_producto_por_nombre(producto)
-                    costo = float(costo_unitario)
-                    precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
-
-                    ok_stock = True
-                    ok_inv = True
-                    if fila_prod is not None:
-                        ok_stock = actualizar_stock_producto(producto, nueva_existencia, fecha)
-                        ok_inv = upsert_inventario_actual(
-                            producto,
-                            costo,
-                            precio,
-                            nueva_existencia,
-                            fecha,
-                            f"Descontado por pérdida de mercancía. Cantidad perdida: {cantidad}"
-                        )
-
-                    if ok_perdida and ok_stock and ok_inv:
-                        st.success("Pérdida guardada y descontada del inventario correctamente.")
-                        st.rerun()
-
-    df = DATA["perdidas"].copy()
-    if not df.empty:
-        d1, d2 = rango_fechas_ui("perdidas")
-        df = filtrar_por_fechas(df, d1, d2)
-        txt = st.text_input("Buscar pérdida", key="buscar_perd")
-        df = buscar_df(df, txt)
-        st.dataframe(df, use_container_width=True)
-        descargar_archivos(df, "perdidas")
-
-        st.subheader("📉 Descontar del inventario una pérdida ya guardada")
-        pendientes = df.copy()
-        if "observacion" in pendientes.columns:
-            obs_norm = pendientes["observacion"].astype(str).apply(normalizar_texto)
-            pendientes = pendientes[~obs_norm.str.contains("inventario descontado", na=False)]
-
-        if pendientes.empty:
-            st.info("No hay pérdidas pendientes de descontar en el inventario dentro del filtro seleccionado.")
+    with tab_reportar:
+        if not puede_reportar_perdidas():
+            st.warning("No tienes permiso para reportar pérdidas de mercancía.")
         else:
-            opciones = []
-            mapa_perdidas = {}
-            for _, r in pendientes.iterrows():
-                perdida_id = r.get("id") or r.get("identificación") or r.get("identificacion")
-                prod = r.get("producto", "")
-                cant = float(limpiar_numero(r.get("cantidad")) or 0)
-                costo = float(limpiar_numero(r.get("costo_unitario")) or limpiar_numero(r.get("costo")) or 0)
-                fecha_r = r.get("fecha", "")
-                etiqueta = f"{perdida_id} | {prod} | cant: {cant:,.0f} | costo: {costo:,.2f} | fecha: {fecha_r}"
-                opciones.append(etiqueta)
-                mapa_perdidas[etiqueta] = r
+            with st.form("form_reportar_perdida", clear_on_submit=True):
+                st.markdown("### ➕ Formulario de Reporte de Pérdida")
+                c1, c2 = st.columns(2)
+                with c1:
+                    fecha = st.date_input("Fecha de la pérdida", value=date.today(), key="rep_fecha")
+                    hora = st.text_input("Hora (HH:MM)", value=datetime.now().strftime("%H:%M"), key="rep_hora")
+                    producto = st.selectbox("Producto", productos_lista, key="rep_prod") if productos_lista else st.text_input("Producto", key="rep_prod_txt")
+                    existencia_actual = obtener_existencia_desde_inventario(producto) if producto else 0.0
+                    st.number_input(
+                        "Existencia actual en inventario (Informativo)",
+                        value=float(existencia_actual),
+                        step=1.0,
+                        disabled=True,
+                        key=f"rep_existencia_{normalizar_texto(producto)}"
+                    )
+                with c2:
+                    cantidad = st.number_input("Cantidad perdida", min_value=0.0, step=1.0, key="rep_cant")
+                    costo_auto = obtener_costo_desde_inventario(producto) if producto else 0.0
+                    costo_unitario = st.number_input(
+                        "Costo unitario",
+                        min_value=0.0,
+                        step=0.01,
+                        value=float(costo_auto),
+                        key=f"rep_costo_{normalizar_texto(producto)}"
+                    )
+                    tipo_perdida = st.selectbox("Tipo de pérdida", ["mercancia", "vencimiento", "rotura", "ajuste_mercancia", "otro"], key="rep_tipo")
+                    persona_involucrada = st.text_input("Persona involucrada (Cajera / Empleado)", key="rep_persona")
 
-            sel_perdida = st.selectbox("Selecciona pérdida pendiente", opciones, key="perdida_pendiente_descuento")
-            fila_p = mapa_perdidas[sel_perdida]
+                observacion = st.text_area("Observación / Justificación detallada", key="rep_obs")
 
-            perdida_id = fila_p.get("id") or fila_p.get("identificación") or fila_p.get("identificacion")
-            producto_p = limpiar_texto(fila_p.get("producto"))
-            cantidad_p = float(limpiar_numero(fila_p.get("cantidad")) or 0)
-            costo_p = float(limpiar_numero(fila_p.get("costo_unitario")) or limpiar_numero(fila_p.get("costo")) or obtener_costo_desde_inventario(producto_p) or 0)
-            existencia_p = obtener_existencia_desde_inventario(producto_p)
-            nueva_existencia_p = max(float(existencia_p) - float(cantidad_p), 0.0)
-
-            cpa, cpb, cpc = st.columns(3)
-            cpa.metric("Existencia actual", f"{existencia_p:,.0f}")
-            cpb.metric("Cantidad a descontar", f"{cantidad_p:,.0f}")
-            cpc.metric("Nueva existencia", f"{nueva_existencia_p:,.0f}")
-
-            if st.button("📉 Aplicar descuento al inventario", key="btn_aplicar_descuento_perdida_pendiente"):
-                if cantidad_p <= 0:
-                    st.error("La pérdida seleccionada no tiene cantidad válida.")
-                elif cantidad_p > existencia_p:
-                    st.error("La cantidad perdida no puede ser mayor que la existencia actual.")
-                else:
-                    fila_prod = get_producto_por_nombre(producto_p)
-                    precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
-
-                    ok_stock = True
-                    ok_inv = True
-                    if fila_prod is not None:
-                        ok_stock = actualizar_stock_producto(producto_p, nueva_existencia_p, date.today())
-                        ok_inv = upsert_inventario_actual(
-                            producto_p,
-                            costo_p,
-                            precio,
-                            nueva_existencia_p,
-                            date.today(),
-                            f"Descontado desde pérdida ya guardada. Pérdida ID: {perdida_id}"
+                if st.form_submit_button("📋 Reportar pérdida", use_container_width=True):
+                    if not limpiar_texto(producto):
+                        st.error("Debes seleccionar un producto.")
+                    elif cantidad <= 0:
+                        st.error("La cantidad perdida debe ser mayor que cero.")
+                    elif costo_unitario <= 0:
+                        st.error("El costo unitario no puede ser cero.")
+                    else:
+                        ok = registrar_perdida(
+                            fecha_mov=fecha,
+                            producto=producto,
+                            cantidad=cantidad,
+                            costo_unitario=costo_unitario,
+                            tipo_perdida=tipo_perdida,
+                            observacion=observacion,
+                            estado="pendiente",
+                            hora=hora,
+                            reportado_por=nombre_usuario_actual(),
+                            persona_involucrada=persona_involucrada
                         )
+                        if ok:
+                            st.success("Pérdida reportada correctamente. Queda en estado 'pendiente' para revisión de administración.")
+                            st.rerun()
 
-                    ok_update = True
-                    if perdida_id:
-                        obs_anterior = limpiar_texto(fila_p.get("observacion"))
-                        obs_nueva = (obs_anterior + " | " if obs_anterior else "") + "Inventario descontado"
-                        ok_update = actualizar("perdidas", perdida_id, {"observacion": obs_nueva})
+    with tab_historial:
+        df = DATA["perdidas"].copy()
 
-                    if ok_stock and ok_inv and ok_update:
-                        st.success("Pérdida aplicada al inventario correctamente.")
-                        st.rerun()
+        # --- PANEL DE APROBACIÓN PARA ADMINS ---
+        if puede_aprobar_perdidas() or puede_debitar_perdidas():
+            st.markdown("### 🛡️ Panel de Revisión de Pérdidas Pendientes")
 
-        render_crud_generico("perdidas", df, "🛠️ Editar / eliminar pérdidas")
-    else:
-        st.info("No hay pérdidas registradas.")
+            if not df.empty and "estado" in df.columns:
+                df_pendientes = df[df["estado"].isin(["pendiente", "en_investigacion"])].copy()
+            else:
+                df_pendientes = pd.DataFrame()
+
+            if df_pendientes.empty:
+                st.info("No hay pérdidas pendientes de revisión. ¡Buen trabajo!")
+            else:
+                opciones_rev = []
+                mapa_rev = {}
+                for _, r in df_pendientes.iterrows():
+                    p_id = r.get("id") or r.get("identificación") or r.get("identificacion")
+                    prod = r.get("producto", "")
+                    cant = float(limpiar_numero(r.get("cantidad")) or 0)
+                    fecha_r = r.get("fecha", "")
+                    estado_r = r.get("estado", "pendiente")
+                    lbl = f"ID: {p_id} | {prod} | Cant: {cant:,.0f} | Fecha: {fecha_r} | [{estado_r.upper()}]"
+                    opciones_rev.append(lbl)
+                    mapa_rev[lbl] = r
+
+                sel_rev = st.selectbox("Selecciona pérdida para revisar", opciones_rev, key="rev_sel_perdida")
+                fila_rev = mapa_rev[sel_rev]
+
+                rev_id = fila_rev.get("id") or fila_rev.get("identificación") or fila_rev.get("identificacion")
+                rev_producto = limpiar_texto(fila_rev.get("producto"))
+                rev_cantidad = float(limpiar_numero(fila_rev.get("cantidad")) or 0)
+                rev_costo = float(limpiar_numero(fila_rev.get("costo_unitario")) or 0)
+                rev_valor = float(limpiar_numero(fila_rev.get("valor")) or (rev_cantidad * rev_costo))
+                rev_estado = fila_rev.get("estado", "pendiente")
+                rev_fecha = fila_rev.get("fecha", "")
+                rev_hora = fila_rev.get("hora", "") or "No especificada"
+                rev_reportado = fila_rev.get("reportado_por", "") or "No especificado"
+                rev_involucrado = fila_rev.get("persona_involucrada", "") or "No especificada"
+                rev_obs = fila_rev.get("observacion", "") or ""
+
+                with st.container(border=True):
+                    col_d1, col_d2 = st.columns(2)
+                    with col_d1:
+                        st.markdown(f"**📦 Producto:** {rev_producto}")
+                        st.markdown(f"**🔢 Cantidad:** {rev_cantidad:,.0f} uds.")
+                        st.markdown(f"**💵 Valor:** RD$ {rev_valor:,.2f}")
+                        st.markdown(f"**📅 Fecha y Hora:** {rev_fecha} a las {rev_hora}")
+                    with col_d2:
+                        st.markdown(f"**👤 Reportado por:** {rev_reportado}")
+                        st.markdown(f"**👥 Persona Involucrada:** {rev_involucrado}")
+                        st.markdown(f"**📝 Observación Empleado:** {rev_obs}")
+                        st.markdown(f"**🔄 Estado Actual:** `{rev_estado.upper()}`")
+
+                obs_admin = st.text_area("Observación / Nota del Administrador", key=f"rev_obs_admin_{rev_id}")
+
+                col_b1, col_b2, col_b3 = st.columns(3)
+                with col_b1:
+                    if st.button("🔍 Poner en investigación", key=f"btn_investigar_{rev_id}", use_container_width=True):
+                        ok_up = actualizar("perdidas", rev_id, {
+                            "estado": "en_investigacion",
+                            "observacion_admin": obs_admin,
+                            "revisado_por": nombre_usuario_actual(),
+                            "fecha_revision": str(date.today()),
+                            "decision_admin": "Puesta en investigación"
+                        })
+                        if ok_up:
+                            st.success("La pérdida ha sido marcada 'En investigación'.")
+                            st.rerun()
+
+                with col_b2:
+                    if st.button("❌ Rechazar pérdida", key=f"btn_rechazar_{rev_id}", use_container_width=True):
+                        ok_up = actualizar("perdidas", rev_id, {
+                            "estado": "rechazada",
+                            "observacion_admin": obs_admin,
+                            "revisado_por": nombre_usuario_actual(),
+                            "fecha_revision": str(date.today()),
+                            "decision_admin": "Rechazada"
+                        })
+                        if ok_up:
+                            st.success("La pérdida ha sido rechazada.")
+                            st.rerun()
+
+                with col_b3:
+                    if puede_debitar_perdidas():
+                        if st.button("✅ Aprobar y descontar stock", key=f"btn_aprobar_debitar_{rev_id}", use_container_width=True):
+                            existencia = obtener_existencia_desde_inventario(rev_producto)
+                            if rev_cantidad > existencia:
+                                st.error(f"Error: La existencia actual del producto ({existencia:,.0f}) es insuficiente para descontar {rev_cantidad:,.0f} uds.")
+                            else:
+                                nueva_existencia = max(existencia - rev_cantidad, 0.0)
+                                fila_prod = get_producto_por_nombre(rev_producto)
+                                precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
+                                ok_stock = True
+                                ok_inv = True
+                                if fila_prod is not None:
+                                    ok_stock = actualizar_stock_producto(rev_producto, nueva_existencia, date.today())
+                                    ok_inv = upsert_inventario_actual(
+                                        rev_producto,
+                                        rev_costo,
+                                        precio,
+                                        nueva_existencia,
+                                        date.today(),
+                                        f"Descontado por aprobación de pérdida ID: {rev_id}"
+                                    )
+                                ok_up = actualizar("perdidas", rev_id, {
+                                    "estado": "debitada",
+                                    "observacion_admin": obs_admin,
+                                    "revisado_por": nombre_usuario_actual(),
+                                    "fecha_revision": str(date.today()),
+                                    "decision_admin": "Aprobada y debitada del inventario"
+                                })
+                                if ok_stock and ok_inv and ok_up:
+                                    st.success("Pérdida aprobada y descontada del inventario correctamente.")
+                                    st.rerun()
+                    else:
+                        if st.button("✅ Aprobar pérdida", key=f"btn_aprobar_{rev_id}", use_container_width=True):
+                            ok_up = actualizar("perdidas", rev_id, {
+                                "estado": "aprobada",
+                                "observacion_admin": obs_admin,
+                                "revisado_por": nombre_usuario_actual(),
+                                "fecha_revision": str(date.today()),
+                                "decision_admin": "Aprobada (pendiente de debitar)"
+                            })
+                            if ok_up:
+                                st.success("Pérdida aprobada. Queda pendiente de debitar stock por un usuario con ese permiso.")
+                                st.rerun()
+
+            st.markdown("---")
+
+        # --- SECCIÓN APLICAR DESCUENTO A PÉRDIDAS PENDIENTES/APROBADAS ---
+        if puede_debitar_perdidas():
+            st.markdown("### 📉 Descontar del inventario una pérdida ya guardada/aprobada")
+            if not df.empty and "estado" in df.columns:
+                df_debitables = df[df["estado"].isin(["pendiente", "aprobada"])].copy()
+            else:
+                df_debitables = pd.DataFrame()
+
+            if df_debitables.empty:
+                st.info("No hay pérdidas pendientes de descontar stock en el inventario.")
+            else:
+                opciones_deb = []
+                mapa_deb = {}
+                for _, r in df_debitables.iterrows():
+                    p_id = r.get("id") or r.get("identificación") or r.get("identificacion")
+                    prod = r.get("producto", "")
+                    cant = float(limpiar_numero(r.get("cantidad")) or 0)
+                    costo = float(limpiar_numero(r.get("costo_unitario")) or 0)
+                    fecha_r = r.get("fecha", "")
+                    lbl = f"ID: {p_id} | {prod} | Cant: {cant:,.0f} | Costo: {costo:,.2f} | Fecha: {fecha_r}"
+                    opciones_deb.append(lbl)
+                    mapa_deb[lbl] = r
+
+                sel_deb = st.selectbox("Selecciona pérdida para descontar stock", opciones_deb, key="deb_sel_perdida")
+                fila_deb = mapa_deb[sel_deb]
+
+                deb_id = fila_deb.get("id") or fila_deb.get("identificación") or fila_deb.get("identificacion")
+                deb_producto = limpiar_texto(fila_deb.get("producto"))
+                deb_cantidad = float(limpiar_numero(fila_deb.get("cantidad")) or 0)
+                deb_costo = float(limpiar_numero(fila_deb.get("costo_unitario")) or obtener_costo_desde_inventario(deb_producto) or 0)
+                deb_existencia = obtener_existencia_desde_inventario(deb_producto)
+                deb_nueva_existencia = max(deb_existencia - deb_cantidad, 0.0)
+
+                cpa, cpb, cpc = st.columns(3)
+                cpa.metric("Existencia actual", f"{deb_existencia:,.0f}")
+                cpb.metric("Cantidad a descontar", f"{deb_cantidad:,.0f}")
+                cpc.metric("Nueva existencia", f"{deb_nueva_existencia:,.0f}")
+
+                if st.button("📉 Aplicar descuento al inventario", key=f"btn_debitar_directo_{deb_id}"):
+                    if deb_cantidad <= 0:
+                        st.error("La pérdida seleccionada no tiene cantidad válida.")
+                    elif deb_cantidad > deb_existencia:
+                        st.error("La cantidad perdida no puede ser mayor que la existencia actual.")
+                    else:
+                        fila_prod = get_producto_por_nombre(deb_producto)
+                        precio = float(limpiar_numero(fila_prod.get("precio")) or 0) if fila_prod is not None else 0.0
+                        ok_stock = True
+                        ok_inv = True
+                        if fila_prod is not None:
+                            ok_stock = actualizar_stock_producto(deb_producto, deb_nueva_existencia, date.today())
+                            ok_inv = upsert_inventario_actual(
+                                deb_producto,
+                                deb_costo,
+                                precio,
+                                deb_nueva_existencia,
+                                date.today(),
+                                f"Descontado desde historial de pérdidas. ID: {deb_id}"
+                            )
+                        obs_ant = limpiar_texto(fila_deb.get("observacion"))
+                        obs_n = (obs_ant + " | " if obs_ant else "") + "Inventario descontado por administración"
+                        ok_up = actualizar("perdidas", deb_id, {
+                            "estado": "debitada",
+                            "observacion": obs_n,
+                            "revisado_por": nombre_usuario_actual(),
+                            "fecha_revision": str(date.today()),
+                            "decision_admin": "Descontada de inventario"
+                        })
+                        if ok_stock and ok_inv and ok_up:
+                            st.success("Pérdida aplicada al inventario correctamente.")
+                            st.rerun()
+            st.markdown("---")
+
+        # --- LISTADO HISTÓRICO GENERAL DE PÉRDIDAS ---
+        if puede_ver_perdidas():
+            st.markdown("### 📊 Historial General de Pérdidas")
+            if not df.empty:
+                d1, d2 = rango_fechas_ui("perdidas")
+                df_filtered = filtrar_por_fechas(df, d1, d2)
+                txt = st.text_input("Buscar pérdida en historial", key="buscar_perd_hist")
+                df_filtered = buscar_df(df_filtered, txt)
+                cols_perd = ["id", "fecha", "hora", "producto", "cantidad", "costo_unitario", "valor", "estado", "reportado_por", "persona_involucrada", "decision_admin", "observacion"]
+                cols_vis = [c for c in cols_perd if c in df_filtered.columns]
+                st.dataframe(df_filtered[cols_vis], use_container_width=True)
+                descargar_archivos(df_filtered, "perdidas")
+                render_crud_generico("perdidas", df_filtered, "🛠️ Editar / eliminar registros de pérdidas")
+            else:
+                st.info("No hay pérdidas registradas en el sistema.")
+        else:
+            st.warning("No tienes permiso para ver el historial de pérdidas.")
 
 
 
@@ -14123,17 +14441,19 @@ elif menu == "Usuarios":
                 n_usuario = st.text_input("Usuario de Acceso", key="new_usr_usuario")
                 n_clave = st.text_input("Contraseña / Clave", key="new_usr_clave")
                 n_rol = st.selectbox("Rol", ["admin", "gerente", "cajera"], key="new_usr_rol")
-            with c2:
                 n_activo = st.checkbox("Usuario Activo", value=True, key="new_usr_activo")
-                n_pv = st.checkbox("Puede vender (POS)", value=True, key="new_usr_pv")
-                n_pev = st.checkbox("Puede editar ventas/facturas", key="new_usr_pev")
-                n_pel = st.checkbox("Puede eliminar registros", key="new_usr_pel")
-                n_pan = st.checkbox("Puede anular ventas/facturas", key="new_usr_pan")
-                n_pvr = st.checkbox("Puede ver reportes/dashboard", key="new_usr_pvr")
-                n_prc = st.checkbox("Puede registrar compras", key="new_usr_prc")
-                n_prg = st.checkbox("Puede registrar gastos", key="new_usr_prg")
-                n_pcf = st.checkbox("Puede modificar configuración", key="new_usr_pcf")
-                
+            with c2:
+                st.markdown("**Permisos Granulares:**")
+                st.caption("Selecciona los módulos y acciones a los que tendrá acceso este usuario.")
+
+            st.markdown("---")
+            permisos_crear = render_checkboxes_permisos("new_usr", defaults_dict={
+                "puede_vender": True,
+                "puede_abrir_caja": True,
+                "puede_cerrar_caja": True,
+                "puede_ver_ventas_propias": True,
+            })
+
             if st.button("🚀 Crear Usuario", key="btn_crear_usuario_new", use_container_width=True):
                 user_clean = n_usuario.strip().lower()
                 name_clean = n_nombre.strip()
@@ -14153,14 +14473,7 @@ elif menu == "Usuarios":
                             "rol": n_rol,
                             "activo": n_activo,
                             "email": "" if _tenant == "global" else _tenant,
-                            "puede_vender": n_pv,
-                            "puede_editar_ventas": n_pev,
-                            "puede_eliminar": n_pel,
-                            "puede_anular": n_pan,
-                            "puede_ver_reportes": n_pvr,
-                            "puede_registrar_compras": n_prc,
-                            "puede_registrar_gastos": n_prg,
-                            "puede_configurar": n_pcf
+                            **permisos_crear,
                         }
                         try:
                             supabase.table("usuarios").insert(new_user_payload).execute()
@@ -14173,7 +14486,7 @@ elif menu == "Usuarios":
                                 st.error(f"⚠️ El nombre de usuario '{user_clean}' ya está registrado. Por favor, elige uno diferente.")
                             else:
                                 st.error(f"Error al crear cuenta: {exc}")
-                                
+
         with tab_edit:
             if df.empty:
                 st.info("No hay usuarios registrados para gestionar.")
@@ -14184,10 +14497,10 @@ elif menu == "Usuarios":
                     lbl = f"{u_row['usuario']} ({u_row['nombre']})"
                     user_options.append(lbl)
                     user_map[lbl] = u_row
-                
+
                 selected_lbl = st.selectbox("Selecciona el usuario a gestionar:", user_options, key="select_user_to_edit")
                 usr_sel = user_map[selected_lbl]
-                
+
                 c1e, c2e = st.columns(2)
                 with c1e:
                     edit_username = st.text_input("Usuario de Acceso", value=usr_sel["usuario"], key="edit_usr_user")
@@ -14196,15 +14509,11 @@ elif menu == "Usuarios":
                     edit_rol = st.selectbox("Rol", ["admin", "gerente", "cajera"], index=["admin", "gerente", "cajera"].index(usr_sel["rol"]) if usr_sel["rol"] in ["admin", "gerente", "cajera"] else 0, key="edit_usr_rol")
                 with c2e:
                     edit_activo = st.checkbox("Usuario Activo", value=bool(usr_sel["activo"]), key="edit_usr_activo")
-                    edit_pv = st.checkbox("Puede vender (POS)", value=bool(usr_sel.get("puede_vender", True)), key="edit_usr_pv")
-                    edit_pev = st.checkbox("Puede editar ventas/facturas", value=bool(usr_sel.get("puede_editar_ventas", False)), key="edit_usr_pev")
-                    edit_pel = st.checkbox("Puede eliminar registros", value=bool(usr_sel.get("puede_eliminar", False)), key="edit_usr_pel")
-                    edit_pan = st.checkbox("Puede anular ventas/facturas", value=bool(usr_sel.get("puede_anular", False)), key="edit_usr_pan")
-                    edit_pvr = st.checkbox("Puede ver reportes/dashboard", value=bool(usr_sel.get("puede_ver_reportes", False)), key="edit_usr_pvr")
-                    edit_prc = st.checkbox("Puede registrar compras", value=bool(usr_sel.get("puede_registrar_compras", False)), key="edit_usr_prc")
-                    edit_prg = st.checkbox("Puede registrar gastos", value=bool(usr_sel.get("puede_registrar_gastos", False)), key="edit_usr_prg")
-                    edit_pcf = st.checkbox("Puede modificar configuración", value=bool(usr_sel.get("puede_configurar", False)), key="edit_usr_pcf")
-                
+
+                st.markdown("---")
+                st.markdown("**Permisos Granulares:**")
+                permisos_editar = render_checkboxes_permisos("edit_usr", defaults_dict=dict(usr_sel))
+
                 c_btn1, c_btn2 = st.columns(2)
                 with c_btn1:
                     if st.button("💾 Guardar Cambios de Usuario", key="btn_save_user_changes", use_container_width=True):
@@ -14215,21 +14524,14 @@ elif menu == "Usuarios":
                                 if user_exist:
                                     st.error(f"⚠️ El nombre de usuario '{new_username}' ya está registrado. Por favor, elige uno diferente.")
                                     st.stop()
-                            
+
                             payload = {
                                 "usuario": new_username,
                                 "nombre": edit_name.strip(),
                                 "clave": edit_pass.strip(),
                                 "rol": edit_rol,
                                 "activo": edit_activo,
-                                "puede_vender": edit_pv,
-                                "puede_editar_ventas": edit_pev,
-                                "puede_eliminar": edit_pel,
-                                "puede_anular": edit_pan,
-                                "puede_ver_reportes": edit_pvr,
-                                "puede_registrar_compras": edit_prc,
-                                "puede_registrar_gastos": edit_prg,
-                                "puede_configurar": edit_pcf
+                                **permisos_editar,
                             }
                             supabase.table("usuarios").update(payload).eq("id", usr_sel["id"]).execute()
                             invalidar_cache_tabla("usuarios")
