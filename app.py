@@ -487,7 +487,7 @@ def obtener_sugerencia_imagen_wiki(query) -> list:
         return []
 
 
-def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None = None, excluir: list[str] | None = None):
+def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None = None, excluir: list[str] | None = None, expanded: bool = False):
     if not puede_editar_global():
         return
     if df is None or df.empty:
@@ -498,7 +498,7 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
     if "identificación" in df.columns:
         excluir.add("identificación")
     titulo = titulo or f"🛠️ Editar / eliminar en {nombre_tabla}"
-    with st.expander(titulo, expanded=False):
+    with st.expander(titulo, expanded=expanded):
         df_local = df.copy()
         if "Código" not in df_local.columns:
             df_local = agregar_columna_codigo_secuencial(df_local, nombre_tabla)
@@ -628,11 +628,57 @@ def render_crud_generico(nombre_tabla: str, df: pd.DataFrame, titulo: str | None
                     if not valido:
                         st.error(msg_err)
                         st.stop()
+                if nombre_tabla == "compras":
+                    p_id = fila.get("producto_id")
+                    cant_antigua = float(fila.get("cantidad") or 0.0)
+                    cant_nueva = float(nuevos_datos.get("cantidad") or 0.0)
+                    dif_cant = cant_nueva - cant_antigua
+                    
+                    if dif_cant != 0:
+                        fila_prod = refrescar_producto_por_id(p_id) if p_id else get_producto_por_nombre(fila.get("producto"))
+                        if fila_prod is not None:
+                            stock_real = obtener_existencia_producto(fila_prod)
+                            nuevo_stock = max(stock_real + dif_cant, 0.0)
+                            actualizar_stock_producto(fila_prod["nombre"], nuevo_stock)
+                            
+                            registrar_movimiento_inventario(
+                                fila_prod["id"],
+                                fila_prod["nombre"],
+                                "ajuste_compra",
+                                "compras",
+                                fila_id,
+                                dif_cant,
+                                float(nuevos_datos.get("costo_unitario") or 0.0),
+                                f"Ajuste por edición de compra. Diferencia: {dif_cant:+.2f} uds."
+                            )
+                            costo_nuevo = float(nuevos_datos.get("costo_unitario") or 0.0)
+                            if costo_nuevo > 0:
+                                actualizar("productos", fila_prod["id"], {"costo": costo_nuevo})
+                
                 if actualizar(nombre_tabla, fila_id, nuevos_datos):
                     st.success("Registro actualizado.")
                     st.rerun()
         with c2:
             if st.button("🗑️ Eliminar registro", key=f"crud_delete_{nombre_tabla}_{fila_id}"):
+                if nombre_tabla == "compras":
+                    p_id = fila.get("producto_id")
+                    cant_comprada = float(fila.get("cantidad") or 0.0)
+                    fila_prod = refrescar_producto_por_id(p_id) if p_id else get_producto_por_nombre(fila.get("producto"))
+                    if fila_prod is not None:
+                        stock_real = obtener_existencia_producto(fila_prod)
+                        nuevo_stock = max(stock_real - cant_comprada, 0.0)
+                        actualizar_stock_producto(fila_prod["nombre"], nuevo_stock)
+                        
+                        registrar_movimiento_inventario(
+                            fila_prod["id"],
+                            fila_prod["nombre"],
+                            "reversa_compra",
+                            "compras",
+                            fila_id,
+                            -cant_comprada,
+                            float(fila.get("costo_unitario") or 0.0),
+                            f"Reversa por eliminación de compra de {cant_comprada} uds."
+                        )
                 if eliminar(nombre_tabla, fila_id):
                     st.success("Registro eliminado.")
                     st.rerun()
@@ -3323,95 +3369,22 @@ def anular_venta_completa_app(venta_id: Any, motivo: str = "") -> bool:
 
 def obtener_costo_desde_inventario(producto: str) -> float:
     """
-    Para pérdidas, toma el costo en vivo desde Supabase.
-    Prioridad:
-    1) inventario_actual: costo / costo_unitario / costo_promedio / precio_compra
-    2) productos: costo / costo_unitario / costo_promedio / precio_compra
+    Toma el costo en vivo directamente desde la tabla productos.
     """
-    producto_n = normalizar_texto(producto)
-    if not producto_n:
-        return 0.0
-
-    # 1) Buscar en inventario_actual en vivo
-    try:
-        resp = supabase.table("inventario_actual").select("*").execute()
-        invent = pd.DataFrame(resp.data or [])
-    except Exception:
-        invent = DATA.get("inventario_actual", pd.DataFrame()).copy()
-
-    if not invent.empty and "producto" in invent.columns:
-        tmp = invent.copy()
-        tmp["_n"] = tmp["producto"].astype(str).apply(normalizar_texto)
-        match = tmp[tmp["_n"] == producto_n]
-        if not match.empty:
-            if "fecha" in match.columns:
-                match = match.copy()
-                match["fecha"] = pd.to_datetime(match["fecha"], errors="coerce")
-                match = match.sort_values("fecha", ascending=False)
-            fila_inv = match.iloc[0]
-            for campo in ["costo", "costo_unitario", "costo_promedio", "precio_compra", "ultimo_costo"]:
-                if campo in fila_inv.index:
-                    costo = limpiar_numero(fila_inv.get(campo))
-                    if costo is not None and costo > 0:
-                        return float(costo)
-
-    # 2) Buscar en productos en vivo
-    try:
-        resp = supabase.table("productos").select("*").execute()
-        productos = pd.DataFrame(resp.data or [])
-    except Exception:
-        productos = DATA.get("productos", pd.DataFrame()).copy()
-
-    if not productos.empty and "nombre" in productos.columns:
-        tmp = productos.copy()
-        tmp["_n"] = tmp["nombre"].astype(str).apply(normalizar_texto)
-        match = tmp[tmp["_n"] == producto_n]
-        if not match.empty:
-            fila_prod = match.iloc[0]
-            for campo in ["costo", "costo_unitario", "costo_promedio", "precio_compra", "ultimo_costo"]:
-                if campo in fila_prod.index:
-                    costo = limpiar_numero(fila_prod.get(campo))
-                    if costo is not None and costo > 0:
-                        return float(costo)
-
+    prod = get_producto_por_nombre(producto)
+    if prod is not None:
+        costo = limpiar_numero(prod.get("costo")) or limpiar_numero(prod.get("costo_unitario")) or 0.0
+        return float(costo)
     return 0.0
 
 
 def obtener_existencia_desde_inventario(producto: str) -> float:
     """
-    Toma la existencia en vivo desde inventario_actual.
-    Si no aparece, usa productos como respaldo.
+    Toma la existencia en vivo directamente desde la tabla productos.
     """
-    producto_n = normalizar_texto(producto)
-    if not producto_n:
-        return 0.0
-
-    try:
-        resp = supabase.table("inventario_actual").select("*").execute()
-        invent = pd.DataFrame(resp.data or [])
-    except Exception:
-        invent = DATA.get("inventario_actual", pd.DataFrame()).copy()
-
-    if not invent.empty and "producto" in invent.columns:
-        tmp = invent.copy()
-        tmp["_n"] = tmp["producto"].astype(str).apply(normalizar_texto)
-        match = tmp[tmp["_n"] == producto_n]
-        if not match.empty:
-            if "fecha" in match.columns:
-                match = match.copy()
-                match["fecha"] = pd.to_datetime(match["fecha"], errors="coerce")
-                match = match.sort_values("fecha", ascending=False)
-            fila_inv = match.iloc[0]
-            for campo in ["existencia_sistema", "cantidad", "stock", "existencias"]:
-                if campo in fila_inv.index:
-                    existencia = limpiar_numero(fila_inv.get(campo))
-                    if existencia is not None:
-                        return float(existencia)
-
     prod = get_producto_por_nombre(producto)
     if prod is not None:
         return float(obtener_existencia_producto(prod))
-
     return 0.0
 
 def registrar_perdida(fecha_mov, producto, cantidad, costo_unitario, tipo_perdida, observacion="") -> bool:
@@ -5761,6 +5734,8 @@ else:
             menu_opciones += ["Caja", "POS", "Ventas", "Créditos"]
         if tiene_permiso("puede_ver_reportes"):
             menu_opciones += ["Clientes", "Créditos", "Inventario Actual", "Historial de Inventario", "Conteo Inventario"]
+        if tiene_permiso("puede_editar_todo"):
+            menu_opciones += ["Pérdidas"]
     menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
 
 # Seguridad: Dinero Real solo para administrador
@@ -7932,20 +7907,165 @@ elif menu == "Compras":
                             DATA.update(cargar_datos())
                             st.rerun()
 
-        # Historial de compras del período
+        # =====================================================
+        # HISTORIAL DE COMPRAS — EDITOR AVANZADO
+        # =====================================================
         st.markdown("---")
         st.subheader("📋 Historial de Compras del Período")
-        df = DATA["compras"].copy()
-        if not df.empty:
+        df_hist_c = DATA["compras"].copy()
+
+        if not df_hist_c.empty:
             d1, d2 = rango_fechas_ui("compras")
-            df = filtrar_por_fechas(df, d1, d2)
-            txt = st.text_input("Buscar compra", key="buscar_compras")
-            df = buscar_df(df, txt)
-            st.dataframe(df, use_container_width=True)
-            descargar_archivos(df, "compras")
-            render_crud_generico("compras", df, "🛠️ Editar / eliminar compras")
+            df_hist_c = filtrar_por_fechas(df_hist_c, d1, d2)
+
+            # --- Buscador ---
+            busq_c = st.text_input("🔍 Buscar proveedor, factura o producto", key="buscar_compras_hist")
+            if busq_c:
+                df_hist_c = buscar_df(df_hist_c, busq_c)
+
+            if df_hist_c.empty:
+                st.info("No hay compras en ese período / búsqueda.")
+            else:
+                # Añadir Código secuencial para visualización
+                df_hist_c = agregar_columna_codigo_secuencial(df_hist_c, "compras")
+
+                # Columnas visibles en la tabla resumen
+                cols_vis = [c for c in ["Código", "fecha", "numero", "proveedor", "producto", "cantidad", "costo_unitario", "total", "metodo", "descripcion"]
+                            if c in df_hist_c.columns]
+                st.dataframe(df_hist_c[cols_vis], use_container_width=True)
+                descargar_archivos(df_hist_c, "compras")
+
+                if puede_editar_global():
+                    st.markdown("---")
+                    st.markdown("#### ✏️ Editar Compra Seleccionada")
+
+                    # Selector de compra a editar
+                    opciones_c = []
+                    mapa_c = {}
+                    for _, r in df_hist_c.iterrows():
+                        cod = r.get("Código") or r.get("id") or ""
+                        prov = limpiar_texto(r.get("proveedor") or "")
+                        num = limpiar_texto(r.get("numero") or "")
+                        prod = limpiar_texto(r.get("producto") or "")
+                        fecha_r = str(r.get("fecha") or "")[:10]
+                        etiq = f"{cod} | {fecha_r} | {prov} | {num} | {prod}"
+                        opciones_c.append(etiq)
+                        mapa_c[etiq] = r
+                    etiq_sel = st.selectbox("Selecciona la compra a editar", opciones_c, key="edit_compra_sel")
+                    fila_c = mapa_c[etiq_sel]
+                    fila_c_id = valor_simple(fila_c.get("id") or fila_c.get("identificación"))
+
+                    with st.container(border=True):
+                        st.markdown("##### 📅 Datos Generales de la Compra")
+                        ec1, ec2, ec3 = st.columns(3)
+
+                        with ec1:
+                            fecha_actual_c = pd.to_datetime(fila_c.get("fecha"), errors="coerce")
+                            fecha_edit_c = st.date_input(
+                                "📅 Fecha de la compra",
+                                value=fecha_actual_c.date() if not pd.isna(fecha_actual_c) else date.today(),
+                                key=f"edit_c_fecha_{fila_c_id}"
+                            )
+                            num_fact_edit = st.text_input("No. Factura (no editable)", value=limpiar_texto(fila_c.get("numero") or ""), key=f"edit_c_num_{fila_c_id}", disabled=True, help="El número de factura es un identificador único y no puede modificarse.")
+
+                        with ec2:
+                            prov_list_e = [""] + (proveedores_df["nombre"].astype(str).tolist() if not proveedores_df.empty and "nombre" in proveedores_df.columns else [])
+                            prov_actual = limpiar_texto(fila_c.get("proveedor") or "")
+                            prov_idx = prov_list_e.index(prov_actual) if prov_actual in prov_list_e else 0
+                            prov_edit_c = st.selectbox("Proveedor", prov_list_e, index=prov_idx, key=f"edit_c_prov_{fila_c_id}")
+                            metodo_edit_c = st.selectbox(
+                                "Método de pago",
+                                ["Efectivo", "Transferencia", "Tarjeta", "Crédito"],
+                                index=["efectivo", "transferencia", "tarjeta", "credito"].index(
+                                    normalizar_texto(limpiar_texto(fila_c.get("metodo") or "efectivo"))
+                                ) if normalizar_texto(limpiar_texto(fila_c.get("metodo") or "efectivo")) in ["efectivo", "transferencia", "tarjeta", "credito"] else 0,
+                                key=f"edit_c_metodo_{fila_c_id}"
+                            )
+
+                        with ec3:
+                            desc_edit_c = st.text_area("Descripción / Observación", value=limpiar_texto(fila_c.get("descripcion") or ""), height=100, key=f"edit_c_desc_{fila_c_id}")
+
+                        st.markdown("---")
+                        st.markdown("##### 📦 Detalles del Producto en Esta Línea")
+
+                        ep1, ep2 = st.columns(2)
+                        cant_actual_c = float(limpiar_numero(fila_c.get("cantidad")) or 0.0)
+                        costo_u_actual_c = float(limpiar_numero(fila_c.get("costo_unitario")) or 0.0)
+
+                        with ep1:
+                            # Campos directos
+                            cant_edit_c = st.number_input("Cantidad total (unidades)", min_value=0.0, value=cant_actual_c, step=1.0, key=f"edit_c_cant_{fila_c_id}")
+                            costo_u_edit_c = st.number_input("Costo por unidad (RD$)", min_value=0.0, value=costo_u_actual_c, step=0.01, key=f"edit_c_cu_{fila_c_id}")
+
+                        with ep2:
+                            total_edit_c = cant_edit_c * costo_u_edit_c
+                            st.metric("Total de esta línea", f"RD$ {total_edit_c:,.2f}")
+
+                        # Calculadora de cajas (igual que en nueva compra)
+                        with st.expander("🧮 Recalcular usando Cajas (Opcional)", expanded=False):
+                            st.caption("Rellena estos campos para recalcular automáticamente la cantidad y el costo por unidad.")
+                            bc1, bc2 = st.columns(2)
+                            with bc1:
+                                cajas_e = st.number_input("Cantidad de cajas", min_value=1.0, value=1.0, step=1.0, key=f"edit_c_cajas_{fila_c_id}")
+                                uds_e = st.number_input("Unidades por caja", min_value=1.0, value=24.0, step=1.0, key=f"edit_c_uds_{fila_c_id}")
+                            with bc2:
+                                costo_total_e = st.number_input("Costo total compra (RD$)", min_value=0.0, value=float(limpiar_numero(fila_c.get("total") or fila_c.get("monto")) or 0.0), step=100.0, key=f"edit_c_ctotal_{fila_c_id}")
+                            total_uds_e = cajas_e * uds_e
+                            costo_caja_e = costo_total_e / cajas_e if cajas_e > 0 else 0.0
+                            costo_ud_e = costo_total_e / total_uds_e if total_uds_e > 0 else 0.0
+                            st.write(f"- 📦 **Total unidades:** {total_uds_e:,.0f}")
+                            st.write(f"- 💵 **Costo por caja:** RD$ {costo_caja_e:,.2f}")
+                            st.write(f"- 🪙 **Costo por unidad:** RD$ {costo_ud_e:,.2f}")
+                            if st.button("↩️ Aplicar cálculo al formulario arriba", key=f"edit_c_aplicar_calc_{fila_c_id}"):
+                                st.session_state[f"edit_c_cant_{fila_c_id}"] = total_uds_e
+                                st.session_state[f"edit_c_cu_{fila_c_id}"] = costo_ud_e
+                                st.rerun()
+
+                        st.markdown("---")
+                        btn_c1, btn_c2 = st.columns(2)
+
+                        with btn_c1:
+                            if st.button("💾 Guardar cambios en esta compra", key=f"btn_save_edit_c_{fila_c_id}", use_container_width=True):
+                                nuevos_c = {
+                                    "fecha": str(fecha_edit_c),
+                                    # numero NO se incluye: es identificador único inmutable
+                                    "proveedor": prov_edit_c,
+                                    "metodo": metodo_edit_c.lower(),
+                                    "descripcion": desc_edit_c.strip(),
+                                    "cantidad": float(cant_edit_c),
+                                    "costo_unitario": float(costo_u_edit_c),
+                                    "total": float(total_edit_c),
+                                    "monto": float(total_edit_c),
+                                }
+                                # Sincronizar diferencia de cantidad con inventario
+                                dif_c = float(cant_edit_c) - float(cant_actual_c)
+                                if dif_c != 0:
+                                    p_id_c = fila_c.get("producto_id")
+                                    fp = refrescar_producto_por_id(p_id_c) if p_id_c else get_producto_por_nombre(fila_c.get("producto"))
+                                    if fp is not None:
+                                        nuevo_stk = max(obtener_existencia_producto(fp) + dif_c, 0.0)
+                                        actualizar_stock_producto(fp["nombre"], nuevo_stk)
+                                        if float(costo_u_edit_c) > 0:
+                                            actualizar("productos", fp["id"], {"costo": float(costo_u_edit_c)})
+                                if actualizar("compras", fila_c_id, nuevos_c):
+                                    st.success("✅ Compra actualizada correctamente.")
+                                    DATA.update(cargar_datos())
+                                    st.rerun()
+
+                        with btn_c2:
+                            if st.button("🗑️ Eliminar esta compra", key=f"btn_del_edit_c_{fila_c_id}", use_container_width=True):
+                                p_id_c = fila_c.get("producto_id")
+                                fp = refrescar_producto_por_id(p_id_c) if p_id_c else get_producto_por_nombre(fila_c.get("producto"))
+                                if fp is not None:
+                                    nuevo_stk = max(obtener_existencia_producto(fp) - cant_actual_c, 0.0)
+                                    actualizar_stock_producto(fp["nombre"], nuevo_stk)
+                                if eliminar("compras", fila_c_id):
+                                    st.success("🗑️ Compra eliminada y stock revertido.")
+                                    DATA.update(cargar_datos())
+                                    st.rerun()
         else:
             st.info("No hay compras registradas.")
+
 
     with tab_proveedores:
         st.subheader("🚚 Control de Proveedores Integrado")
