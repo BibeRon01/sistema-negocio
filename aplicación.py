@@ -12869,9 +12869,14 @@ elif menu == "POS":
                             st.rerun()
                     else:
                         st.session_state["modal_query_src_preloaded"] = codigo_scan.strip()
-                        modal_buscar_productos()
+                        st.session_state["mostrar_modal_busqueda"] = True
+                        st.rerun()
                 else:
-                    modal_buscar_productos()
+                    st.session_state["mostrar_modal_busqueda"] = True
+                    st.rerun()
+
+        if st.session_state.pop("mostrar_modal_busqueda", False):
+            modal_buscar_productos()
 
         st.markdown("---")
         st.subheader("📱 Catálogo Rápido")
