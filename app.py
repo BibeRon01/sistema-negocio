@@ -6702,7 +6702,13 @@ elif menu == "Productos":
 elif menu == "Inventario Actual":
     st.title("📊 Inventario Actual")
 
-    with st.expander("📥 Subir Excel / CSV de inventario actual", expanded=True):
+    tab_existencia, tab_alertas, tab_excel = st.tabs([
+        "📋 Existencias en Tiempo Real", 
+        "🚨 Alertas de Reposición y Demanda", 
+        "📥 Subir Excel / CSV de inventario actual"
+    ])
+
+    with tab_excel:
         st.write("Columnas esperadas: nombre o producto, cantidad o existencia_sistema. Costo y precio opcionales.")
         archivo = st.file_uploader("Sube archivo", type=["xlsx", "xls", "csv", "txt"], key="up_inventario")
         fecha_inv = st.date_input("Fecha del inventario", value=date.today(), key="fecha_inv_actual")
@@ -6756,37 +6762,214 @@ elif menu == "Inventario Actual":
                 st.success(f"Inventario actualizado: {procesados} productos.")
                 st.rerun()
 
-    prods = DATA["productos"].copy()
-    if not prods.empty:
-        if "usar_en_inventario" in prods.columns:
-            prods = prods[prods["usar_en_inventario"] == True]
+    with tab_existencia:
+        prods = DATA["productos"].copy()
+        if not prods.empty:
+            if "usar_en_inventario" in prods.columns:
+                prods = prods[prods["usar_en_inventario"] == True]
+                
+            prods_display = pd.DataFrame()
+            prods_display["Código"] = prods["Código"] if "Código" in prods.columns else prods.get("codigo", "")
+            prods_display["Producto"] = prods["nombre"]
             
-        prods_display = pd.DataFrame()
-        prods_display["Código"] = prods["Código"] if "Código" in prods.columns else prods.get("codigo", "")
-        prods_display["Producto"] = prods["nombre"]
-        
-        existencia_col = "stock" if "stock" in prods.columns else "existencia" if "existencia" in prods.columns else "cantidad"
-        prods_display["Existencia Actual"] = prods[existencia_col].fillna(0.0).astype(float)
-        prods_display["Costo Unitario"] = prods["costo"].fillna(0.0).astype(float)
-        prods_display["Precio Venta"] = prods["precio"].fillna(0.0).astype(float)
-        prods_display["Valor Inventario"] = prods_display["Existencia Actual"] * prods_display["Costo Unitario"]
-        
-        prods_display = prods_display.sort_values("Producto")
-        
-        txt_search = st.text_input("Buscar producto en inventario", key="buscar_inv_actual_realtime")
-        if txt_search:
-            mask = prods_display.astype(str).apply(lambda col: col.str.contains(txt_search, case=False, na=False)).any(axis=1)
-            prods_display = prods_display[mask]
+            existencia_col = "stock" if "stock" in prods.columns else "existencia" if "existencia" in prods.columns else "cantidad"
+            prods_display["Existencia Actual"] = prods[existencia_col].fillna(0.0).astype(float)
+            prods_display["Costo Unitario"] = prods["costo"].fillna(0.0).astype(float)
+            prods_display["Precio Venta"] = prods["precio"].fillna(0.0).astype(float)
+            prods_display["Valor Inventario"] = prods_display["Existencia Actual"] * prods_display["Costo Unitario"]
             
-        st.subheader("📋 Existencias en Tiempo Real (Fotografía Actual)")
-        st.dataframe(prods_display, use_container_width=True)
+            prods_display = prods_display.sort_values("Producto")
+            
+            txt_search = st.text_input("Buscar producto en inventario", key="buscar_inv_actual_realtime")
+            if txt_search:
+                mask = prods_display.astype(str).apply(lambda col: col.str.contains(txt_search, case=False, na=False)).any(axis=1)
+                prods_display = prods_display[mask]
+                
+            st.subheader("📋 Existencias en Tiempo Real (Fotografía Actual)")
+            st.dataframe(prods_display, use_container_width=True)
+            
+            total_valor_inv = prods_display["Valor Inventario"].sum()
+            st.metric("💰 Valor Total del Inventario (Costo)", f"RD$ {total_valor_inv:,.2f}")
+            
+            descargar_archivos(prods_display, "inventario_actual_realtime")
+        else:
+            st.info("No hay productos registrados en el catálogo de inventario.")
+
+    with tab_alertas:
+        import math
+        st.subheader("🚨 Alertas de Reposición y Mayor Demanda (Flujo)")
+        st.caption("Analiza la velocidad de venta de tus productos para recomendarte qué comprar y en qué cantidad.")
         
-        total_valor_inv = prods_display["Valor Inventario"].sum()
-        st.metric("💰 Valor Total del Inventario (Costo)", f"RD$ {total_valor_inv:,.2f}")
+        # Inputs para el análisis
+        col_c1, col_c2, col_c3 = st.columns(3)
+        with col_c1:
+            dias_analisis = st.selectbox(
+                "Rango de análisis de ventas",
+                [7, 15, 30, 60, 90],
+                index=2,
+                format_func=lambda x: f"Últimos {x} días",
+                key="alertas_dias_analisis"
+            )
+        with col_c2:
+            dias_cobertura = st.number_input(
+                "Días de stock deseados a cubrir",
+                min_value=1,
+                max_value=365,
+                value=15,
+                step=1,
+                help="¿Para cuántos días quieres tener inventario al comprar?",
+                key="alertas_dias_cobertura"
+            )
+        with col_c3:
+            umbral_alerta = st.number_input(
+                "Umbral de alerta (días restantes)",
+                min_value=1,
+                max_value=90,
+                value=7,
+                step=1,
+                help="Te alertará si el inventario actual dura menos de estos días.",
+                key="alertas_umbral_alerta"
+            )
+            
+        # Calcular fechas del análisis
+        fecha_fin = date.today()
+        fecha_ini = fecha_fin - timedelta(days=dias_analisis)
         
-        descargar_archivos(prods_display, "inventario_actual_realtime")
-    else:
-        st.info("No hay productos registrados en el catálogo de inventario.")
+        # Cargar datos
+        ventas_df = _df_actual("ventas")
+        detalles_df = _df_actual("detalle_venta")
+        productos_df = _df_actual("productos")
+        
+        if not ventas_df.empty and not detalles_df.empty and not productos_df.empty:
+            # Filtrar ventas del período
+            v_col = _fecha_col(ventas_df) or "fecha"
+            ventas_df["_fecha_dt"] = pd.to_datetime(ventas_df[v_col], errors="coerce").dt.date
+            ventas_periodo = ventas_df[(ventas_df["_fecha_dt"] >= fecha_ini) & (ventas_df["_fecha_dt"] <= fecha_fin)]
+            
+            # Quitar ventas anuladas si aplica
+            for col_anulado in ["anulado", "cancelado"]:
+                if col_anulado in ventas_periodo.columns:
+                    try:
+                        ventas_periodo = ventas_periodo[~ventas_periodo[col_anulado].fillna(False).astype(bool)]
+                    except Exception:
+                        pass
+                        
+            if not ventas_periodo.empty:
+                # Obtener IDs de ventas válidas
+                venta_ids = set()
+                for c in ["id", "identificación", "identificacion", "venta_id"]:
+                    if c in ventas_periodo.columns:
+                        venta_ids.update(ventas_periodo[c].dropna().astype(str).tolist())
+                        
+                # Filtrar detalles de ventas correspondientes a esas ventas
+                detalles_periodo = detalles_df[detalles_df["venta_id"].astype(str).isin(venta_ids)].copy() if venta_ids else pd.DataFrame()
+                
+                # Quitar detalles anulados si aplica
+                for col_anulado in ["anulado", "cancelado"]:
+                    if col_anulado in detalles_periodo.columns:
+                        try:
+                            detalles_periodo = detalles_periodo[~detalles_periodo[col_anulado].fillna(False).astype(bool)]
+                        except Exception:
+                            pass
+                
+                if not detalles_periodo.empty:
+                    # Agrupar por producto para calcular volumen de ventas
+                    detalles_periodo["cantidad"] = pd.to_numeric(detalles_periodo["cantidad"], errors="coerce").fillna(0.0)
+                    
+                    prod_sales = detalles_periodo.groupby("producto")["cantidad"].sum().reset_index()
+                    prod_sales = prod_sales.rename(columns={"cantidad": "cantidad_vendida"})
+                    
+                    # Calcular velocidad diaria (flujo)
+                    prod_sales["flujo_diario"] = prod_sales["cantidad_vendida"] / dias_analisis
+                    
+                    # Cruzar con tabla de productos para obtener stock actual y costo
+                    prod_catalogo = productos_df.copy()
+                    prod_catalogo["Producto"] = prod_catalogo["nombre"]
+                    existencia_col = "stock" if "stock" in prod_catalogo.columns else "existencia" if "existencia" in prod_catalogo.columns else "cantidad"
+                    prod_catalogo["Stock Actual"] = pd.to_numeric(prod_catalogo[existencia_col], errors="coerce").fillna(0.0)
+                    prod_catalogo["Costo Unitario"] = pd.to_numeric(prod_catalogo["costo"], errors="coerce").fillna(0.0)
+                    
+                    # Realizar cruce (merge)
+                    analisis = pd.merge(prod_sales, prod_catalogo[["Producto", "Stock Actual", "Costo Unitario"]], left_on="producto", right_on="Producto", how="right")
+                    analisis["producto"] = analisis["producto"].fillna(analisis["Producto"])
+                    analisis["cantidad_vendida"] = analisis["cantidad_vendida"].fillna(0.0)
+                    analisis["flujo_diario"] = analisis["flujo_diario"].fillna(0.0)
+                    analisis["Stock Actual"] = analisis["Stock Actual"].fillna(0.0)
+                    analisis["Costo Unitario"] = analisis["Costo Unitario"].fillna(0.0)
+                    
+                    # Calcular días restantes de inventario
+                    analisis["dias_restantes"] = analisis.apply(
+                        lambda r: r["Stock Actual"] / r["flujo_diario"] if r["flujo_diario"] > 0 else 9999.0,
+                        axis=1
+                    )
+                    
+                    # Calcular cantidad sugerida a comprar
+                    analisis["sugerido_comprar"] = analisis.apply(
+                        lambda r: max(0.0, (r["flujo_diario"] * dias_cobertura) - r["Stock Actual"]) if r["flujo_diario"] > 0 else 0.0,
+                        axis=1
+                    )
+                    analisis["sugerido_comprar"] = analisis["sugerido_comprar"].apply(lambda x: float(math.ceil(x)))
+                    analisis["costo_reposicion"] = analisis["sugerido_comprar"] * analisis["Costo Unitario"]
+                    
+                    # Dividir la pantalla en dos columnas
+                    col_izq, col_der = st.columns(2)
+                    
+                    with col_izq:
+                        st.subheader("🏆 Productos con Mayor Flujo (Más Vendidos)")
+                        st.caption(f"Top 10 productos con mayor volumen de ventas en los últimos {dias_analisis} días.")
+                        top_flujo = analisis.sort_values("cantidad_vendida", ascending=False).head(10)
+                        
+                        top_display = pd.DataFrame()
+                        top_display["Producto"] = top_flujo["producto"]
+                        top_display["Vendidos"] = top_flujo["cantidad_vendida"]
+                        top_display["Venta Diaria Prom."] = top_flujo["flujo_diario"].round(2)
+                        top_display["Stock Actual"] = top_flujo["Stock Actual"]
+                        
+                        st.dataframe(top_display, use_container_width=True, hide_index=True)
+                        
+                    with col_der:
+                        st.subheader("🚨 Alertas de Stock y Reposición")
+                        st.caption(f"Productos cuyo stock dura menos de {umbral_alerta} días o que ya se agotaron.")
+                        
+                        # Alertas son productos con dias_restantes <= umbral_alerta y flujo_diario > 0
+                        # O productos que tienen stock = 0 y flujo_diario > 0
+                        alertas_df = analisis[
+                            (analisis["flujo_diario"] > 0) & 
+                            ((analisis["dias_restantes"] <= umbral_alerta) | (analisis["Stock Actual"] <= 0))
+                        ].copy()
+                        
+                        if not alertas_df.empty:
+                            alertas_df = alertas_df.sort_values("dias_restantes")
+                            
+                            alertas_display = pd.DataFrame()
+                            alertas_display["Producto"] = alertas_df["producto"]
+                            alertas_display["Stock Actual"] = alertas_df["Stock Actual"]
+                            alertas_display["Venta Diaria"] = alertas_df["flujo_diario"].round(2)
+                            
+                            def _format_dias(d):
+                                if d == 9999.0: return "Sin ventas"
+                                if d <= 0: return "❌ Agotado"
+                                return f"⚠️ {d:.1f} días"
+                                
+                            alertas_display["Duración Stock"] = alertas_df["dias_restantes"].apply(_format_dias)
+                            alertas_display["Sugerido Comprar"] = alertas_df["sugerido_comprar"].astype(int)
+                            alertas_display["Costo Reposición (RD$)"] = alertas_df["costo_reposicion"].round(2)
+                            
+                            st.dataframe(alertas_display, use_container_width=True, hide_index=True)
+                            
+                            total_costo_rep = alertas_display["Costo Reposición (RD$)"].sum()
+                            st.info(f"💰 **Presupuesto estimado de reposición:** RD$ {total_costo_rep:,.2f}")
+                            
+                            # Botón de descargar sugeridos
+                            descargar_archivos(alertas_display, "sugerencias_compra")
+                        else:
+                            st.success("✅ ¡Todo en orden! No hay productos con alertas de stock bajo según la velocidad de venta actual.")
+                else:
+                    st.info("No se encontraron detalles de productos vendidos en este período de análisis.")
+            else:
+                st.info("No se registraron ventas en este período de análisis.")
+        else:
+            st.info("Cargando catálogo e historial para generar las alertas...")
 
 
 # =========================================================
