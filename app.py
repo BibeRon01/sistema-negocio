@@ -13083,7 +13083,7 @@ elif menu == "POS":
                 with col_q1:
                     st.markdown(f"**{producto_nombre}**")
                 with col_q2:
-                    max_cant = float(stock) if usa_inv else 999999.0
+                    max_cant = max(0.0, float(stock)) if usa_inv else 999999.0
                     nueva_cant = st.number_input(
                         "Cantidad",
                         min_value=0.0,
