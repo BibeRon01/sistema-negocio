@@ -13415,11 +13415,8 @@ elif menu == "POS":
                     st.error("No puedes cobrar hasta que los pagos cuadren con el total real de la venta.")
                     st.stop()
                 if es_cobro and pago_credito > 0:
-                    temp_cliente = alias_cuenta.strip() if es_cuenta_editada and alias_cuenta.strip() else (st.session_state.get("pos_cuenta_abierta_nombre") if es_cuenta_editada else None)
-                    if not temp_cliente:
-                        temp_cliente = cliente_nombre
-                    if temp_cliente == "Venta general":
-                        st.error("Para vender a crédito debes asignar un cliente o definir un nombre/alias para la cuenta.")
+                    if not cliente_id or cliente_nombre == "Venta general":
+                        st.error("🚫 **Para registrar una venta a crédito debes asignar un cliente registrado de la base de datos.** Activa 'Asignar cliente' y selecciónalo.")
                         st.stop()
                 if not es_cobro and not es_cuenta_editada:
                     # Validación: no se puede guardar cuenta abierta sin identificación
@@ -13474,7 +13471,7 @@ elif menu == "POS":
                                 metodo_pago_final = "abierta" if estado_final == "abierta" else ("mixto" if sum(v > 0 for v in [pago_efectivo, pago_transferencia, pago_tarjeta, pago_credito]) > 1 else ("efectivo" if pago_efectivo > 0 else "transferencia" if pago_transferencia > 0 else "tarjeta" if pago_tarjeta > 0 else "credito"))
                                 cliente_nombre_final = alias_cuenta if alias_cuenta else st.session_state.get("pos_cuenta_abierta_nombre", "Cuenta Abierta")
                                 
-                                payload_upd = {**payload_base, "metodo_pago": metodo_pago_final, "cliente_nombre": cliente_nombre_final}
+                                payload_upd = {**payload_base, "metodo_pago": metodo_pago_final, "cliente_nombre": cliente_nombre_final, "cliente_id": cliente_id}
                                 supabase.table("ventas").update(json_safe_payload(payload_upd)).eq("id", str(venta_id)).execute()
                                 venta_resp_data = [{"id": venta_id}]
                             else:
