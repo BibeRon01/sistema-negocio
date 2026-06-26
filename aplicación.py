@@ -418,10 +418,10 @@ def puede_abrir_caja() -> bool:
     return es_admin() or tiene_permiso("puede_abrir_caja") or tiene_permiso("puede_vender")
 
 def puede_cerrar_caja() -> bool:
-    return es_admin() or tiene_permiso("puede_cerrar_caja") or tiene_permiso("puede_vender")
+    return es_admin() or tiene_permiso("puede_cerrar_caja")
 
 def puede_ver_ventas_propias() -> bool:
-    return es_admin() or tiene_permiso("puede_ver_ventas_propias") or tiene_permiso("puede_vender")
+    return es_admin() or tiene_permiso("puede_ver_ventas_propias")
 
 def puede_ver_todas_ventas() -> bool:
     return es_admin() or tiene_permiso("puede_ver_todas_ventas") or tiene_permiso("puede_ver_reportes")
@@ -498,7 +498,7 @@ def puede_eliminar_perdidas() -> bool:
 
 # --- Productos ---
 def puede_ver_productos() -> bool:
-    return es_admin() or tiene_permiso("puede_ver_productos") or tiene_permiso("puede_vender") or tiene_permiso("puede_ver_reportes")
+    return es_admin() or tiene_permiso("puede_ver_productos")
 
 def puede_crear_productos() -> bool:
     return es_admin() or tiene_permiso("puede_crear_productos") or tiene_permiso("puede_editar_todo")
@@ -521,11 +521,13 @@ def render_checkboxes_permisos(key_prefix: str, defaults_dict: dict = None) -> d
             permisos["puede_abrir_caja"] = st.checkbox("Puede abrir caja", value=bool(defaults_dict.get("puede_abrir_caja", True)), key=f"{key_prefix}_pab")
             permisos["puede_cerrar_caja"] = st.checkbox("Puede cerrar caja", value=bool(defaults_dict.get("puede_cerrar_caja", True)), key=f"{key_prefix}_pce")
             permisos["puede_ver_ventas_propias"] = st.checkbox("Puede ver ventas propias", value=bool(defaults_dict.get("puede_ver_ventas_propias", True)), key=f"{key_prefix}_pvp")
+            permisos["ver_clientes"] = st.checkbox("Puede ver/gestionar clientes", value=bool(defaults_dict.get("ver_clientes", False)), key=f"{key_prefix}_vcl")
         with c2:
             permisos["puede_ver_todas_ventas"] = st.checkbox("Puede ver todas las ventas", value=bool(defaults_dict.get("puede_ver_todas_ventas", False)), key=f"{key_prefix}_pvt")
             permisos["puede_editar_ventas"] = st.checkbox("Puede editar ventas/facturas", value=bool(defaults_dict.get("puede_editar_ventas", False)), key=f"{key_prefix}_pev")
             permisos["puede_anular"] = st.checkbox("Puede anular ventas/facturas", value=bool(defaults_dict.get("puede_anular", False)), key=f"{key_prefix}_pan")
             permisos["puede_eliminar"] = st.checkbox("Puede eliminar ventas/facturas", value=bool(defaults_dict.get("puede_eliminar", False)), key=f"{key_prefix}_pel")
+            permisos["ver_credito"] = st.checkbox("Puede ver/gestionar créditos", value=bool(defaults_dict.get("ver_credito", False)), key=f"{key_prefix}_vcr")
     with st.expander("🛒 Compras", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
@@ -5897,13 +5899,18 @@ else:
     menu_opciones = []
     # POS / Ventas / Caja
     if puede_vender():
-        menu_opciones += ["Caja", "POS", "Clientes", "Créditos"]
-    if puede_ver_ventas_propias() or puede_ver_todas_ventas():
+        menu_opciones += ["Caja", "POS"]
+    if tiene_permiso("ver_clientes"):
+        menu_opciones += ["Clientes"]
+    if tiene_permiso("ver_credito"):
+        menu_opciones += ["Créditos"]
+    if tiene_permiso("puede_ver_ventas_propias") or tiene_permiso("puede_ver_todas_ventas"):
         menu_opciones += ["Ventas"]
-    if puede_cerrar_caja():
+    if tiene_permiso("puede_cerrar_caja"):
         menu_opciones += ["Cierre de Caja"]
+        
     # Productos
-    if puede_ver_productos():
+    if tiene_permiso("puede_ver_productos"):
         menu_opciones += ["Productos"]
     # Compras
     if puede_ver_compras() or puede_registrar_compras():
@@ -15671,7 +15678,11 @@ elif menu == "🔒 Mi Perfil":
                     if existe_otro:
                         st.error(f"Ya existe un usuario con el nombre '{usr_clean}'. Elige otro.")
                     else:
-                        payload = {"nombre": name_clean, "usuario": usr_clean, "clave": clave_clean}
+                        if es_admin():
+                            payload = {"nombre": name_clean, "usuario": usr_clean, "clave": clave_clean}
+                        else:
+                            payload = {"nombre": name_clean}
+                            
                         if actualizar("usuarios", user_id, payload):
                             user.update(payload)
                             st.session_state["usuario_data"] = user
