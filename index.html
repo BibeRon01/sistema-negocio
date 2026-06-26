@@ -1,0 +1,1874 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A&M ERP SaaS — Nivel Empresa</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome para Iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Hojas de Estilo -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="light-theme">
+    <!-- Login Portal Seguro -->
+    <div id="login-portal" class="login-overlay">
+        <div class="login-card glass-card text-center">
+            <div class="login-brand">
+                <i class="fa-solid fa-cake-candles logo-icon"></i>
+                <h2>A&M ERP</h2>
+                <span>Portal de Acceso Seguro</span>
+            </div>
+            
+            <div id="login-error-msg" class="alert-box danger hidden" style="margin-bottom: 15px; padding: 10px; border-radius: 8px;">
+                <i class="fa-solid fa-triangle-exclamation"></i> Credenciales Incorrectas. Inténtalo de nuevo.
+            </div>
+            
+            <form id="login-form">
+                <div class="form-group text-left" style="margin-bottom: 12px; display: none;">
+                    <label for="login-tenant" style="display: block; font-size: 12px; margin-bottom: 6px; font-weight: bold;">🍰 Selecciona tu Empresa:</label>
+                    <select id="login-tenant" class="select-premium font-bold">
+                        <option value="MigaMiga" selected>🍽️ A&M ERP (Plan Empresa)</option>
+                        <option value="DulceTentacion">🍩 Dulce Tentación ERP (Plan Pro)</option>
+                        <option value="SweetHouse">🧁 Sweet House ERP (Plan Básico - Suspendido)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group text-left" style="margin-bottom: 12px;">
+                    <label for="login-username" style="display: block; font-size: 12px; margin-bottom: 6px; font-weight: bold;">👤 Usuario:</label>
+                    <input type="text" id="login-username" class="input-premium" value="admin" placeholder="admin, cajero, o chef" required style="width: 100%;">
+                </div>
+                
+                <div class="form-group text-left" style="margin-bottom: 15px;">
+                    <label for="login-password" style="display: block; font-size: 12px; margin-bottom: 6px; font-weight: bold;">🔑 Contraseña:</label>
+                    <input type="password" id="login-password" class="input-premium" value="admin123" placeholder="••••••••" required style="width: 100%;">
+                </div>
+                
+                <button type="submit" class="btn btn-primary btn-full font-bold" id="login-submit-btn" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <i class="fa-solid fa-shield-halved"></i> Autenticar Sesión
+                </button>
+            </form>
+            
+            <div class="divider" style="margin: 15px 0;"></div>
+            <p class="font-secondary" style="font-size: 11px; color: var(--text-muted); line-height: 1.4; text-align: left;">
+                🔒 <strong>Acceso Cifrado Seguro.</strong> Credenciales demo:<br>
+                • Administrador: <code>admin</code> / <code>admin123</code><br>
+                • Ventas/Caja: <code>cajero</code> / <code>cajera123</code><br>
+                • Producción: <code>chef</code> / <code>chef123</code>
+            </p>
+        </div>
+    </div>
+
+    <!-- App Container -->
+    <div id="app-wrapper">
+        
+        <!-- Sidebar Principal -->
+        <aside id="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-logo">
+                    <i class="fa-solid fa-cake-candles"></i>
+                </div>
+                <div class="brand-info">
+                    <h2>A&M</h2>
+                    <span>ERP SaaS Gastronómico</span>
+                </div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <ul>
+                    <li class="nav-item active" data-target="dashboard-page">
+                        <a href="#"><i class="fa-solid fa-chart-line"></i> <span>Tablero General</span></a>
+                    </li>
+                    <li class="nav-item" data-target="pos-page">
+                        <a href="#"><i class="fa-solid fa-cash-register"></i> <span>Punto de Venta (POS)</span></a>
+                    </li>
+                    <li class="nav-item" data-target="caja-page">
+                        <a href="#"><i class="fa-solid fa-vault"></i> <span>Caja y Turnos</span></a>
+                    </li>
+                    <li class="nav-item" data-target="inventario-page">
+                        <a href="#"><i class="fa-solid fa-boxes-stacked"></i> <span>Inventario Real</span></a>
+                    </li>
+                    <li class="nav-item" data-target="recetario-page">
+                        <a href="#"><i class="fa-solid fa-book-open"></i> <span>Recetario & Costeo</span></a>
+                    </li>
+                    <li class="nav-item" data-target="produccion-page">
+                        <a href="#"><i class="fa-solid fa-kitchen-set"></i> <span>Línea de Producción</span></a>
+                    </li>
+                    <li class="nav-item" data-target="crm-page">
+                        <a href="#"><i class="fa-solid fa-users"></i> <span>CRM & Pedidos</span></a>
+                    </li>
+                    <li class="nav-item" data-target="marketplace-page">
+                        <a href="#"><i class="fa-solid fa-store"></i> <span>Marketplace</span></a>
+                    </li>
+                    <li class="nav-item" data-target="finanzas-page">
+                        <a href="#"><i class="fa-solid fa-chart-pie"></i> <span>Finanzas & Nómina</span></a>
+                    </li>
+                    <li class="nav-item divider"></li>
+                    <li class="nav-item saas-only" data-target="saas-page">
+                        <a href="#"><i class="fa-solid fa-sliders"></i> <span>SaaS Admin <span class="badge-super">SYS</span></span></a>
+                    </li>
+                    <li class="nav-item" data-target="settings-page">
+                        <a href="#"><i class="fa-solid fa-gears"></i> <span>Configuración</span></a>
+                    </li>
+                </ul>
+            </nav>
+            
+            <div class="sidebar-footer" style="position: relative;">
+                <div class="user-profile" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                    <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256&auto=format&fit=crop" alt="Usuario" id="user-avatar" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">
+                    <div class="user-details" style="flex: 1; margin-left: 10px;">
+                        <h4 id="user-name" style="font-size: 13px; font-weight: bold;">Sofía Rodríguez</h4>
+                        <span id="user-role" style="font-size: 11px; color: var(--text-muted);">Administradora</span>
+                    </div>
+                    <button id="logout-btn" title="Cerrar Sesión" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; font-size: 15px; margin-left: auto; transition: color 0.2s; display: flex; align-items: center; justify-content: center;">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main id="main-content">
+            
+            <!-- Topbar -->
+            <header id="topbar">
+                <div class="topbar-left">
+                    <button id="toggle-sidebar" class="icon-btn"><i class="fa-solid fa-bars"></i></button>
+                    <!-- Selector de Tenant (Multiempresa) -->
+                    <div class="tenant-selector-wrapper">
+                        <label for="tenant-select"><i class="fa-solid fa-building-user"></i> Empresa:</label>
+                        <select id="tenant-select" class="select-premium">
+                            <option value="MigaMiga" selected>🍽️ A&M ERP (Negocio Principal)</option>
+                            <option value="DulceTentacion">🍩 Dulce Tentación (SaaS Cliente 1)</option>
+                            <option value="SweetHouse">🧁 Sweet House (SaaS Cliente 2)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="topbar-right">
+                    <!-- Switch de Rol de Demostración -->
+                    <div class="role-switch-wrapper">
+                        <label for="role-select"><i class="fa-solid fa-user-shield"></i> Rol:</label>
+                        <select id="role-select" class="select-premium small">
+                            <option value="admin">Administrador</option>
+                            <option value="cajero">Cajero/a (Camila)</option>
+                            <option value="produccion">Producción (Chef)</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Botón Simulador de Celular -->
+                    <button id="toggle-mobile-shell" class="btn btn-secondary small" title="Simular Vista Móvil">
+                        <i class="fa-solid fa-mobile-screen-button"></i> <span>Ver en Celular</span>
+                    </button>
+                    
+                    <!-- Estado de Caja -->
+                    <div class="caja-status-indicator" id="topbar-caja-indicator">
+                        <span class="status-dot green"></span>
+                        <span class="indicator-text">Caja Abierta</span>
+                    </div>
+                    
+                    <!-- Notificaciones -->
+                    <button class="icon-btn notification-btn">
+                        <i class="fa-solid fa-bell"></i>
+                        <span class="badge" id="alert-count">2</span>
+                    </button>
+                    
+                    <!-- Asistente de IA (MigaAI) Trigger -->
+                    <button id="trigger-ai-assistant" class="btn btn-primary premium-glow small">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Preguntar a MigaAI</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Contenido de las Páginas -->
+            <div id="page-container">
+                
+                <!-- SUSPENDED SCREEN OVERLAY (Para Sweet House) -->
+                <div id="suspended-overlay" class="hidden glass-card">
+                    <div class="suspended-content">
+                        <i class="fa-solid fa-triangle-exclamation warning-pulse"></i>
+                        <h2>Cuenta Suspendida Temporalmente</h2>
+                        <p>El acceso a <strong>Sweet House</strong> ha sido restringido por falta de pago de la suscripción mensual.</p>
+                        <div class="suspended-meta">
+                            <div><strong>Plan:</strong> Básico (RD$1,800/mes)</div>
+                            <div><strong>Saldo Pendiente:</strong> RD$3,600 (2 Meses)</div>
+                        </div>
+                        <button class="btn btn-primary" id="reactivate-tenant-btn">
+                            <i class="fa-solid fa-credit-card"></i> Pagar Factura y Reactivar (Superadmin)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 1. TABLERO GENERAL (DASHBOARD) -->
+                <section id="dashboard-page" class="page-section active">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">Tablero Gerencial de <span class="tenant-name-span">MigaMiga</span></h1>
+                            <p class="page-subtitle">Monitorea las ventas, inventario crítico, costos y ganancias reales sin tecnicismos.</p>
+                        </div>
+                        <div class="date-filter">
+                            <i class="fa-solid fa-calendar-days"></i>
+                            <input type="date" id="dash-date-from" class="input-premium inline small">
+                            <span>a</span>
+                            <input type="date" id="dash-date-to" class="input-premium inline small">
+                        </div>
+                    </div>
+
+                    <!-- Tarjetas de Métricas Clave (KPIs) -->
+                    <div class="kpi-grid">
+                        <div class="kpi-card glass-card">
+                            <div class="kpi-icon blue"><i class="fa-solid fa-coins"></i></div>
+                            <div class="kpi-data">
+                                <h3>Ventas Cobradas</h3>
+                                <span class="kpi-value" id="kpi-ventas">RD$0.00</span>
+                                <span class="kpi-trend green"><i class="fa-solid fa-arrow-trend-up"></i> +12% este mes</span>
+                            </div>
+                        </div>
+                        <div class="kpi-card glass-card">
+                            <div class="kpi-icon red"><i class="fa-solid fa-utensils"></i></div>
+                            <div class="kpi-data">
+                                <h3>Costo de Ventas (COGS)</h3>
+                                <span class="kpi-value" id="kpi-costos">RD$0.00</span>
+                                <span class="kpi-trend font-secondary">Inversión en ingredientes</span>
+                            </div>
+                        </div>
+                        <div class="kpi-card glass-card">
+                            <div class="kpi-icon green"><i class="fa-solid fa-circle-dollar-to-slot"></i></div>
+                            <div class="kpi-data">
+                                <h3>Utilidad Bruta</h3>
+                                <span class="kpi-value" id="kpi-bruta">RD$0.00</span>
+                                <span class="kpi-trend" id="kpi-margen-bruto">Margen: 0%</span>
+                            </div>
+                        </div>
+                        <div class="kpi-card glass-card">
+                            <div class="kpi-icon purple"><i class="fa-solid fa-wallet"></i></div>
+                            <div class="kpi-data">
+                                <h3>Utilidad Neta Real</h3>
+                                <span class="kpi-value premium-text" id="kpi-neta">RD$0.00</span>
+                                <span class="kpi-trend green" id="kpi-margen-neto">¡Ganancia limpia!</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fila del Dashboard: Gráfico e Inventario Crítico -->
+                    <div class="dashboard-row grid-2-1">
+                        <!-- Columna Izquierda: Análisis de Rendimiento Financiero -->
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-chart-simple"></i> Desglose de Gastos y Flujo Contable</h3>
+                                <button class="btn btn-secondary btn-icon-only small" id="export-pdf-dashboard" title="Exportar PDF"><i class="fa-solid fa-file-pdf"></i></button>
+                            </div>
+                            <div class="chart-container">
+                                <!-- Barra de Progreso Financiero -->
+                                <div class="finance-progress-section">
+                                    <div class="progress-bar-label">
+                                        <span>Utilidad Neta vs Costos & Gastos</span>
+                                        <strong id="progress-percentage">60% de margen neto</strong>
+                                    </div>
+                                    <div class="premium-progress-bar">
+                                        <div class="progress-fill green-bg" id="progress-neta-fill" style="width: 40%"></div>
+                                        <div class="progress-fill red-bg" id="progress-cogs-fill" style="width: 35%"></div>
+                                        <div class="progress-fill orange-bg" id="progress-gastos-fill" style="width: 25%"></div>
+                                    </div>
+                                    <div class="progress-legend">
+                                        <span><span class="legend-color green-bg"></span> Utilidad Neta (<span id="legend-neta">RD$0</span>)</span>
+                                        <span><span class="legend-color red-bg"></span> Costo de Ventas (<span id="legend-cogs">RD$0</span>)</span>
+                                        <span><span class="legend-color orange-bg"></span> Gastos Operativos (<span id="legend-gastos">RD$0</span>)</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="divider" style="margin: 15px 0;"></div>
+                                <h4><i class="fa-solid fa-file-invoice-dollar text-gold"></i> Estado de Resultados Contable</h4>
+                                <div class="table-responsive" style="margin-top: 10px;">
+                                    <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;" class="table-premium">
+                                        <tbody>
+                                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                                <td style="padding: 6px 0;"><strong>(+) Ingresos Operacionales (Ventas Cobradas):</strong></td>
+                                                <td style="text-align: right; padding: 6px 0;" id="er-ventas" class="text-green font-bold">RD$0.00</td>
+                                            </tr>
+                                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                                <td style="padding: 6px 0;"><strong>(-) Costo de Ventas (COGS - Materia Prima Usada):</strong></td>
+                                                <td style="text-align: right; padding: 6px 0;" id="er-cogs" class="text-red">RD$0.00</td>
+                                            </tr>
+                                            <tr style="border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.02);">
+                                                <td style="padding: 6px 0;"><strong>(=) Utilidad Bruta:</strong></td>
+                                                <td style="text-align: right; padding: 6px 0;" id="er-utilidad-bruta" class="font-bold">RD$0.00</td>
+                                            </tr>
+                                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                                <td style="padding: 6px 0; padding-left: 15px; color: var(--text-muted);">(-) Gastos Operacionales Fijos (Renta, salarios fijos...):</td>
+                                                <td style="text-align: right; padding: 6px 0; color: var(--text-muted);" id="er-gastos-fijos">RD$0.00</td>
+                                            </tr>
+                                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                                <td style="padding: 6px 0; padding-left: 15px; color: var(--text-muted);">(-) Gastos Operacionales Variables (Transporte, delivery...):</td>
+                                                <td style="text-align: right; padding: 6px 0; color: var(--text-muted);" id="er-gastos-variables">RD$0.00</td>
+                                            </tr>
+                                            <tr style="border-bottom: 1px solid var(--border-color); background: rgba(16,185,129,0.06);">
+                                                <td style="padding: 6px 0;"><strong>(=) Utilidad Neta Real (Ganancia Limpia):</strong></td>
+                                                <td style="text-align: right; padding: 6px 0; font-size: 14px;" id="er-utilidad-neta" class="text-green font-bold">RD$0.00</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                
+                                <div class="divider"></div>
+                                <!-- Lista de Productos más Rentables -->
+                                <h4><i class="fa-solid fa-trophy text-gold"></i> Productos Más Rentables</h4>
+                                <div class="ranking-list" id="profitable-products-list">
+                                    <!-- Cargado por JS -->
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Columna Derecha: Alertas de Inventario Crítico -->
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-triangle-exclamation text-amber"></i> Inventario Crítico</h3>
+                                <span class="badge red-bg" id="critico-count">0 Alertas</span>
+                            </div>
+                            <div class="critical-inventory-list" id="critical-inventory-items">
+                                <!-- Cargado por JS -->
+                            </div>
+                            <div class="panel-footer">
+                                <button class="btn btn-secondary btn-full text-center nav-trigger-btn" data-target="inventario-page">
+                                    <i class="fa-solid fa-cart-flatbed-suitcase"></i> Comprar Insumos ahora
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fila de Cierre y Resumen del Mes -->
+                    <div class="dashboard-row grid-3">
+                        <div class="glass-card panel-card card-kpi-sub">
+                            <div class="sub-kpi-header">
+                                <span><i class="fa-solid fa-piggy-bank"></i> Dinero en Efectivo (Caja)</span>
+                                <h4 id="dash-cash-caja">RD$0.00</h4>
+                            </div>
+                            <p class="meta-desc">Efectivo físico esperado en la gaveta de ventas.</p>
+                        </div>
+                        <div class="glass-card panel-card card-kpi-sub">
+                            <div class="sub-kpi-header">
+                                <span><i class="fa-solid fa-credit-card"></i> Bancos / Transferencias</span>
+                                <h4 id="dash-cash-bancos">RD$0.00</h4>
+                            </div>
+                            <p class="meta-desc">Dinero cobrado por tarjetas o transferencias.</p>
+                        </div>
+                        <div class="glass-card panel-card card-kpi-sub">
+                            <div class="sub-kpi-header">
+                                <span><i class="fa-solid fa-hand-holding-dollar"></i> Cuentas por Cobrar (Créditos)</span>
+                                <h4 id="dash-cash-creditos">RD$0.00</h4>
+                            </div>
+                            <p class="meta-desc">Dinero en la calle pendiente de cobro de clientes.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2. PUNTO DE VENTA (POS) -->
+                <section id="pos-page" class="page-section">
+                    <div class="pos-container">
+                        <!-- POS Izquierdo: Catálogo de Productos -->
+                        <div class="pos-catalog-panel glass-card">
+                            <div class="pos-catalog-header">
+                                <div class="search-bar-wrapper">
+                                    <i class="fa-solid fa-magnifying-glass"></i>
+                                    <input type="text" id="pos-search" class="input-premium" placeholder="Buscar brownie, cake, galletas o simular código...">
+                                </div>
+                                <div class="category-scroll">
+                                    <button class="category-tag active" data-category="all">Todos</button>
+                                    <button class="category-tag" data-category="brownies">Brownies</button>
+                                    <button class="category-tag" data-category="cakes">Bizcochos</button>
+                                    <button class="category-tag" data-category="mini">Minis</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Catálogo de Cards de Productos -->
+                            <div class="pos-grid-products" id="pos-products-grid">
+                                <!-- Cargado por JS -->
+                            </div>
+                        </div>
+
+                        <!-- POS Derecho: Carrito de Compras -->
+                        <div class="pos-cart-panel glass-card">
+                            <div class="cart-header">
+                                <h3><i class="fa-solid fa-basket-shopping text-primary"></i> Carrito de Compras</h3>
+                                <button class="btn btn-secondary text-red small" id="clear-cart-btn" title="Vaciar Carrito"><i class="fa-solid fa-trash-can"></i></button>
+                            </div>
+                            
+                            <!-- Lista de Items en Carrito -->
+                            <div class="cart-items-list" id="cart-items-container">
+                                <!-- Muestra carrito vacío por defecto -->
+                                <div class="empty-cart-state">
+                                    <i class="fa-solid fa-cart-shopping"></i>
+                                    <p>El carrito está vacío.<br>Haz clic en un producto para agregarlo.</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Resumen del Carrito y Selección de Cliente/Pago -->
+                            <div class="cart-summary-section">
+                                <div class="cart-customer-selector">
+                                    <label><i class="fa-solid fa-user-tag"></i> Cliente:</label>
+                                    <select id="cart-customer-select" class="select-premium small">
+                                        <!-- Cargado por JS -->
+                                    </select>
+                                </div>
+                                
+                                <div class="divider small"></div>
+                                
+                                <div class="cart-totals">
+                                    <div class="total-row">
+                                        <span>Subtotal</span>
+                                        <span id="cart-subtotal">RD$0.00</span>
+                                    </div>
+                                    <div class="total-row fiscal-row">
+                                        <span>ITBIS desglosado (18%)</span>
+                                        <span id="cart-tax">RD$0.00</span>
+                                    </div>
+                                    <div class="total-row main-total">
+                                        <span>Total Neto</span>
+                                        <span id="cart-total" class="premium-text">RD$0.00</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="divider small"></div>
+
+                                <!-- Comprobantes Fiscales NCF (República Dominicana) -->
+                                <div class="ncf-selector-section">
+                                    <label><i class="fa-solid fa-file-invoice-dollar"></i> Comprobante Fiscal (NCF):</label>
+                                    <div class="ncf-buttons">
+                                        <button class="ncf-btn active" data-type="consumidor">Consumo (B01)</button>
+                                        <button class="ncf-btn" data-type="fiscal">Crédito Fiscal (B02)</button>
+                                    </div>
+                                    <div id="ncf-fiscal-rnc-wrapper" class="hidden">
+                                        <input type="text" id="pos-rnc-input" class="input-premium small margin-top-5" placeholder="RNC o Cédula (9 o 11 dígitos)">
+                                    </div>
+                                </div>
+
+                                <div class="divider small"></div>
+
+                                <div class="payment-method-section">
+                                    <label><i class="fa-solid fa-credit-card"></i> Método de Pago:</label>
+                                    <select id="pos-payment-method" class="select-premium">
+                                        <option value="efectivo">💵 Efectivo</option>
+                                        <option value="tarjeta">💳 Tarjeta de Crédito/Débito</option>
+                                        <option value="transferencia">🏦 Transferencia Bancaria</option>
+                                        <option value="credito">🤝 Cuenta de Crédito (Pendiente)</option>
+                                        <option value="mixto">🔀 Pago Mixto (Efectivo + Tarjeta)</option>
+                                    </select>
+                                </div>
+
+                                <!-- Pago Mixto Detalle (Oculto por defecto) -->
+                                <div id="pos-mixto-fields" class="hidden margin-top-10">
+                                    <div class="grid-2 gap-10">
+                                        <div>
+                                            <label class="small-label">Monto Efectivo:</label>
+                                            <input type="number" id="pos-mixto-efectivo" class="input-premium small" value="0">
+                                        </div>
+                                        <div>
+                                            <label class="small-label">Monto Tarjeta:</label>
+                                            <input type="number" id="pos-mixto-tarjeta" class="input-premium small" value="0" readonly>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Devuelta Automática (Efectivo) -->
+                                <div id="pos-cash-received-wrapper" class="margin-top-10">
+                                    <div class="grid-2 gap-10">
+                                        <div>
+                                            <label class="small-label">Recibido:</label>
+                                            <input type="number" id="pos-cash-received" class="input-premium small" placeholder="RD$0.00">
+                                        </div>
+                                        <div>
+                                            <label class="small-label">Devuelta:</label>
+                                            <span class="devuelta-display" id="pos-cash-change">RD$0.00</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button class="btn btn-primary btn-full margin-top-15 font-bold" id="pos-checkout-btn">
+                                    <i class="fa-solid fa-receipt"></i> Completar Venta e Imprimir
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 3. CAJA Y TURNOS -->
+                <section id="caja-page" class="page-section">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">Gestión de Caja Chica y Cierre de Turnos</h1>
+                            <p class="page-subtitle">Controla el dinero en efectivo físico con auditoría y alertas de descuadre.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid-2 gap-20">
+                        <!-- Control de Apertura/Cierre de Caja -->
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-vault"></i> Estado del Turno de Caja</h3>
+                                <span class="badge" id="caja-panel-status">Cargando...</span>
+                            </div>
+                            
+                            <!-- Formulario de Apertura (Visible si la caja está cerrada) -->
+                            <div id="caja-open-form" class="caja-form-panel hidden">
+                                <div class="alert-box info">
+                                    <i class="fa-solid fa-circle-info"></i>
+                                    <span>Para poder facturar en el POS, debes abrir una caja con un fondo inicial en efectivo.</span>
+                                </div>
+                                <div class="form-group margin-top-15">
+                                    <label for="caja-fondo-inicial">Fondo Inicial en Efectivo (RD$):</label>
+                                    <input type="number" id="caja-fondo-inicial" class="input-premium" value="1000">
+                                </div>
+                                <button class="btn btn-primary margin-top-10" id="caja-open-btn">
+                                    <i class="fa-solid fa-key"></i> Abrir Caja Chica
+                                </button>
+                            </div>
+
+                            <!-- Resumen e Historial de la Caja Activa (Visible si la caja está abierta) -->
+                            <div id="caja-active-info" class="caja-form-panel hidden">
+                                <div class="caja-summary-grid">
+                                    <div class="caja-summary-item">
+                                        <span>Fondo Inicial</span>
+                                        <strong id="caja-val-fondo">RD$1,000.00</strong>
+                                    </div>
+                                    <div class="caja-summary-item">
+                                        <span>Ventas Efectivo</span>
+                                        <strong id="caja-val-ventas">RD$0.00</strong>
+                                    </div>
+                                    <div class="caja-summary-item">
+                                        <span>Abonos Crédito</span>
+                                        <strong id="caja-val-abonos">RD$0.00</strong>
+                                    </div>
+                                    <div class="caja-summary-item">
+                                        <span>Gastos / Egresos</span>
+                                        <strong id="caja-val-egresos" class="text-red">RD$0.00</strong>
+                                    </div>
+                                </div>
+                                
+                                <div class="divider"></div>
+                                
+                                <div class="caja-expected-section">
+                                    <span>Efectivo Esperado en Gaveta:</span>
+                                    <h2 id="caja-val-esperado">RD$1,000.00</h2>
+                                </div>
+
+                                <div class="divider"></div>
+
+                                <!-- Formulario de Cierre de Caja -->
+                                <h4><i class="fa-solid fa-lock"></i> Arqueo para Cierre de Caja</h4>
+                                <div class="grid-2 gap-10 margin-top-10">
+                                    <div class="form-group">
+                                        <label for="caja-real-contado">Efectivo Físico Contado (RD$):</label>
+                                        <input type="number" id="caja-real-contado" class="input-premium" placeholder="Ingresa lo contado en físico">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Resultado de Arqueo:</label>
+                                        <div class="arqueo-diff-box" id="caja-arqueo-result">RD$0.00 (Cuadrado)</div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-primary btn-full margin-top-15" id="caja-close-btn">
+                                    <i class="fa-solid fa-lock"></i> Realizar Cierre de Turno
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Panel de Movimientos Manuales (Gastos / Entradas) y Auditoría -->
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-hand-holding-dollar"></i> Retiros, Gastos y Egresos Rápidos</h3>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="caja-mov-tipo">Tipo de Movimiento:</label>
+                                <select id="caja-mov-tipo" class="select-premium">
+                                    <option value="egreso">🔴 Salida de Caja / Gasto Operativo (RD$)</option>
+                                    <option value="ingreso">🟢 Entrada / Aporte Extra (RD$)</option>
+                                </select>
+                            </div>
+                            <div class="grid-3 gap-10 margin-top-10" id="caja-mov-inputs-row">
+                                <div class="form-group">
+                                    <label for="caja-mov-monto">Monto (RD$):</label>
+                                    <input type="number" id="caja-mov-monto" class="input-premium" placeholder="0.00">
+                                </div>
+                                <div class="form-group">
+                                    <label for="caja-mov-concepto">Concepto / Razón:</label>
+                                    <input type="text" id="caja-mov-concepto" class="input-premium" placeholder="Ej. Pago de Gas, renta, delivery...">
+                                </div>
+                                <div class="form-group" id="caja-expense-class-group">
+                                    <label for="caja-expense-class">Clasificación:</label>
+                                    <select id="caja-expense-class" class="select-premium">
+                                        <option value="variable" selected>Variable (Delivery, insumos...)</option>
+                                        <option value="fijo">Fijo (Alquiler, sueldos fijos, servicios...)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <button class="btn btn-secondary btn-full margin-top-10" id="caja-add-mov-btn">
+                                <i class="fa-solid fa-circle-plus"></i> Registrar Movimiento
+                            </button>
+                            
+                            <div class="divider"></div>
+
+                            <h4><i class="fa-solid fa-clock-rotate-left"></i> Historial de Movimientos de este Turno</h4>
+                            <div class="table-responsive margin-top-10" style="max-height: 200px;">
+                                <table class="table-premium">
+                                    <thead>
+                                        <tr>
+                                            <th>Hora</th>
+                                            <th>Tipo</th>
+                                            <th>Monto</th>
+                                            <th>Concepto</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="caja-movimientos-tbody">
+                                        <!-- Cargado por JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fila de Facturas / Ventas Emitidas (Historial General de Ventas) -->
+                    <div class="glass-card panel-card margin-top-20">
+                        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <h3><i class="fa-solid fa-file-invoice-dollar text-gold"></i> Bitácora General de Ventas Facturadas (NCF)</h3>
+                            <button class="btn btn-secondary small" id="export-sales-csv-btn">
+                                <i class="fa-solid fa-file-excel"></i> Exportar Ventas a Excel (CSV)
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table-premium">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha / Hora</th>
+                                        <th>NCF / Factura</th>
+                                        <th>Cliente</th>
+                                        <th>Método Pago</th>
+                                        <th>Subtotal (RD$)</th>
+                                        <th>ITBIS (18%)</th>
+                                        <th>Total Neto (RD$)</th>
+                                        <th class="admin-only-action-header">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sales-history-tbody">
+                                    <!-- Cargado dinámicamente por JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 4. INVENTARIO REAL -->
+                <section id="inventario-page" class="page-section">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">Inventario Inteligente por Medidas</h1>
+                            <p class="page-subtitle">Control exacto de ingredientes en gramos, mililitros, unidades y decoración.</p>
+                        </div>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <!-- File input oculto para importar -->
+                            <input type="file" id="csv-import-file" accept=".csv" style="display: none;">
+                            <button class="btn btn-secondary" id="import-inventory-csv-btn">
+                                <i class="fa-solid fa-file-import"></i> Importar desde Excel (CSV)
+                            </button>
+                            <button class="btn btn-secondary" id="export-inventory-csv-btn">
+                                <i class="fa-solid fa-file-excel"></i> Exportar Almacén
+                            </button>
+                            <button class="btn btn-primary" id="add-inventory-btn">
+                                <i class="fa-solid fa-plus"></i> Registrar Compra / Entrada
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Clasificación por Categorías de Inventario -->
+                    <div class="glass-card panel-card">
+                        <div class="panel-header">
+                            <h3><i class="fa-solid fa-warehouse"></i> Existencias en Bodega</h3>
+                            <div class="inventory-filters" style="display: flex; gap: 8px;">
+                                <select id="inventory-cat-filter" class="select-premium inline small">
+                                    <option value="all">Todas las Categorías</option>
+                                    <option value="Ingredientes">Ingredientes</option>
+                                    <option value="Empaque">Empaques y Cajas</option>
+                                    <option value="Decoración">Decoraciones</option>
+                                    <option value="Limpieza">Artículos de Limpieza</option>
+                                    <option value="Equipos">Equipos de Cocina</option>
+                                </select>
+                                <select id="inventory-unit-filter" class="select-premium inline small" title="Cambiar Unidad de Visualización">
+                                    <option value="base" selected>📏 Unidad Base (g/ml/u)</option>
+                                    <option value="tazas">☕ Mostrar en Tazas</option>
+                                    <option value="onzas">⚖️ Mostrar en Onzas (oz)</option>
+                                    <option value="libras">📦 Mostrar en Libras (lb)</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="table-responsive">
+                            <table class="table-premium" id="inventory-table">
+                                <thead>
+                                    <tr>
+                                        <th>Insumo</th>
+                                        <th>Categoría</th>
+                                        <th>Existencia Actual</th>
+                                        <th>Unidad</th>
+                                        <th>Costo Unitario (Compra)</th>
+                                        <th>Valor Total</th>
+                                        <th>Alerta Mínima</th>
+                                        <th>Estado</th>
+                                        <th>Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inventory-items-tbody">
+                                    <!-- Cargado por JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Kardex de Movimientos Recientes -->
+                    <div class="glass-card panel-card margin-top-20">
+                        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <h3><i class="fa-solid fa-list-check"></i> Kardex de Inventario (Historial de Movimientos)</h3>
+                            <button class="btn btn-secondary small" id="export-kardex-csv-btn">
+                                <i class="fa-solid fa-file-excel"></i> Exportar Kardex a Excel (CSV)
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table-premium">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha / Hora</th>
+                                        <th>Insumo / Artículo</th>
+                                        <th>Tipo de Movimiento</th>
+                                        <th>Cantidad</th>
+                                        <th>Unidad</th>
+                                        <th>Costo Unitario</th>
+                                        <th>Razón / Origen</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="kardex-tbody">
+                                    <!-- Cargado por JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- MODAL COMPRAR / AJUSTAR INVENTARIO (Oculto) -->
+                    <div id="inventory-modal" class="modal hidden">
+                        <div class="modal-content glass-card">
+                            <div class="modal-header">
+                                <h3><i class="fa-solid fa-cart-shopping"></i> Registrar Entrada a Inventario (Compra)</h3>
+                                <button class="close-modal-btn icon-btn"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="form-group">
+                                    <label for="inv-modal-select">Selecciona el Insumo / Artículo:</label>
+                                    <select id="inv-modal-select" class="select-premium">
+                                        <!-- Insumos cargados por JS -->
+                                    </select>
+                                </div>
+                                <div class="grid-3 gap-10 margin-top-10" id="inv-modal-inputs-row">
+                                    <div class="form-group">
+                                        <label for="inv-modal-qty">Cantidad:</label>
+                                        <input type="number" id="inv-modal-qty" class="input-premium" placeholder="Ej. 2, 500, 10">
+                                    </div>
+                                    <div class="form-group" id="inv-modal-unit-group">
+                                        <label for="inv-modal-unit">Unidad Comprada:</label>
+                                        <select id="inv-modal-unit" class="select-premium">
+                                            <option value="base" selected>Base (Igual a Bodega)</option>
+                                            <option value="g">g (Gramos)</option>
+                                            <option value="ml">ml (Mililitros)</option>
+                                            <option value="lb">lb (Libras)</option>
+                                            <option value="oz">oz (Onzas)</option>
+                                            <option value="kg">kg (Kilogramos)</option>
+                                            <option value="litro">litro (Litros)</option>
+                                            <option value="taza">taza (Tazas)</option>
+                                            <option value="u">unidad (Unidades)</option>
+                                            <option value="paquete">paquete</option>
+                                            <option value="pote">pote</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" id="inv-modal-cost-group">
+                                        <label for="inv-modal-cost">Costo Total (RD$):</label>
+                                        <input type="number" id="inv-modal-cost" class="input-premium" placeholder="Costo total">
+                                    </div>
+                                </div>
+                                <div class="form-group margin-top-10">
+                                    <label>Nota: El costo unitario se actualizará automáticamente mediante el sistema de costo promedio.</label>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn btn-secondary close-modal-btn">Cancelar</button>
+                                <button class="btn btn-primary" id="inv-modal-save-btn">Guardar Compra</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- MODAL EDITAR FICHA DE INSUMO (Oculto) -->
+                    <div id="edit-item-modal" class="modal hidden">
+                        <div class="modal-content glass-card">
+                            <div class="modal-header">
+                                <h3><i class="fa-solid fa-pen-to-square"></i> Editar Ficha de Insumo / Bodega</h3>
+                                <button class="close-modal-btn icon-btn" onclick="document.getElementById('edit-item-modal').classList.add('hidden')"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                            <div class="modal-body">
+                                <input type="hidden" id="edit-item-id">
+                                <div class="form-group">
+                                    <label for="edit-item-name">Nombre del Insumo:</label>
+                                    <input type="text" id="edit-item-name" class="input-premium">
+                                </div>
+                                <div class="grid-2 gap-10 margin-top-10">
+                                    <div class="form-group">
+                                        <label for="edit-item-category">Categoría:</label>
+                                        <select id="edit-item-category" class="select-premium">
+                                            <option value="Ingredientes">Ingredientes</option>
+                                            <option value="Empaques">Empaques</option>
+                                            <option value="Decoracion">Decoración</option>
+                                            <option value="Limpieza">Limpieza</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="edit-item-unit">Unidad Base en Almacén:</label>
+                                        <select id="edit-item-unit" class="select-premium">
+                                            <option value="g">g (Gramos)</option>
+                                            <option value="ml">ml (Mililitros)</option>
+                                            <option value="u">u (Unidades)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="grid-3 gap-10 margin-top-10">
+                                    <div class="form-group">
+                                        <label for="edit-item-stock">Existencia Física (Stock):</label>
+                                        <input type="number" step="any" id="edit-item-stock" class="input-premium">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="edit-item-cost">Costo Promedio (RD$ / u):</label>
+                                        <input type="number" step="any" id="edit-item-cost" class="input-premium">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="edit-item-min">Stock Mínimo (Alerta):</label>
+                                        <input type="number" step="any" id="edit-item-min" class="input-premium">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                                <button class="btn btn-red" id="edit-item-delete-btn"><i class="fa-solid fa-trash"></i> Eliminar de Almacén</button>
+                                <div>
+                                    <button class="btn btn-secondary" onclick="document.getElementById('edit-item-modal').classList.add('hidden')">Cancelar</button>
+                                    <button class="btn btn-primary" id="edit-item-save-btn">Guardar Ficha</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- MODAL EDITAR FACTURA DE VENTA (Oculto) -->
+                    <div id="edit-sale-modal" class="modal hidden">
+                        <div class="modal-content glass-card">
+                            <div class="modal-header">
+                                <h3><i class="fa-solid fa-pen-to-square"></i> Modificar Factura de Venta / NCF</h3>
+                                <button class="close-modal-btn icon-btn" onclick="document.getElementById('edit-sale-modal').classList.add('hidden')"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                            <div class="modal-body">
+                                <input type="hidden" id="edit-sale-id">
+                                <div class="grid-2 gap-10">
+                                    <div class="form-group">
+                                        <label for="edit-sale-ncf">NCF / Número de Factura:</label>
+                                        <input type="text" id="edit-sale-ncf" class="input-premium" disabled>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="edit-sale-date">Fecha de Emisión:</label>
+                                        <input type="text" id="edit-sale-date" class="input-premium" disabled>
+                                    </div>
+                                </div>
+                                <div class="form-group margin-top-10">
+                                    <label for="edit-sale-customer">Nombre del Cliente / Entidad:</label>
+                                    <input type="text" id="edit-sale-customer" class="input-premium">
+                                </div>
+                                <div class="grid-2 gap-10 margin-top-10">
+                                    <div class="form-group">
+                                        <label for="edit-sale-payment">Método de Pago:</label>
+                                        <select id="edit-sale-payment" class="select-premium">
+                                            <option value="efectivo">Efectivo</option>
+                                            <option value="tarjeta">Tarjeta de Crédito / Débito</option>
+                                            <option value="transferencia">Transferencia Bancaria</option>
+                                            <option value="credito">Cuenta de Crédito (Fiado)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="edit-sale-total">Monto Total Facturado (RD$):</label>
+                                        <input type="number" step="any" id="edit-sale-total" class="input-premium">
+                                    </div>
+                                </div>
+                                <div class="alert-box warning margin-top-15">
+                                    <i class="fa-solid fa-triangle-exclamation"></i>
+                                    <span>¡Atención! Modificar el monto total de una factura afectará directamente los saldos de la Caja Chica Activa o las deudas del cliente en el CRM.</span>
+                                </div>
+                            </div>
+                            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                                <button class="btn btn-red" id="edit-sale-delete-btn"><i class="fa-solid fa-trash"></i> Anular / Eliminar Venta</button>
+                                <div>
+                                    <button class="btn btn-secondary" onclick="document.getElementById('edit-sale-modal').classList.add('hidden')">Cancelar</button>
+                                    <button class="btn btn-primary" id="edit-sale-save-btn">Aplicar Cambios</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 5. RECETARIO & COSTEO -->
+                <section id="recetario-page" class="page-section">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">Recetario y Costeo Profesional</h1>
+                            <p class="page-subtitle">Calcula el costo real de tus postres incluyendo mano de obra, gas, luz y empaques.</p>
+                        </div>
+                        <button class="btn btn-primary" id="add-recipe-btn">
+                            <i class="fa-solid fa-plus"></i> Crear Nueva Receta
+                        </button>
+                    </div>
+
+                    <div class="grid-2-1 gap-20">
+                        <!-- Lista de Recetas Existentes -->
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-book-open text-primary"></i> Recetas Guardadas</h3>
+                            </div>
+                            <div class="recipes-grid" id="recipes-container">
+                                <!-- Cargado por JS -->
+                            </div>
+                        </div>
+
+                        <!-- Costeo Interactivo y Precios Sugeridos -->
+                        <div class="glass-card panel-card" id="recipe-cost-calculator-panel">
+                            <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                                <h3 id="calc-recipe-name">Selecciona una receta</h3>
+                                <button class="btn btn-red small" id="delete-recipe-btn" style="display: none; padding: 4px 8px; font-size: 11px;">
+                                    <i class="fa-solid fa-trash"></i> Eliminar Receta
+                                </button>
+                            </div>
+                            
+                            <div class="recipe-detail-summary hidden" id="recipe-calc-details">
+                                <div class="metric-mini-grid">
+                                    <div class="metric-mini-card">
+                                        <span>Rendimiento</span>
+                                        <strong id="calc-yield">0 U</strong>
+                                    </div>
+                                    <div class="metric-mini-card">
+                                        <span>Tiempo</span>
+                                        <strong id="calc-time">0 min</strong>
+                                    </div>
+                                    <div class="metric-mini-card">
+                                        <span>Dificultad</span>
+                                        <strong id="calc-difficulty">Fácil</strong>
+                                    </div>
+                                </div>
+
+                                <div class="divider"></div>
+
+                                <h4><i class="fa-solid fa-mortar-pestle"></i> Costo de Insumos & Empaques</h4>
+                                <div class="table-responsive margin-top-10" style="max-height: 150px;">
+                                    <table class="table-premium small">
+                                        <thead>
+                                            <tr>
+                                                <th>Insumo</th>
+                                                <th>Cant. Usada</th>
+                                                <th>Costo</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="recipe-calc-ingredients-tbody">
+                                            <!-- JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div class="divider"></div>
+
+                                <h4><i class="fa-solid fa-bolt-lightning"></i> Costos Indirectos de Producción</h4>
+                                <div class="grid-2 gap-10 margin-top-10">
+                                    <div class="form-group">
+                                        <label for="calc-indirect-servicios">Electricidad/Gas (RD$):</label>
+                                        <input type="number" id="calc-indirect-servicios" class="input-premium small recipe-recalc-trigger" value="50">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="calc-indirect-mano">Mano de Obra (RD$):</label>
+                                        <input type="number" id="calc-indirect-mano" class="input-premium small recipe-recalc-trigger" value="150">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="calc-indirect-merma">Merma Estimada (%):</label>
+                                        <input type="number" id="calc-indirect-merma" class="input-premium small recipe-recalc-trigger" value="5">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="calc-indirect-empaque">Costo Empaques (RD$):</label>
+                                        <input type="number" id="calc-indirect-empaque" class="input-premium small recipe-recalc-trigger" value="80">
+                                    </div>
+                                </div>
+
+                                <div class="divider"></div>
+
+                                <!-- Resultados de Costo Real -->
+                                <div class="cost-summary-box">
+                                    <div class="cost-row">
+                                        <span>Costo de Producción Tanda Completa:</span>
+                                        <strong id="recipe-total-cost-tanda">RD$0.00</strong>
+                                    </div>
+                                    <div class="cost-row main-cost">
+                                        <span>Costo Real Unitario:</span>
+                                        <strong id="recipe-unit-cost-real" class="text-red">RD$0.00</strong>
+                                    </div>
+                                </div>
+
+                                <div class="divider"></div>
+
+                                <!-- Precios Inteligentes Sugeridos -->
+                                <h4><i class="fa-solid fa-brain-circuit text-gold"></i> Precios Inteligentes Sugeridos</h4>
+                                <div class="pricing-suggestions-grid margin-top-10">
+                                    <div class="price-suggest-card">
+                                        <span class="p-title">Mínimo (30% Margen)</span>
+                                        <strong class="p-value" id="price-suggest-min">RD$0.00</strong>
+                                    </div>
+                                    <div class="price-suggest-card active">
+                                        <span class="p-title">Recomendado (50% Margen)</span>
+                                        <strong class="p-value" id="price-suggest-rec">RD$0.00</strong>
+                                    </div>
+                                    <div class="price-suggest-card">
+                                        <span class="p-title">Premium (80% Margen)</span>
+                                        <strong class="p-value" id="price-suggest-prem">RD$0.00</strong>
+                                    </div>
+                                </div>
+
+                                <!-- Alerta de Precio Bajo el Costo en el POS -->
+                                <div class="price-covenant-checker margin-top-15">
+                                    <label for="recipe-pos-price-mock">Precio de Venta en POS (RD$):</label>
+                                    <div class="flex gap-10">
+                                        <input type="number" id="recipe-pos-price-mock" class="input-premium recipe-recalc-trigger" value="120">
+                                        <button class="btn btn-secondary" id="save-price-pos-btn">Fijar Precio</button>
+                                    </div>
+                                    <div id="recipe-alert-below-cost" class="alert-box danger margin-top-10 hidden">
+                                        <i class="fa-solid fa-triangle-exclamation"></i>
+                                        <span><strong>¡Alerta!</strong> El precio de venta establecido está por debajo del costo unitario real. Estás perdiendo dinero.</span>
+                                    </div>
+                                </div>
+
+                            </div>
+                            <div class="empty-state-card" id="recipe-calc-empty">
+                                <i class="fa-solid fa-scale-balanced"></i>
+                                <p>Selecciona una receta de la lista para ver y configurar el desglose de costos y precios inteligentes.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 6. LÍNEA DE PRODUCCIÓN -->
+                <section id="produccion-page" class="page-section">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">Línea de Producción Automatizada</h1>
+                            <p class="page-subtitle">Convierte ingredientes en productos terminados, reservando y descontando existencias en vivo.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid-2 gap-20">
+                        <!-- Formulario de Producción -->
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-kitchen-set"></i> Iniciar Nueva Orden de Producción</h3>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="prod-recipe-select">Selecciona la Receta a Producir:</label>
+                                <select id="prod-recipe-select" class="select-premium">
+                                    <!-- Cargado por JS -->
+                                </select>
+                            </div>
+
+                            <div class="grid-2 gap-10 margin-top-10">
+                                <div class="form-group">
+                                    <label for="prod-multiplier">Cantidad de Tandas a Producir:</label>
+                                    <input type="number" id="prod-multiplier" class="input-premium" value="1" min="1">
+                                </div>
+                                <div class="form-group">
+                                    <label>Total Postres a Crear:</label>
+                                    <div class="arqueo-diff-box font-bold text-center" id="prod-total-units-display">27 Unidades</div>
+                                </div>
+                            </div>
+
+                            <div class="divider"></div>
+
+                            <h4><i class="fa-solid fa-clipboard-list"></i> Comprobación de Ingredientes en Inventario</h4>
+                            <div class="production-check-list margin-top-10" id="production-ingredients-check">
+                                <!-- JS checks -->
+                            </div>
+
+                            <div class="divider"></div>
+
+                            <button class="btn btn-primary btn-full" id="prod-execute-btn">
+                                <i class="fa-solid fa-fire"></i> Iniciar Cocción y Procesar Producción
+                            </button>
+                        </div>
+
+                        <!-- Historial de Órdenes Realizadas -->
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-clock-rotate-left"></i> Historial de Producción</h3>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table-premium">
+                                    <thead>
+                                        <tr>
+                                            <th>Fecha/Hora</th>
+                                            <th>Receta</th>
+                                            <th>Tandas</th>
+                                            <th>Unidades Creadas</th>
+                                            <th>Costo Real U.</th>
+                                            <th>Costo Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="production-history-tbody">
+                                        <!-- JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fila de Mermas y Reutilización de Postres -->
+                    <div class="grid-2 gap-20 margin-top-20">
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-cookie-bite text-red"></i> Control de Mermas, Roturas y Pérdidas</h3>
+                            </div>
+                            <div class="form-group">
+                                <label for="merma-product-select">Selecciona el Producto Dañado:</label>
+                                <select id="merma-product-select" class="select-premium">
+                                    <!-- Cargar productos por JS -->
+                                </select>
+                            </div>
+                            <div class="grid-2 gap-10 margin-top-10">
+                                <div class="form-group">
+                                    <label for="merma-qty">Cantidad Dañada:</label>
+                                    <input type="number" id="merma-qty" class="input-premium small" value="1" min="1">
+                                </div>
+                                <div class="form-group">
+                                    <label for="merma-action">Destino / Acción:</label>
+                                    <select id="merma-action" class="select-premium small">
+                                        <option value="descarte">🔴 Descarte Total (Registrar como Pérdida)</option>
+                                        <option value="reutilizar">♻️ Reutilizar como Insumo (Migas de Brownie)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button class="btn btn-secondary btn-full margin-top-15" id="merma-execute-btn">
+                                <i class="fa-solid fa-circle-check"></i> Registrar Merma de Postre
+                            </button>
+                        </div>
+
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-recycle text-green"></i> Insumos Reutilizables en Bodega</h3>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table-premium">
+                                    <thead>
+                                        <tr>
+                                            <th>Insumo Reutilizado</th>
+                                            <th>Existencia</th>
+                                            <th>Unidad</th>
+                                            <th>Costo Contable</th>
+                                            <th>Razón de Origen</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="reusable-items-tbody">
+                                        <!-- JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 7. CRM & PEDIDOS -->
+                <section id="crm-page" class="page-section">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">CRM de Clientes & Pedidos Especiales</h1>
+                            <p class="page-subtitle">Gestiona abonos, estados de entrega de pedidos personalizados y créditos activos.</p>
+                        </div>
+                        <div class="crm-tabs">
+                            <button class="tab-btn active" data-tab="tab-pedidos">Pedidos Especiales</button>
+                            <button class="tab-btn" data-tab="tab-clientes">Clientes & Crédito</button>
+                        </div>
+                    </div>
+
+                    <!-- TAB 1: PEDIDOS ESPECIALES / EVENTOS -->
+                    <div id="tab-pedidos" class="crm-tab-content active">
+                        <div class="grid-2-1 gap-20">
+                            <!-- Listado de Pedidos y Calendario -->
+                            <div class="glass-card panel-card">
+                                <div class="panel-header">
+                                    <h3><i class="fa-solid fa-calendar-check text-primary"></i> Pedidos en Agenda</h3>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table-premium">
+                                        <thead>
+                                            <tr>
+                                                <th>Entrega</th>
+                                                <th>Cliente</th>
+                                                <th>Detalle / Diseño</th>
+                                                <th>Monto</th>
+                                                <th>Abono</th>
+                                                <th>Balance</th>
+                                                <th>Estado</th>
+                                                <th>Acción</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="orders-tbody">
+                                            <!-- JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Formulario de Pedido Especial / Evento -->
+                            <div class="glass-card panel-card">
+                                <div class="panel-header">
+                                    <h3><i class="fa-solid fa-cake-candles"></i> Agendar Pedido de Evento</h3>
+                                </div>
+                                <div class="form-group">
+                                    <label for="order-client">Cliente:</label>
+                                    <select id="order-client" class="select-premium small">
+                                        <!-- JS -->
+                                    </select>
+                                </div>
+                                <div class="grid-2 gap-10 margin-top-10">
+                                    <div class="form-group">
+                                        <label for="order-date">Fecha Entrega:</label>
+                                        <input type="date" id="order-date" class="input-premium small">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="order-time">Hora Entrega:</label>
+                                        <input type="time" id="order-time" class="input-premium small" value="16:00">
+                                    </div>
+                                </div>
+                                <div class="form-group margin-top-10">
+                                    <label for="order-desc">Descripción del Postre / Diseño:</label>
+                                    <textarea id="order-desc" class="input-premium small" rows="2" placeholder="Ej. Bizcocho de Bodas de 3 niveles con flores de fondant y relleno de dulce de leche."></textarea>
+                                </div>
+                                <div class="grid-3 gap-10 margin-top-10">
+                                    <div class="form-group">
+                                        <label for="order-price">Monto Total:</label>
+                                        <input type="number" id="order-price" class="input-premium small" placeholder="RD$0.00">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="order-abono">Abono Inicial:</label>
+                                        <input type="number" id="order-abono" class="input-premium small" placeholder="RD$0.00">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Balance Pendiente:</label>
+                                        <div class="balance-display font-bold" id="order-balance-display">RD$0.00</div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-primary btn-full margin-top-15" id="order-save-btn">
+                                    <i class="fa-solid fa-floppy-disk"></i> Agendar e Imprimir Recibo
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: CLIENTES & CRÉDITO -->
+                    <div id="tab-clientes" class="crm-tab-content">
+                        <div class="grid-2 gap-20">
+                            <!-- Ficha de Clientes -->
+                            <div class="glass-card panel-card">
+                                <div class="panel-header">
+                                    <h3><i class="fa-solid fa-users"></i> Listado de Clientes Activos</h3>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table-premium">
+                                        <thead>
+                                            <tr>
+                                                <th>Nombre</th>
+                                                <th>Contacto</th>
+                                                <th>Gasto Prom.</th>
+                                                <th>Cumpleaños</th>
+                                                <th>Límite Crédito</th>
+                                                <th>Saldo Deudor</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="crm-clients-tbody">
+                                            <!-- JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Gestión de Cuenta Corriente / Cobro de Crédito -->
+                            <div class="glass-card panel-card">
+                                <div class="panel-header">
+                                    <h3><i class="fa-solid fa-wallet"></i> Cobro de Saldos / Abonos a Créditos</h3>
+                                </div>
+                                <div class="form-group">
+                                    <label for="credit-client-select">Selecciona el Cliente:</label>
+                                    <select id="credit-client-select" class="select-premium">
+                                        <!-- JS -->
+                                    </select>
+                                </div>
+                                <div class="credit-state-info margin-top-15" id="credit-client-details">
+                                    <div class="kpi-mini-row">
+                                        <span>Saldo Deudor Actual:</span>
+                                        <h3 id="credit-val-deuda" class="text-red">RD$0.00</h3>
+                                    </div>
+                                    <div class="kpi-mini-row margin-top-5">
+                                        <span>Límite de Crédito Permitido:</span>
+                                        <span id="credit-val-limite" class="font-bold">RD$5,000.00</span>
+                                    </div>
+                                </div>
+
+                                <div class="divider"></div>
+
+                                <h4><i class="fa-solid fa-money-bill-transfer"></i> Registrar Abono a la Deuda</h4>
+                                <div class="grid-2 gap-10 margin-top-10">
+                                    <div class="form-group">
+                                        <label for="credit-abono-monto">Monto a Abonar (RD$):</label>
+                                        <input type="number" id="credit-abono-monto" class="input-premium" placeholder="0.00">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="credit-abono-method">Método de Cobro:</label>
+                                        <select id="credit-abono-method" class="select-premium">
+                                            <option value="efectivo">💵 Efectivo (Entra a Caja)</option>
+                                            <option value="transferencia">🏦 Transferencia (Entra a Banco)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button class="btn btn-primary btn-full margin-top-15" id="credit-abono-btn">
+                                    <i class="fa-solid fa-circle-plus"></i> Aplicar Abono a Cuenta
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 8. MARKETPLACE & PLANTILLAS -->
+                <section id="marketplace-page" class="page-section">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">Marketplace de Recetas & Diseños</h1>
+                            <p class="page-subtitle">Compra, vende e instala recetas compartidas por otros profesionales de repostería.</p>
+                        </div>
+                    </div>
+
+                    <div class="marketplace-grid">
+                        <div class="glass-card recipe-item-card">
+                            <img src="https://images.unsplash.com/photo-1606313564200-e75d5e30476c?q=80&w=400&auto=format&fit=crop" alt="Carlota de Limón" class="mkt-img">
+                            <div class="mkt-info">
+                                <span class="badge blue-bg">Receta e Insumos</span>
+                                <h3>Carlota de Limón Imperial</h3>
+                                <p class="desc">Receta completa optimizada, incluye empaques sugeridos y tabla de mermas.</p>
+                                <div class="mkt-footer">
+                                    <span class="price">RD$850.00</span>
+                                    <button class="btn btn-secondary small buy-recipe-btn" data-recipe="carlota"><i class="fa-solid fa-cart-shopping"></i> Comprar</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="glass-card recipe-item-card">
+                            <img src="https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=400&auto=format&fit=crop" alt="Chocolate Fudgy" class="mkt-img">
+                            <div class="mkt-info">
+                                <span class="badge green-bg">Diseño & Técnica</span>
+                                <h3>Fudge Cake Suprema de Bodas</h3>
+                                <p class="desc">Plantilla de diseño de bizcocho con manual de producción paso a paso.</p>
+                                <div class="mkt-footer">
+                                    <span class="price">RD$1,200.00</span>
+                                    <button class="btn btn-secondary small buy-recipe-btn" data-recipe="fudge"><i class="fa-solid fa-cart-shopping"></i> Comprar</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="glass-card recipe-item-card">
+                            <img src="https://images.unsplash.com/photo-1558961309-dbdf71791454?q=80&w=400&auto=format&fit=crop" alt="Galletas Red Velvet" class="mkt-img">
+                            <div class="mkt-info">
+                                <span class="badge orange-bg">Receta</span>
+                                <h3>Red Velvet Cookies Premium</h3>
+                                <p class="desc">Fórmula exacta para galletas crujientes por fuera y melosas por dentro.</p>
+                                <div class="mkt-footer">
+                                    <span class="price">RD$500.00</span>
+                                    <button class="btn btn-secondary small buy-recipe-btn" data-recipe="redvelvet"><i class="fa-solid fa-cart-shopping"></i> Comprar</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 9. SAAS ADMIN (SUPERADMIN PANEL) -->
+                <section id="saas-page" class="page-section saas-only">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">Consola de Administración del SaaS</h1>
+                            <p class="page-subtitle">Panel exclusivo del propietario del software para facturación, planes y control de clientes.</p>
+                        </div>
+                    </div>
+
+                    <!-- Fila SaaS KPIs -->
+                    <div class="kpi-grid">
+                        <div class="kpi-card glass-card">
+                            <div class="kpi-icon blue"><i class="fa-solid fa-server"></i></div>
+                            <div class="kpi-data">
+                                <h3>Negocios Totales</h3>
+                                <span class="kpi-value">3</span>
+                                <span class="kpi-trend green">SaaS Multi-tenant Activo</span>
+                            </div>
+                        </div>
+                        <div class="kpi-card glass-card">
+                            <div class="kpi-icon green"><i class="fa-solid fa-money-bill-trend-up"></i></div>
+                            <div class="kpi-data">
+                                <h3>MRR (Ingresos Recurrentes)</h3>
+                                <span class="kpi-value">RD$9,700.00</span>
+                                <span class="kpi-trend font-secondary">Facturación mensual</span>
+                            </div>
+                        </div>
+                        <div class="kpi-card glass-card">
+                            <div class="kpi-icon purple"><i class="fa-solid fa-heart-circle-check"></i></div>
+                            <div class="kpi-data">
+                                <h3>Clientes Activos</h3>
+                                <span class="kpi-value" id="saas-active-tenants">2 / 3</span>
+                                <span class="kpi-trend font-secondary">A&M + Dulce Tentación</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tabla de Negocios en el SaaS -->
+                    <div class="glass-card panel-card margin-top-20">
+                        <div class="panel-header">
+                            <h3><i class="fa-solid fa-building-shield"></i> Control de Clientes / Empresas en el Ecosistema</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table-premium">
+                                <thead>
+                                    <tr>
+                                        <th>Negocio / Empresa</th>
+                                        <th>Plan Suscrito</th>
+                                        <th>Administrador</th>
+                                        <th>Última Factura</th>
+                                        <th>Monto Mensual</th>
+                                        <th>Estado SaaS</th>
+                                        <th>Acciones Superadmin</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td><strong>🍽️ A&M ERP</strong></td>
+                                        <td><span class="badge purple-bg">Empresa ERP</span></td>
+                                        <td>Sofía Rodríguez</td>
+                                        <td>2026-05-15</td>
+                                        <td>RD$4,500.00</td>
+                                        <td><span class="status-dot green"></span> Activo (Tu Negocio)</td>
+                                        <td><button class="btn btn-secondary small disabled" disabled>Inmune</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>🍩 Dulce Tentación</strong></td>
+                                        <td><span class="badge blue-bg">Plan Pro</span></td>
+                                        <td>Carlos Mendoza</td>
+                                        <td>2026-05-10</td>
+                                        <td>RD$3,400.00</td>
+                                        <td><span class="status-dot green"></span> Activo</td>
+                                        <td>
+                                            <button class="btn btn-secondary small text-red saas-toggle-tenant-btn" data-tenant="DulceTentacion">
+                                                <i class="fa-solid fa-ban"></i> Suspender
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><strong>🧁 Sweet House</strong></td>
+                                        <td><span class="badge">Plan Básico</span></td>
+                                        <td>Lucía Gómez</td>
+                                        <td>2026-04-01</td>
+                                        <td>RD$1,800.00</td>
+                                        <td>
+                                            <span class="status-dot red" id="saas-sweethouse-status-dot"></span> 
+                                            <span id="saas-sweethouse-status-text" class="text-red font-bold">Suspendido</span>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-primary small saas-toggle-tenant-btn" id="saas-sweethouse-toggle-btn" data-tenant="SweetHouse">
+                                                <i class="fa-solid fa-circle-check"></i> Activar / Desbloquear
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Fila para Registrar Nueva Empresa en el SaaS -->
+                    <div class="glass-card panel-card margin-top-20">
+                        <div class="panel-header">
+                            <h3><i class="fa-solid fa-square-plus"></i> Registrar Nueva Repostería / Restaurante en el SaaS</h3>
+                        </div>
+                        <form id="saas-add-tenant-form" class="margin-top-15">
+                            <div class="grid-3 gap-10">
+                                <div class="form-group">
+                                    <label for="new-tenant-name">Nombre de la Empresa:</label>
+                                    <input type="text" id="new-tenant-name" class="input-premium small" placeholder="Ej. Sweet Bakery" required style="width: 100%;">
+                                </div>
+                                <div class="form-group">
+                                    <label for="new-tenant-admin">Nombre del Administrador:</label>
+                                    <input type="text" id="new-tenant-admin" class="input-premium small" placeholder="Ej. Ana Martínez" required style="width: 100%;">
+                                </div>
+                                <div class="form-group">
+                                    <label for="new-tenant-plan">Plan de Suscripción:</label>
+                                    <select id="new-tenant-plan" class="select-premium small">
+                                        <option value="Empresa" selected>Empresa ERP (RD$4,500/mes)</option>
+                                        <option value="Pro">Plan Pro (RD$3,400/mes)</option>
+                                        <option value="Básico">Plan Básico (RD$1,800/mes)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="grid-2 gap-10 margin-top-10">
+                                <div class="form-group">
+                                    <label for="new-tenant-rnc">RNC Fiscal:</label>
+                                    <input type="text" id="new-tenant-rnc" class="input-premium small" placeholder="Ej. 131-99999-9" required style="width: 100%;">
+                                </div>
+                                <div class="form-group">
+                                    <label for="new-tenant-address">Dirección Física:</label>
+                                    <input type="text" id="new-tenant-address" class="input-premium small" placeholder="Ej. Av. Sarasota #12, Santo Domingo" required style="width: 100%;">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary small margin-top-15" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                <i class="fa-solid fa-circle-plus"></i> Crear & Habilitar Nueva Empresa
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- 11. FINANZAS Y NOMINA -->
+                <section id="finanzas-page" class="page-section">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">Super Sistema Financiero</h1>
+                            <p class="page-subtitle">Gestión de gastos (606), nómina con comisiones y estados financieros.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid-2 gap-20">
+                        <!-- Gastos y NCF 606 -->
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-file-invoice"></i> Gastos y Compras NCF 606</h3>
+                            </div>
+                            <form id="expense-606-form" class="margin-top-10">
+                                <div class="grid-2 gap-10">
+                                    <div class="form-group">
+                                        <label>RNC / Cédula Proveedor:</label>
+                                        <input type="text" id="exp-rnc" class="input-premium small" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>NCF:</label>
+                                        <input type="text" id="exp-ncf" class="input-premium small" required>
+                                    </div>
+                                </div>
+                                <div class="grid-2 gap-10 margin-top-10">
+                                    <div class="form-group">
+                                        <label>Monto Total (RD$):</label>
+                                        <input type="number" id="exp-amount" class="input-premium small" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>ITBIS (RD$):</label>
+                                        <input type="number" id="exp-tax" class="input-premium small" value="0">
+                                    </div>
+                                </div>
+                                <div class="form-group margin-top-10">
+                                    <label>Concepto:</label>
+                                    <input type="text" id="exp-desc" class="input-premium small" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-full margin-top-15">
+                                    <i class="fa-solid fa-plus"></i> Registrar Gasto (606)
+                                </button>
+                            </form>
+                            <div class="divider"></div>
+                            <div class="table-responsive" style="max-height: 200px;">
+                                <table class="table-premium">
+                                    <thead><tr><th>Fecha</th><th>RNC</th><th>NCF</th><th>Total</th></tr></thead>
+                                    <tbody id="expenses-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Nómina y Comisiones -->
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-people-carry-box"></i> Nómina y Comisiones</h3>
+                                <button id="process-payroll-btn" class="btn btn-secondary small"><i class="fa-solid fa-money-check-dollar"></i> Procesar Pago</button>
+                            </div>
+                            <div class="table-responsive margin-top-10">
+                                <table class="table-premium">
+                                    <thead><tr><th>Empleado</th><th>Sueldo Base</th><th>Comisión</th><th>Desc. Ley</th><th>Neto</th></tr></thead>
+                                    <tbody id="payroll-tbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="glass-card panel-card margin-top-20">
+                        <div class="panel-header">
+                            <h3><i class="fa-solid fa-scale-balanced"></i> Estados Financieros</h3>
+                            <div style="display:flex; gap:10px;">
+                                <button id="print-pl-btn" class="btn btn-secondary small"><i class="fa-solid fa-print"></i> P&L</button>
+                                <button id="print-bs-btn" class="btn btn-secondary small"><i class="fa-solid fa-print"></i> Balance General</button>
+                            </div>
+                        </div>
+                        <div class="grid-2 gap-20 margin-top-10">
+                            <div>
+                                <h4>Estado de Resultados (P&L)</h4>
+                                <div id="pl-statement-display" style="padding: 10px; background: rgba(0,0,0,0.02); border-radius:6px; font-family: monospace; font-size:12px; white-space: pre-wrap;">Cargando...</div>
+                            </div>
+                            <div>
+                                <h4>Balance General</h4>
+                                <div id="bs-statement-display" style="padding: 10px; background: rgba(0,0,0,0.02); border-radius:6px; font-family: monospace; font-size:12px; white-space: pre-wrap;">Cargando...</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 10. CONFIGURACIÓN -->
+                <section id="settings-page" class="page-section">
+                    <div class="page-header">
+                        <div>
+                            <h1 class="page-title">Configuración del ERP</h1>
+                            <p class="page-subtitle">Modifica los parámetros de tu empresa actual y administra los planes de suscripción.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid-2 gap-20">
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-sliders"></i> Ajustes de Negocio</h3>
+                            </div>
+                            <div class="form-group margin-top-15">
+                                <label>Nombre del Negocio:</label>
+                                <input type="text" class="input-premium" id="set-business-name" value="A&M ERP">
+                            </div>
+                            <div class="form-group margin-top-10">
+                                <label>RNC Fiscal (Cédula):</label>
+                                <input type="text" class="input-premium" id="set-business-rnc" value="131-45678-9">
+                            </div>
+                            <div class="form-group margin-top-10">
+                                <label>Dirección:</label>
+                                <input type="text" class="input-premium" id="set-business-address" value="Av. Abraham Lincoln #402, Santo Domingo, RD">
+                            </div>
+                            <button class="btn btn-primary margin-top-15" id="save-settings-btn">Guardar Ajustes</button>
+                        </div>
+
+                        <div class="glass-card panel-card">
+                            <div class="panel-header">
+                                <h3><i class="fa-solid fa-credit-card"></i> Suscripción y Respaldos</h3>
+                            </div>
+                            <div class="plan-info-card margin-top-15">
+                                <div class="flex justify-between items-center">
+                                    <span class="badge purple-bg">Nivel Empresa SaaS</span>
+                                    <strong class="text-gold">A&M Pro ERP</strong>
+                                </div>
+                                <div class="price-desc margin-top-10">
+                                    <h2>RD$4,500.00 <span class="small-label">/ mes</span></h2>
+                                    <p class="small-label text-green"><i class="fa-solid fa-check"></i> Próximo cobro automático el 15 de Junio, 2026</p>
+                                </div>
+                            </div>
+                            <div class="divider small" style="margin: 10px 0;"></div>
+                            <div class="backup-section">
+                                <h4 style="font-size: 13px; margin: 0;"><i class="fa-solid fa-database text-gold"></i> Respaldo de Base de Datos Real</h4>
+                                <p style="font-size: 11px; color: var(--text-light); margin-top: 5px; line-height: 1.4;">Descarga una copia de seguridad física de la base de datos relacional SQLite (`erp.db`) en vivo para salvaguardar tu contabilidad.</p>
+                                <button class="btn btn-secondary small margin-top-10" id="download-db-backup-btn" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: bold;">
+                                    <i class="fa-solid fa-download"></i> Descargar Respaldo Real (.db)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fila de Gestión de Usuarios y Permisos -->
+                    <div class="glass-card panel-card margin-top-20">
+                        <div class="panel-header">
+                            <h3><i class="fa-solid fa-users-gear text-gold"></i> Gestión de Personal e Inicios de Sesión (Usuarios)</h3>
+                        </div>
+                        <div class="grid-2 gap-20 margin-top-15">
+                            <div>
+                                <h4>👤 Lista de Personal Autorizado</h4>
+                                <div class="table-responsive" style="margin-top: 10px;">
+                                    <table class="table-premium">
+                                        <thead>
+                                            <tr>
+                                                <th>Nombre</th>
+                                                <th>Usuario</th>
+                                                <th>Sueldo Base</th>
+                                                <th>Rol / Depto</th>
+                                                <th>Pestañas Permitidas</th>
+                                                <th>Acción</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="user-management-tbody">
+                                            <!-- JS -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div>
+                                <h4>➕ Registrar Nuevo Empleado / Usuario</h4>
+                                <form id="add-user-form" class="margin-top-10">
+                                    <div class="form-group">
+                                        <label for="new-user-name">Nombre Completo:</label>
+                                        <input type="text" id="new-user-name" class="input-premium small" placeholder="Ej. María Pérez" required style="width: 100%;">
+                                    </div>
+                                    <div class="grid-2 gap-10 margin-top-10">
+                                        <div class="form-group">
+                                            <label for="new-user-username">Usuario (Login):</label>
+                                            <input type="text" id="new-user-username" class="input-premium small" placeholder="Ej. maria" required style="width: 100%;">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="new-user-password">Contraseña:</label>
+                                            <input type="text" id="new-user-password" class="input-premium small" placeholder="Ej. maria123" required style="width: 100%;">
+                                        </div>
+                                    </div>
+                                    <div class="form-group margin-top-10">
+                                        <label for="new-user-salary">Sueldo Base Mensual (RD$):</label>
+                                        <input type="number" id="new-user-salary" class="input-premium small" placeholder="Ej. 25000" value="0" required style="width: 100%;">
+                                    </div>
+                                    <div class="form-group margin-top-10">
+                                        <label for="new-user-role">Rol / Departamento:</label>
+                                        <select id="new-user-role" class="select-premium small">
+                                            <option value="admin">Administrador (Control Total)</option>
+                                            <option value="cajero" selected>Vendedor / Cajera (POS y Caja Chica)</option>
+                                            <option value="produccion">Chef de Producción (Recetas y Bodega)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group margin-top-10">
+                                        <label>Accesos y Pestañas Autorizadas:</label>
+                                        <div class="grid-2 gap-5 margin-top-5" style="font-size: 11.5px; background: rgba(0,0,0,0.02); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); text-align: left;">
+                                            <div>
+                                                <input type="checkbox" class="user-perm-checkbox" id="perm-dashboard" value="dashboard-page" checked>
+                                                <label for="perm-dashboard"> Tablero General</label>
+                                            </div>
+                                            <div>
+                                                <input type="checkbox" class="user-perm-checkbox" id="perm-pos" value="pos-page" checked>
+                                                <label for="perm-pos"> Punto de Venta (POS)</label>
+                                            </div>
+                                            <div>
+                                                <input type="checkbox" class="user-perm-checkbox" id="perm-caja" value="caja-page" checked>
+                                                <label for="perm-caja"> Caja Chica & Turnos</label>
+                                            </div>
+                                            <div>
+                                                <input type="checkbox" class="user-perm-checkbox" id="perm-inventario" value="inventario-page" checked>
+                                                <label for="perm-inventario"> Inventario Real</label>
+                                            </div>
+                                            <div>
+                                                <input type="checkbox" class="user-perm-checkbox" id="perm-recetario" value="recetario-page" checked>
+                                                <label for="perm-recetario"> Recetario & Costeo</label>
+                                            </div>
+                                            <div>
+                                                <input type="checkbox" class="user-perm-checkbox" id="perm-produccion" value="produccion-page" checked>
+                                                <label for="perm-produccion"> Línea de Producción</label>
+                                            </div>
+                                            <div>
+                                                <input type="checkbox" class="user-perm-checkbox" id="perm-crm" value="crm-page" checked>
+                                                <label for="perm-crm"> CRM & Pedidos</label>
+                                            </div>
+                                            <div>
+                                                <input type="checkbox" class="user-perm-checkbox" id="perm-settings" value="settings-page">
+                                                <label for="perm-settings"> Configuración</label>
+                                            </div>
+                                            <div>
+                                                <input type="checkbox" class="user-perm-checkbox" id="perm-finanzas" value="finanzas-page">
+                                                <label for="perm-finanzas"> Finanzas & Nómina</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary small btn-full margin-top-15">
+                                        <i class="fa-solid fa-user-plus"></i> Crear Cuenta de Empleado
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fila de Auditoría y Bitácora del Sistema -->
+                    <div class="glass-card panel-card margin-top-20">
+                        <div class="panel-header">
+                            <h3><i class="fa-solid fa-clipboard-list text-gold"></i> Bitácora de Auditoría Contable y del Sistema (Audit Trail)</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table-premium">
+                                <thead>
+                                    <tr>
+                                        <th>Fecha / Hora</th>
+                                        <th>Usuario</th>
+                                        <th>Rol</th>
+                                        <th>Módulo</th>
+                                        <th>Acción / Operación</th>
+                                        <th>Impacto / Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="audit-log-tbody">
+                                    <!-- Cargado por JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+                
+            </div>
+            
+        </main>
+        
+        <!-- ================= PANEL INTERACTIVO DE MigaAI (ASISTENTE) ================= -->
+        <div id="ai-assistant-drawer" class="glass-card shadow-2xl">
+            <div class="ai-drawer-header">
+                <div class="ai-title">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <div>
+                        <h3>A&M AI Gastronómico</h3>
+                        <span>Asistente ERP Inteligente</span>
+                    </div>
+                </div>
+                <button id="close-ai-drawer" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="ai-drawer-body" id="ai-chat-body">
+                <!-- Mensajes del Chat -->
+                <div class="chat-message system">
+                    <i class="fa-solid fa-robot"></i>
+                    <div class="msg-bubble">
+                        Hola, soy **MigaAI**, el asistente inteligente de tu repostería. Puedo procesar tareas por ti de forma ultra-rápida.
+                        
+                        **Ejemplos de lo que me puedes escribir:**
+                        * *"Hice 27 brownies"* (Creará la producción y descontará el inventario).
+                        * *"¿Qué producto me deja más dinero?"* (Te mostraré los productos más rentables).
+                        * *"Abre la caja con 2000 pesos"*
+                    </div>
+                </div>
+            </div>
+            <div class="ai-drawer-footer">
+                <input type="text" id="ai-chat-input" class="input-premium" placeholder="Escribe un comando o pregunta a MigaAI...">
+                <button id="ai-chat-send" class="btn btn-primary btn-icon-only"><i class="fa-solid fa-paper-plane"></i></button>
+            </div>
+        </div>
+
+        <!-- ================= SIMULADOR MÓVIL (MOBILE SHELL FRAME) ================= -->
+        <div id="mobile-preview-shell" class="hidden">
+            <div class="phone-frame">
+                <div class="phone-notch"></div>
+                <div class="phone-screen-header">
+                    <span class="phone-time">08:14 PM</span>
+                    <div class="phone-icons">
+                        <i class="fa-solid fa-signal"></i>
+                        <i class="fa-solid fa-wifi"></i>
+                        <i class="fa-solid fa-battery-three-quarters"></i>
+                    </div>
+                </div>
+                <!-- Clonación del contenido responsive de la página -->
+                <div class="phone-screen-content" id="mobile-screen-iframe-emulated">
+                    <!-- Aquí se clona dinámicamente el contenido de la pantalla activa -->
+                </div>
+                <div class="phone-home-indicator"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Scripts de Lógica Central -->
+    <script src="app.js"></script>
+</body>
+</html>
