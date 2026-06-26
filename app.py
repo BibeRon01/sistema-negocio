@@ -5944,11 +5944,9 @@ else:
     menu_opciones = []
     # POS / Ventas / Caja
     if puede_vender():
-        menu_opciones += ["Caja", "POS"]
+        menu_opciones += ["Caja", "POS", "Clientes", "Créditos"]
     if puede_ver_ventas_propias() or puede_ver_todas_ventas():
         menu_opciones += ["Ventas"]
-    if puede_vender() or puede_ver_ventas_propias():
-        menu_opciones += ["Clientes", "Créditos"]
     if puede_cerrar_caja():
         menu_opciones += ["Cierre de Caja"]
         
@@ -5977,8 +5975,10 @@ else:
         menu_opciones += ["Pérdidas"]
         
     # Reportes / Dashboard / Contabilidad básica
-    if tiene_permiso("puede_ver_dashboard") or tiene_permiso("puede_ver_reportes"):
-        menu_opciones += ["Dashboard", "Informes", "Estado de Resultados"]
+    if tiene_permiso("puede_ver_dashboard"):
+        menu_opciones += ["Dashboard"]
+    if tiene_permiso("puede_ver_reportes"):
+        menu_opciones += ["Informes", "Estado de Resultados"]
         
     # Configuración / Usuarios / Empleados
     if tiene_permiso("puede_configurar"):
@@ -8883,59 +8883,59 @@ elif menu == "Pérdidas":
         if not puede_reportar_perdidas():
             st.warning("No tienes permiso para reportar pérdidas de mercancía.")
         else:
-            with st.form("form_reportar_perdida", clear_on_submit=True):
-                st.markdown("### ➕ Formulario de Reporte de Pérdida")
-                c1, c2 = st.columns(2)
-                with c1:
-                    fecha = st.date_input("Fecha de la pérdida", value=date.today(), key="rep_fecha")
-                    hora = st.text_input("Hora (HH:MM)", value=datetime.now().strftime("%H:%M"), key="rep_hora")
-                    producto = st.selectbox("Producto", productos_lista, key="rep_prod") if productos_lista else st.text_input("Producto", key="rep_prod_txt")
-                    existencia_actual = obtener_existencia_desde_inventario(producto) if producto else 0.0
-                    st.number_input(
-                        "Existencia actual en inventario (Informativo)",
-                        value=float(existencia_actual),
-                        step=1.0,
-                        disabled=True,
-                        key=f"rep_existencia_{normalizar_texto(producto)}"
+            # Formulario de pérdidas interactivo sin st.form para permitir recarga y autocompletado en vivo
+            st.markdown("### ➕ Formulario de Reporte de Pérdida")
+            c1, c2 = st.columns(2)
+            with c1:
+                fecha = st.date_input("Fecha de la pérdida", value=date.today(), key="rep_fecha")
+                hora = st.text_input("Hora (HH:MM)", value=datetime.now().strftime("%H:%M"), key="rep_hora")
+                producto = st.selectbox("Producto", productos_lista, key="rep_prod") if productos_lista else st.text_input("Producto", key="rep_prod_txt")
+                existencia_actual = obtener_existencia_desde_inventario(producto) if producto else 0.0
+                st.number_input(
+                    "Existencia actual en inventario (Informativo)",
+                    value=float(existencia_actual),
+                    step=1.0,
+                    disabled=True,
+                    key=f"rep_existencia_{normalizar_texto(producto)}"
+                )
+            with c2:
+                cantidad = st.number_input("Cantidad perdida", min_value=0.0, step=1.0, key="rep_cant")
+                costo_auto = obtener_costo_desde_inventario(producto) if producto else 0.0
+                costo_unitario = st.number_input(
+                    "Costo unitario",
+                    min_value=0.0,
+                    step=0.01,
+                    value=float(costo_auto),
+                    key=f"rep_costo_{normalizar_texto(producto)}"
+                )
+                tipo_perdida = st.selectbox("Tipo de pérdida", ["mercancia", "vencimiento", "rotura", "ajuste_mercancia", "otro"], key="rep_tipo")
+                persona_involucrada = st.text_input("Persona involucrada (Cajera / Empleado)", key="rep_persona")
+            
+            observacion = st.text_area("Observación / Justificación detallada", key="rep_obs")
+            
+            if st.button("📋 Reportar pérdida", use_container_width=True, key="btn_reportar_perdida_submit"):
+                if not limpiar_texto(producto):
+                    st.error("Debes seleccionar un producto.")
+                elif cantidad <= 0:
+                    st.error("La cantidad perdida debe ser mayor que cero.")
+                elif costo_unitario <= 0:
+                    st.error("El costo unitario no puede ser cero.")
+                else:
+                    ok = registrar_perdida(
+                        fecha_mov=fecha,
+                        producto=producto,
+                        cantidad=cantidad,
+                        costo_unitario=costo_unitario,
+                        tipo_perdida=tipo_perdida,
+                        observacion=observacion,
+                        estado="pendiente",
+                        hora=hora,
+                        reportado_por=nombre_usuario_actual(),
+                        persona_involucrada=persona_involucrada
                     )
-                with c2:
-                    cantidad = st.number_input("Cantidad perdida", min_value=0.0, step=1.0, key="rep_cant")
-                    costo_auto = obtener_costo_desde_inventario(producto) if producto else 0.0
-                    costo_unitario = st.number_input(
-                        "Costo unitario",
-                        min_value=0.0,
-                        step=0.01,
-                        value=float(costo_auto),
-                        key=f"rep_costo_{normalizar_texto(producto)}"
-                    )
-                    tipo_perdida = st.selectbox("Tipo de pérdida", ["mercancia", "vencimiento", "rotura", "ajuste_mercancia", "otro"], key="rep_tipo")
-                    persona_involucrada = st.text_input("Persona involucrada (Cajera / Empleado)", key="rep_persona")
-                
-                observacion = st.text_area("Observación / Justificación detallada", key="rep_obs")
-                
-                if st.form_submit_button("📋 Reportar pérdida", use_container_width=True):
-                    if not limpiar_texto(producto):
-                        st.error("Debes seleccionar un producto.")
-                    elif cantidad <= 0:
-                        st.error("La cantidad perdida debe ser mayor que cero.")
-                    elif costo_unitario <= 0:
-                        st.error("El costo unitario no puede ser cero.")
-                    else:
-                        ok = registrar_perdida(
-                            fecha_mov=fecha,
-                            producto=producto,
-                            cantidad=cantidad,
-                            costo_unitario=costo_unitario,
-                            tipo_perdida=tipo_perdida,
-                            observacion=observacion,
-                            estado="pendiente",
-                            hora=hora,
-                            reportado_por=nombre_usuario_actual(),
-                            persona_involucrada=persona_involucrada
-                        )
-                        if ok:
-                            st.success("Pérdida reportada correctamente. Queda en estado 'pendiente' para revisión de administración.")
-                            st.rerun()
+                    if ok:
+                        st.success("Pérdida reportada correctamente. Queda en estado 'pendiente' para revisión de administración.")
+                        st.rerun()
 
     with tab_historial:
         df = DATA["perdidas"].copy()
