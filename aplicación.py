@@ -13669,14 +13669,8 @@ elif menu == "POS":
                             st.rerun()
                     except Exception as exc:
                         import traceback
-                        tb_str = traceback.format_exc()
-                        try:
-                            with open("error_pos.txt", "w", encoding="utf-8") as f_err:
-                                f_err.write(tb_str)
-                        except Exception:
-                            pass
+                        traceback.print_exc()
                         st.error(f"No se pudo registrar la venta: {exc}")
-                        st.code(tb_str)
                 pass
             pass
         else:
