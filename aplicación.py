@@ -5850,7 +5850,7 @@ else:
     <span style='font-size:11px; font-weight:700; color:{_badge_color}; letter-spacing:1px;'>{_badge_label}</span>
     </div>
     """, unsafe_allow_html=True)
-st.sidebar.caption(f"👤 Usuario: {nombre_usuario_actual()}")
+st.sidebar.caption(f"👤 Usuario: {nombre_usuario_actual()} | Rol: {str(usuario_sesion().get('rol', '')).upper()}")
 if st.sidebar.button("🚪 Cerrar sesión"):
     cerrar_sesion()
 
