@@ -7376,7 +7376,7 @@ elif menu == "Ventas":
         df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
         df = df[(df["fecha"] >= pd.to_datetime(d1)) & (df["fecha"] <= pd.to_datetime(d2) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1))]
 
-        txt = st.text_input("Buscar venta", key="buscar_ventas")
+        txt = st.text_input("Buscar venta (puedes buscar por número de factura, cliente, usuario o por producto vendido)", key="buscar_ventas")
         metodo_filtro = st.selectbox(
             "Filtrar por método",
             ["Todos", "efectivo", "transferencia", "tarjeta", "credito", "mixto"],
@@ -7384,7 +7384,28 @@ elif menu == "Ventas":
         )
 
         if txt:
-            df = buscar_df(df, txt)
+            # 1. Búsqueda normal por campos de la venta
+            mask_normal = df.astype(str).apply(lambda col: col.str.contains(txt, case=False, na=False)).any(axis=1)
+            
+            # 2. Búsqueda inteligente por producto en detalle_venta
+            venta_ids_by_prod = set()
+            try:
+                coincidencias_det = supabase.table("detalle_venta").select("venta_id").ilike("producto", f"%{txt}%").execute()
+                venta_ids_by_prod = {str(item.get("venta_id")) for item in (coincidencias_det.data or []) if item.get("venta_id")}
+            except Exception:
+                try:
+                    df_det_local = DATA.get("detalle_venta")
+                    if df_det_local is None or df_det_local.empty:
+                        df_det_local = leer_tabla("detalle_venta")
+                    if df_det_local is not None and not df_det_local.empty:
+                        mask_p = df_det_local["producto"].astype(str).str.contains(txt, case=False, na=False)
+                        venta_ids_by_prod = set(df_det_local[mask_p]["venta_id"].dropna().astype(str).unique())
+                except Exception:
+                    pass
+            
+            mask_prod = df.apply(lambda row: str(row.get("id") or row.get("identificación") or row.get("identificacion") or "") in venta_ids_by_prod, axis=1)
+            df = df[mask_normal | mask_prod]
+
         col_metodo = "metodo_pago" if "metodo_pago" in df.columns else "metodo" if "metodo" in df.columns else None
         if metodo_filtro != "Todos" and col_metodo:
             df = df[df[col_metodo].astype(str).str.lower() == metodo_filtro.lower()]
@@ -7410,12 +7431,62 @@ elif menu == "Ventas":
         df_show = df.copy().sort_values("fecha", ascending=False)
         if not df_show.empty:
             df_show["factura"] = df_show.apply(numero_factura_visible, axis=1)
+            
+            # Obtener los nombres de los productos vendidos en estas facturas
+            detalles_productos_map = {}
+            ids_lista = []
+            for col_id in ["id", "identificación", "identificacion"]:
+                if col_id in df_show.columns:
+                    ids_lista.extend(df_show[col_id].dropna().astype(str).unique().tolist())
+            ids_lista = list(set(ids_lista))
+            if ids_lista:
+                try:
+                    detalles_data = []
+                    for i in range(0, len(ids_lista), 100):
+                        lote = ids_lista[i:i+100]
+                        resp_det = supabase.table("detalle_venta").select("venta_id, producto").in_("venta_id", lote).execute()
+                        detalles_data.extend(resp_det.data or [])
+                    
+                    for d in detalles_data:
+                        v_id = str(d.get("venta_id"))
+                        prod = str(d.get("producto") or "")
+                        if v_id and prod:
+                            if v_id not in detalles_productos_map:
+                                detalles_productos_map[v_id] = []
+                            if prod not in detalles_productos_map[v_id]:
+                                detalles_productos_map[v_id].append(prod)
+                except Exception:
+                    try:
+                        df_det_local = DATA.get("detalle_venta")
+                        if df_det_local is None or df_det_local.empty:
+                            df_det_local = leer_tabla("detalle_venta")
+                        if df_det_local is not None and not df_det_local.empty:
+                            df_det_filt = df_det_local[df_det_local["venta_id"].astype(str).isin(ids_lista)]
+                            for _, r in df_det_filt.iterrows():
+                                v_id = str(r.get("venta_id"))
+                                prod = str(r.get("producto") or "")
+                                if v_id and prod:
+                                    if v_id not in detalles_productos_map:
+                                        detalles_productos_map[v_id] = []
+                                    if prod not in detalles_productos_map[v_id]:
+                                        detalles_productos_map[v_id].append(prod)
+                    except Exception:
+                        pass
+            
+            def obtener_productos_string(row):
+                v_id = str(row.get("id") or row.get("identificación") or row.get("identificacion") or "")
+                prods = detalles_productos_map.get(v_id, [])
+                return ", ".join(prods) if prods else "N/A"
+            
+            df_show["productos"] = df_show.apply(obtener_productos_string, axis=1)
+
         columnas_preferidas = [
             c
             for c in [
                 "numero_factura",
                 "factura",
                 "fecha",
+                "productos",
                 "total",
                 "subtotal",
                 "descuento",
