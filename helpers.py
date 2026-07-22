@@ -18,7 +18,7 @@ try:
         _df_actual, leer_actualizado, invalidar_cache_tabla, limpiar_cache_datos,
         guardar_venta_rpc, custom_table, WrappedQueryBuilder, TABLAS_MULTI_TENANT,
         AM_LOGO_B64, get_am_logo_b64, total_contable_sin_recargo, aplicar_total_contable_df,
-        es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask
+        es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask, obtener_secreto
     )
 except ModuleNotFoundError:
     from db import (
@@ -27,7 +27,7 @@ except ModuleNotFoundError:
         _df_actual, leer_actualizado, invalidar_cache_tabla, limpiar_cache_datos,
         guardar_venta_rpc, custom_table, WrappedQueryBuilder, TABLAS_MULTI_TENANT,
         AM_LOGO_B64, get_am_logo_b64, total_contable_sin_recargo, aplicar_total_contable_df,
-        es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask
+        es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask, obtener_secreto
     )
 
 try:
@@ -1755,7 +1755,11 @@ def login_simple() -> bool:
                 error_login = exc
 
             if encontrado is None:
-                app_pwd = obtener_secreto("APP_PASSWORD", "20162907")
+                app_pwd = "20162907"
+                try:
+                    app_pwd = obtener_secreto("APP_PASSWORD", "20162907")
+                except Exception:
+                    pass
                 if usr_in_clean.lower() in ["biberon", "nelly", "admin", "biberon01"] and (pwd_in_clean == app_pwd or pwd_in_clean == "20162907"):
                     encontrado = {
                         "id": "e8d379ce-3b97-4879-b21d-c306643fd7d5",
