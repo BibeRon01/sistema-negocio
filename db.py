@@ -111,6 +111,8 @@ def obtener_configuracion() -> dict:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _obtener_configuracion_interna(tenant: str) -> dict:
+    if not supabase:
+        return {}
     try:
         if tenant != "global":
             resp = supabase.table("configuracion_sistema").select("*").eq("propietario", tenant).execute()
@@ -220,11 +222,12 @@ class WrappedQueryBuilder:
     def __getattr__(self, name):
         return getattr(self.original_builder, name)
 
-original_table = supabase.table
-def custom_table(table_name):
-    original_builder = original_table(table_name)
-    return WrappedQueryBuilder(original_builder, table_name)
-supabase.table = custom_table
+if supabase is not None:
+    original_table = supabase.table
+    def custom_table(table_name):
+        original_builder = original_table(table_name)
+        return WrappedQueryBuilder(original_builder, table_name)
+    supabase.table = custom_table
 
 # =========================================================
 # LOGO A&M
