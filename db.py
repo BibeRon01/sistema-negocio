@@ -403,7 +403,10 @@ def leer_tabla(nombre_tabla: str, order_by: str = "id") -> pd.DataFrame:
             return df.copy()
 
     df = _leer_tabla_de_supabase(nombre_tabla, order_by, tenant=tenant)
-    from core.utils import agregar_columna_codigo_secuencial
+    try:
+        from core.utils import agregar_columna_codigo_secuencial
+    except ModuleNotFoundError:
+        from utils import agregar_columna_codigo_secuencial
     df = agregar_columna_codigo_secuencial(df, nombre_tabla)
     if not df.empty and "fecha" in df.columns:
         try:
@@ -893,7 +896,10 @@ def _df_actual(tabla: str) -> pd.DataFrame:
 def buscar_producto_por_codigo(codigo: str):
     if not codigo:
         return None
-    from core.utils import normalizar_texto
+    try:
+        from core.utils import normalizar_texto
+    except ModuleNotFoundError:
+        from utils import normalizar_texto
     codigo_n = normalizar_texto(codigo)
     if not codigo_n:
         return None

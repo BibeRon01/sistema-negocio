@@ -11,41 +11,78 @@ import streamlit.components.v1 as components
 from datetime import datetime, date, timedelta
 from typing import Any
 
-from core.db import (
-    supabase, DATA, leer_tabla, insertar, actualizar, eliminar, anular, rpc,
-    obtener_tenant_actual, usuario_sesion, nombre_usuario_actual, obtener_configuracion,
-    _df_actual, leer_actualizado, invalidar_cache_tabla, limpiar_cache_datos,
-    guardar_venta_rpc, custom_table, WrappedQueryBuilder, TABLAS_MULTI_TENANT,
-    AM_LOGO_B64, get_am_logo_b64, total_contable_sin_recargo, aplicar_total_contable_df,
-    es_superadmin_plataforma,  # S-03: privilegio verificado desde JWT
-    to_decimal,                 # C-02: precisión monetaria con Decimal
-    registrar_auditoria_pro,    # S-04/N-05: auditoría avanzada
-    _pii_mask                  # S-07/N-01: PII masking
-)
-from core.auth import (
-    es_admin, es_cajera, tiene_permiso, cerrar_sesion,
-    puede_editar_global, puede_ver_utilidad_global, puede_vender, puede_abrir_caja,
-    puede_cerrar_caja, puede_ver_ventas_propias, puede_ver_todas_ventas,
-    puede_editar_ventas, puede_anular_ventas, puede_eliminar_ventas,
-    puede_registrar_compras, puede_ver_compras, puede_editar_compras,
-    puede_eliminar_compras, puede_aprobar_compras, puede_registrar_gastos,
-    puede_ver_gastos, puede_editar_gastos, puede_eliminar_gastos,
-    puede_ver_inventario, puede_registrar_conteo, puede_aplicar_ajuste_inventario,
-    puede_editar_inventario, puede_reportar_perdidas, puede_ver_perdidas,
-    puede_aprobar_perdidas, puede_debitar_perdidas, puede_editar_perdidas,
-    puede_eliminar_perdidas, puede_ver_productos, puede_crear_productos,
-    puede_editar_productos, puede_eliminar_productos, render_checkboxes_permisos,
-    verificar_clave_usuario, verificar_codigo_totp,
-    verificar_bloqueo_login, registrar_intento_fallido, limpiar_intentos_fallidos,
-    mfa_requerido_para_admin
-)
-from core.utils import (
-    limpiar_texto, quitar_acentos, normalizar_texto, limpiar_numero, parsear_fecha,
-    selector_fechas_universal, normalizar_item_carrito, recalcular_item_carrito,
-    carrito_limpio, buscar_nombre_producto_por_item, nombre_item, numero_factura_visible,
-    predecir_categoria_y_tipo_gasto, generar_codigo_secuencial, generar_codigo_producto,
-    agregar_columna_codigo_secuencial
-)
+try:
+    from core.db import (
+        supabase, DATA, leer_tabla, insertar, actualizar, eliminar, anular, rpc,
+        obtener_tenant_actual, usuario_sesion, nombre_usuario_actual, obtener_configuracion,
+        _df_actual, leer_actualizado, invalidar_cache_tabla, limpiar_cache_datos,
+        guardar_venta_rpc, custom_table, WrappedQueryBuilder, TABLAS_MULTI_TENANT,
+        AM_LOGO_B64, get_am_logo_b64, total_contable_sin_recargo, aplicar_total_contable_df,
+        es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask
+    )
+except ModuleNotFoundError:
+    from db import (
+        supabase, DATA, leer_tabla, insertar, actualizar, eliminar, anular, rpc,
+        obtener_tenant_actual, usuario_sesion, nombre_usuario_actual, obtener_configuracion,
+        _df_actual, leer_actualizado, invalidar_cache_tabla, limpiar_cache_datos,
+        guardar_venta_rpc, custom_table, WrappedQueryBuilder, TABLAS_MULTI_TENANT,
+        AM_LOGO_B64, get_am_logo_b64, total_contable_sin_recargo, aplicar_total_contable_df,
+        es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask
+    )
+
+try:
+    from core.auth import (
+        es_admin, es_cajera, tiene_permiso, cerrar_sesion,
+        puede_editar_global, puede_ver_utilidad_global, puede_vender, puede_abrir_caja,
+        puede_cerrar_caja, puede_ver_ventas_propias, puede_ver_todas_ventas,
+        puede_editar_ventas, puede_anular_ventas, puede_eliminar_ventas,
+        puede_registrar_compras, puede_ver_compras, puede_editar_compras,
+        puede_eliminar_compras, puede_aprobar_compras, puede_registrar_gastos,
+        puede_ver_gastos, puede_editar_gastos, puede_eliminar_gastos,
+        puede_ver_inventario, puede_registrar_conteo, puede_aplicar_ajuste_inventario,
+        puede_editar_inventario, puede_reportar_perdidas, puede_ver_perdidas,
+        puede_aprobar_perdidas, puede_debitar_perdidas, puede_editar_perdidas,
+        puede_eliminar_perdidas, puede_ver_productos, puede_crear_productos,
+        puede_editar_productos, puede_eliminar_productos, render_checkboxes_permisos,
+        verificar_clave_usuario, verificar_codigo_totp,
+        verificar_bloqueo_login, registrar_intento_fallido, limpiar_intentos_fallidos,
+        mfa_requerido_para_admin
+    )
+except ModuleNotFoundError:
+    from auth import (
+        es_admin, es_cajera, tiene_permiso, cerrar_sesion,
+        puede_editar_global, puede_ver_utilidad_global, puede_vender, puede_abrir_caja,
+        puede_cerrar_caja, puede_ver_ventas_propias, puede_ver_todas_ventas,
+        puede_editar_ventas, puede_anular_ventas, puede_eliminar_ventas,
+        puede_registrar_compras, puede_ver_compras, puede_editar_compras,
+        puede_eliminar_compras, puede_aprobar_compras, puede_registrar_gastos,
+        puede_ver_gastos, puede_editar_gastos, puede_eliminar_gastos,
+        puede_ver_inventario, puede_registrar_conteo, puede_aplicar_ajuste_inventario,
+        puede_editar_inventario, puede_reportar_perdidas, puede_ver_perdidas,
+        puede_aprobar_perdidas, puede_debitar_perdidas, puede_editar_perdidas,
+        puede_eliminar_perdidas, puede_ver_productos, puede_crear_productos,
+        puede_editar_productos, puede_eliminar_productos, render_checkboxes_permisos,
+        verificar_clave_usuario, verificar_codigo_totp,
+        verificar_bloqueo_login, registrar_intento_fallido, limpiar_intentos_fallidos,
+        mfa_requerido_para_admin
+    )
+
+try:
+    from core.utils import (
+        limpiar_texto, quitar_acentos, normalizar_texto, limpiar_numero, parsear_fecha,
+        selector_fechas_universal, normalizar_item_carrito, recalcular_item_carrito,
+        carrito_limpio, buscar_nombre_producto_por_item, nombre_item, numero_factura_visible,
+        predecir_categoria_y_tipo_gasto, generar_codigo_secuencial, generar_codigo_producto,
+        agregar_columna_codigo_secuencial
+    )
+except ModuleNotFoundError:
+    from utils import (
+        limpiar_texto, quitar_acentos, normalizar_texto, limpiar_numero, parsear_fecha,
+        selector_fechas_universal, normalizar_item_carrito, recalcular_item_carrito,
+        carrito_limpio, buscar_nombre_producto_por_item, nombre_item, numero_factura_visible,
+        predecir_categoria_y_tipo_gasto, generar_codigo_secuencial, generar_codigo_producto,
+        agregar_columna_codigo_secuencial
+    )
 def valor_simple(valor: Any):
     if isinstance(valor, pd.Series):
         if valor.empty:

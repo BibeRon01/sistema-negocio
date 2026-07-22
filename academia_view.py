@@ -1,7 +1,13 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from core.helpers import normalizar_texto
+try:
+    try:
+        from core.helpers import normalizar_texto
+    except ModuleNotFoundError:
+        from helpers import normalizar_texto
+except ModuleNotFoundError:
+    from helpers import normalizar_texto
 
 def render_academia_dgii():
     st.title("🎓 Academia DGII - Capacitación Integrada")

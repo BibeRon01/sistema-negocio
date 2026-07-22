@@ -4,8 +4,18 @@ import hmac
 import struct
 import time
 import streamlit as st
-from core.db import usuario_sesion, nombre_usuario_actual, obtener_tenant_actual, es_superadmin_plataforma
-from core.utils import normalizar_texto
+try:
+    try:
+        from core.db import usuario_sesion, nombre_usuario_actual, obtener_tenant_actual, es_superadmin_plataforma
+    except ModuleNotFoundError:
+        from db import usuario_sesion, nombre_usuario_actual, obtener_tenant_actual, es_superadmin_plataforma
+    try:
+        from core.utils import normalizar_texto
+    except ModuleNotFoundError:
+        from utils import normalizar_texto
+except ModuleNotFoundError:
+    from db import usuario_sesion, nombre_usuario_actual, obtener_tenant_actual, es_superadmin_plataforma
+    from utils import normalizar_texto
 
 def es_admin() -> bool:
     if es_superadmin_plataforma():
@@ -235,7 +245,10 @@ _BACKOFF_TABLA = [
 def _supabase_admin():
     """Retorna cliente Supabase con service_role para operaciones de auth sin RLS."""
     try:
-        from core.db import obtener_secreto, SUPABASE_URL
+        try:
+            from core.db import obtener_secreto, SUPABASE_URL
+        except ModuleNotFoundError:
+            from db import obtener_secreto, SUPABASE_URL
         from supabase import create_client
         svc_key = obtener_secreto("SUPABASE_SERVICE_KEY", "")
         if svc_key:

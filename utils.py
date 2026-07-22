@@ -143,7 +143,10 @@ def buscar_nombre_producto_por_item(item: dict) -> str:
     codigo = item.get("codigo") or item.get("codigo_barra")
 
     try:
-        from core.db import DATA
+        try:
+            from core.db import DATA
+        except ModuleNotFoundError:
+            from db import DATA
         prods = DATA.get("productos", pd.DataFrame()).copy()
     except Exception:
         prods = pd.DataFrame()
@@ -196,7 +199,10 @@ def predecir_categoria_y_tipo_gasto(nombre: str) -> tuple:
     
     # 1. Intentar aprender del histórico de la empresa (IA Supervisada)
     try:
-        from core.db import _df_actual
+        try:
+            from core.db import _df_actual
+        except ModuleNotFoundError:
+            from db import _df_actual
         gastos_hist = _df_actual("gastos")
         if not gastos_hist.empty and "nombre" in gastos_hist.columns:
             coincidencias = gastos_hist[gastos_hist["nombre"].astype(str).str.lower() == nombre_lower]
@@ -338,7 +344,10 @@ def generar_codigo_secuencial(nombre_tabla: str) -> str:
     prefijo = PREFIJOS.get(nombre_tabla, "XX")
     
     try:
-        from core.db import leer_tabla, DATA
+        try:
+            from core.db import leer_tabla, DATA
+        except ModuleNotFoundError:
+            from db import leer_tabla, DATA
         df = leer_tabla(nombre_tabla)
     except Exception:
         df = DATA.get(nombre_tabla, pd.DataFrame()).copy()

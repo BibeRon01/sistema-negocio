@@ -1,14 +1,24 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from core.helpers import (
-    leer_tabla, insertar, actualizar, normalizar_texto,
-    refrescar_producto_por_id, producto_tiene_inventario,
-    obtener_existencia_producto, actualizar_existencia_producto,
-    sincronizar_producto_inventario, registrar_movimiento_inventario,
-    consumir_ncf_siguiente, obtener_tenant_actual, nombre_usuario_actual,
-    ahora_str, json_safe_payload
-)
+try:
+    from core.helpers import (
+        leer_tabla, insertar, actualizar, normalizar_texto,
+        refrescar_producto_por_id, producto_tiene_inventario,
+        obtener_existencia_producto, actualizar_existencia_producto,
+        sincronizar_producto_inventario, registrar_movimiento_inventario,
+        consumir_ncf_siguiente, obtener_tenant_actual, nombre_usuario_actual,
+        ahora_str, json_safe_payload
+    )
+except ModuleNotFoundError:
+    from helpers import (
+        leer_tabla, insertar, actualizar, normalizar_texto,
+        refrescar_producto_por_id, producto_tiene_inventario,
+        obtener_existencia_producto, actualizar_existencia_producto,
+        sincronizar_producto_inventario, registrar_movimiento_inventario,
+        consumir_ncf_siguiente, obtener_tenant_actual, nombre_usuario_actual,
+        ahora_str, json_safe_payload
+    )
 
 def render_notas_credito():
     st.title("❌ Notas de Crédito (E34 / B04)")

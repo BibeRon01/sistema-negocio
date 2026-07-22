@@ -7,10 +7,28 @@ from datetime import datetime, date
 import hashlib
 import base64
 
-from core.db import *
-from core.auth import *
-from core.utils import *
-from core.helpers import *
+try:
+    try:
+        from core.db import *
+    except ModuleNotFoundError:
+        from db import *
+    try:
+        from core.auth import *
+    except ModuleNotFoundError:
+        from auth import *
+    try:
+        from core.utils import *
+    except ModuleNotFoundError:
+        from utils import *
+    try:
+        from core.helpers import *
+    except ModuleNotFoundError:
+        from helpers import *
+except ModuleNotFoundError:
+    from db import *
+    from auth import *
+    from utils import *
+    from helpers import *
 
 
 def generar_xml_ecf(venta_data: dict, items: list, tipo_ecf: str = "E31") -> str:

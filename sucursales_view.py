@@ -4,10 +4,28 @@ import pandas as pd
 import plotly.express as px
 from datetime import date
 
-from core.db import *
-from core.auth import *
-from core.utils import *
-from core.helpers import *
+try:
+    try:
+        from core.db import *
+    except ModuleNotFoundError:
+        from db import *
+    try:
+        from core.auth import *
+    except ModuleNotFoundError:
+        from auth import *
+    try:
+        from core.utils import *
+    except ModuleNotFoundError:
+        from utils import *
+    try:
+        from core.helpers import *
+    except ModuleNotFoundError:
+        from helpers import *
+except ModuleNotFoundError:
+    from db import *
+    from auth import *
+    from utils import *
+    from helpers import *
 
 
 def render_sucursales():

@@ -41,10 +41,22 @@ try:
     from helpers import *
 except Exception as _e_root:
     try:
-        from core.db import *
-        from core.auth import *
-        from core.utils import *
-        from core.helpers import *
+        try:
+            from core.db import *
+        except ModuleNotFoundError:
+            from db import *
+        try:
+            from core.auth import *
+        except ModuleNotFoundError:
+            from auth import *
+        try:
+            from core.utils import *
+        except ModuleNotFoundError:
+            from utils import *
+        try:
+            from core.helpers import *
+        except ModuleNotFoundError:
+            from helpers import *
     except Exception as _e_core:
         st.error(f"⚠️ **Error cargando módulos iniciales:**\n- Raíz: `{_e_root}`\n- Subcarpeta: `{_e_core}`")
         st.stop()
