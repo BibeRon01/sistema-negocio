@@ -235,23 +235,30 @@ if supabase is not None and not hasattr(supabase, "_original_table"):
 # =========================================================
 # LOGO A&M
 # =========================================================
-_LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "am_logo.png")
-
 def get_am_logo_b64() -> str:
-    try:
-        with open(_LOGO_PATH, "rb") as _f:
-            _data_bytes = _f.read()
-            _data = base64.b64encode(_data_bytes).decode()
-            mime = "image/png"
-            if _data_bytes.startswith(b"\xff\xd8\xff"):
-                mime = "image/jpeg"
-            elif _data_bytes.startswith(b"\x89PNG"):
-                mime = "image/png"
-            elif _data_bytes.startswith(b"GIF8"):
-                mime = "image/gif"
-        return f"data:{mime};base64,{_data}"
-    except Exception:
-        return ""
+    rute_candidates = [
+        os.path.join(os.path.dirname(__file__), "am_logo.png"),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "am_logo.png"),
+        os.path.join(os.getcwd(), "am_logo.png"),
+        "am_logo.png"
+    ]
+    for p in rute_candidates:
+        try:
+            if os.path.isfile(p):
+                with open(p, "rb") as _f:
+                    _data_bytes = _f.read()
+                    _data = base64.b64encode(_data_bytes).decode()
+                    mime = "image/png"
+                    if _data_bytes.startswith(b"\xff\xd8\xff"):
+                        mime = "image/jpeg"
+                    elif _data_bytes.startswith(b"\x89PNG"):
+                        mime = "image/png"
+                    elif _data_bytes.startswith(b"GIF8"):
+                        mime = "image/gif"
+                    return f"data:{mime};base64,{_data}"
+        except Exception:
+            pass
+    return ""
 
 AM_LOGO_B64 = get_am_logo_b64()
 
