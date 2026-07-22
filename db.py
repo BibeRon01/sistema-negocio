@@ -222,11 +222,14 @@ class WrappedQueryBuilder:
     def __getattr__(self, name):
         return getattr(self.original_builder, name)
 
-if supabase is not None:
-    original_table = supabase.table
-    def custom_table(table_name):
-        original_builder = original_table(table_name)
+def custom_table(table_name):
+    if supabase is not None:
+        original_builder = getattr(supabase, "_original_table", supabase.table)(table_name)
         return WrappedQueryBuilder(original_builder, table_name)
+    return None
+
+if supabase is not None and not hasattr(supabase, "_original_table"):
+    supabase._original_table = supabase.table
     supabase.table = custom_table
 
 # =========================================================

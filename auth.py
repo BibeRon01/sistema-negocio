@@ -5,16 +5,12 @@ import struct
 import time
 import streamlit as st
 try:
-    try:
-        from core.db import usuario_sesion, nombre_usuario_actual, obtener_tenant_actual, es_superadmin_plataforma
-    except ModuleNotFoundError:
-        from db import usuario_sesion, nombre_usuario_actual, obtener_tenant_actual, es_superadmin_plataforma
-    try:
-        from core.utils import normalizar_texto
-    except ModuleNotFoundError:
-        from utils import normalizar_texto
+    from core.db import usuario_sesion, nombre_usuario_actual, obtener_tenant_actual, es_superadmin_plataforma
 except ModuleNotFoundError:
     from db import usuario_sesion, nombre_usuario_actual, obtener_tenant_actual, es_superadmin_plataforma
+try:
+    from core.utils import normalizar_texto
+except ModuleNotFoundError:
     from utils import normalizar_texto
 
 def es_admin() -> bool:
