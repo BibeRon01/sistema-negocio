@@ -39,11 +39,15 @@ try:
     from auth import *
     from utils import *
     from helpers import *
-except Exception:
-    from core.db import *
-    from core.auth import *
-    from core.utils import *
-    from core.helpers import *
+except Exception as _e_root:
+    try:
+        from core.db import *
+        from core.auth import *
+        from core.utils import *
+        from core.helpers import *
+    except Exception as _e_core:
+        st.error(f"⚠️ **Error cargando módulos iniciales:**\n- Raíz: `{_e_root}`\n- Subcarpeta: `{_e_core}`")
+        st.stop()
 
 # Validar instalación de dependencias en Streamlit Cloud
 if create_client is None:
