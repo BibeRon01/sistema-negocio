@@ -1716,7 +1716,7 @@ def login_simple() -> bool:
             st.rerun()
             
     else:
-        usuario_in = st.text_input("Usuario", key="login_usuario")
+        usuario_in = st.text_input("Correo Electrónico o Usuario", placeholder="ejemplo@correo.com o tu_usuario", key="login_usuario")
         clave_in = st.text_input("Clave", type="password", key="login_clave")
 
         if st.button("Entrar", key="btn_login_usuario", use_container_width=True):
@@ -1727,26 +1727,24 @@ def login_simple() -> bool:
             
             encontrado = None
             error_login = None
+            usr_clean_lower = usr_in_clean.lower()
             
+            # Paso 1: Autenticar vía Supabase Auth (admite Correo Completo o Usuario)
             try:
                 if supabase is not None:
-                    usr_clean_lower = usr_in_clean.lower()
                     email_auth = usr_clean_lower
                     if "@" not in email_auth:
                         email_auth = f"{email_auth}@ais-erp.com"
                     
-                    # 1. Autenticar usando Supabase Auth
                     auth_resp = supabase.auth.sign_in_with_password({
                         "email": email_auth,
                         "password": pwd_in_clean
                     })
                     
-                    # 2. Configurar el token en la sesión actual
                     session = auth_resp.session
                     st.session_state["access_token"] = session.access_token
                     supabase.postgrest.auth(session.access_token)
                     
-                    # 3. Consultar el perfil del usuario (aislado por RLS)
                     resp = supabase.table("usuarios").select("*").eq("id", auth_resp.user.id).execute()
                     filas = resp.data or []
                     if filas:
@@ -1754,16 +1752,30 @@ def login_simple() -> bool:
             except Exception as exc:
                 error_login = exc
 
+            # Paso 2: Consultar directamente la tabla de usuarios (por correo o por usuario)
+            if encontrado is None and supabase is not None:
+                try:
+                    resp_db = supabase.table("usuarios").select("*").or_(f"email.eq.{usr_clean_lower},usuario.eq.{usr_clean_lower}").execute()
+                    candidatos = resp_db.data or []
+                    for c in candidatos:
+                        clave_guardada = c.get("clave") or ""
+                        if verificar_clave_usuario(clave_guardada, pwd_in_clean) or str(clave_guardada).strip() == pwd_in_clean:
+                            encontrado = c
+                            break
+                except Exception:
+                    pass
+
+            # Paso 3: Fallback de seguridad administrativo local
             if encontrado is None:
                 app_pwd = "20162907"
                 try:
                     app_pwd = obtener_secreto("APP_PASSWORD", "20162907")
                 except Exception:
                     pass
-                if usr_in_clean.lower() in ["biberon", "nelly", "admin", "biberon01"] and (pwd_in_clean == app_pwd or pwd_in_clean == "20162907"):
+                if usr_clean_lower in ["biberon", "nelly", "admin", "biberon01", "biberon01@gmail.com", "nelly@gmail.com"] and (pwd_in_clean == app_pwd or pwd_in_clean == "20162907"):
                     encontrado = {
                         "id": "e8d379ce-3b97-4879-b21d-c306643fd7d5",
-                        "usuario": usr_in_clean.lower(),
+                        "usuario": "biberon",
                         "nombre": "Nelly Aguilera",
                         "rol": "admin",
                         "email": "global",
@@ -1783,7 +1795,7 @@ def login_simple() -> bool:
                 # S-02: Bloquear admins sin MFA antes de dar acceso
                 if mfa_requerido_para_admin(encontrado):
                     st.stop()
-                username_lc = str(encontrado.get("usuario")).lower()
+                username_lc = str(encontrado.get("usuario") or usr_clean_lower).lower()
                 tenant_lc = "global"
                 if username_lc not in ["admin", "nelly"]:
                     parent_lc = encontrado.get("email") or ""
@@ -1811,10 +1823,31 @@ def login_simple() -> bool:
                     st.rerun()
             else:
                 registrar_intento_fallido(usr_in_clean)
-                if error_login is not None:
-                    st.error(f"No se pudo validar el usuario: {error_login}")
+                st.error("Credenciales inválidas, usuario/correo no encontrado o cuenta inactiva.")
+
+        # Opción de Restablecimiento de Contraseña
+        with st.expander("🔑 ¿Olvidaste tu contraseña?", expanded=False):
+            st.markdown("""
+            <div style="font-size: 0.82rem; color: #495057; line-height: 1.4; margin-bottom: 0.6rem;">
+                • <b>Administradores Principales:</b> Ingrese su correo registrado para recibir el enlace de recuperación.<br>
+                • <b>Usuarios Secundarios (Cajeros / Empleados):</b> El Administrador Principal puede restablecer su clave desde el panel de <i>Administración -> Usuarios</i>.
+            </div>
+            """, unsafe_allow_html=True)
+            recup_in = st.text_input("Correo o Usuario a recuperar", key="login_recup_input", placeholder="ejemplo@correo.com o tu_usuario")
+            if st.button("Restablecer Contraseña", key="btn_solicitar_recup", use_container_width=True):
+                recup_clean = str(recup_in or "").strip().lower()
+                if not recup_clean:
+                    st.warning("⚠️ Ingrese su correo o nombre de usuario.")
                 else:
-                    st.error("Credenciales inválidas, cuenta inactiva o requiere restablecer contraseña antigua.")
+                    if "@" in recup_clean:
+                        if supabase is not None:
+                            try:
+                                supabase.auth.reset_password_for_email(recup_clean)
+                            except Exception:
+                                pass
+                        st.success(f"📩 Si el correo <b>{recup_clean}</b> está registrado como Administrador, enviamos las instrucciones a su bandeja de entrada.")
+                    else:
+                        st.info(f"ℹ️ El usuario secundario <b>'{recup_clean}'</b> debe solicitar la actualización de clave al Administrador Principal desde <b>Administración -> Usuarios</b>.")
 
     # Premium footer
     st.markdown("""
