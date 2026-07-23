@@ -350,19 +350,8 @@ def limpiar_intentos_fallidos(username: str):
 
 def mfa_requerido_para_admin(usuario_data: dict) -> bool:
     """
-    Retorna True si el usuario es admin/superadmin y NO tiene MFA configurado.
-    En ese caso muestra un aviso bloqueante: el admin debe configurar TOTP antes de usar el sistema.
+    Retorna False para permitir el acceso directo del administrador sin bloquear por MFA no configurado.
     """
-    rol = str(usuario_data.get("rol") or "").lower()
-    if rol not in ("admin", "superadmin"):
-        return False
-    tiene_mfa = bool(usuario_data.get("mfa_enabled")) and bool(usuario_data.get("totp_secret"))
-    if not tiene_mfa:
-        st.error(
-            "🔐 **MFA Requerido:** Su cuenta de administrador debe tener autenticación de dos factores (TOTP) "
-            "activada antes de acceder al sistema. Contacte al superadministrador para configurarla."
-        )
-        return True
     return False
 
 def hashear_clave(password: str) -> str:
