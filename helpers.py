@@ -1849,29 +1849,47 @@ def login_simple() -> bool:
                     r_pin_clean = str(r_pin or "").strip()
                     r_pwd_clean = str(r_new_pwd or "").strip()
                     
-                    app_pwd = "20162907"
-                    try:
-                        app_pwd = obtener_secreto("APP_PASSWORD", "20162907")
-                    except Exception:
-                        pass
-                        
-                    if not r_usr_clean or not r_pin_clean or not r_pwd_clean:
-                        st.warning("⚠️ Complete todos los campos: Usuario/Correo, Clave Maestra y Nueva Contraseña.")
-                    elif r_pin_clean != app_pwd and r_pin_clean != "20162907":
-                        st.error("❌ Clave Maestra de Seguridad incorrecta.")
+                    intentos_fallidos = st.session_state.get("master_pin_failures", 0)
+                    if intentos_fallidos >= 3:
+                        st.error("🛑 **Acceso Bloqueado:** Se excedió el límite de 3 intentos fallidos del PIN Maestro por seguridad.")
+                    elif not r_usr_clean or not r_pin_clean or not r_pwd_clean:
+                        st.warning("⚠️ Complete todos los campos: Usuario/Correo, PIN Maestro y Nueva Contraseña.")
                     else:
-                        actualizado = False
-                        if supabase is not None:
+                        es_dueña_target = (
+                            r_usr_clean in [
+                                "biberon", "nelly", "admin", "biberon01", "biiberon", "biiberonlicor",
+                                "biiberonlicor@gmail.com", "biberon01@gmail.com", "nelly@gmail.com",
+                                "nellymariaaguilerarosario@gmail.com"
+                            ] or "biberon" in r_usr_clean or "nelly" in r_usr_clean or "admin" in r_usr_clean
+                        )
+                        
+                        if not es_dueña_target:
+                            st.error("⛔ **Acceso Denegado:** El restablecimiento por PIN Maestro está autorizado únicamente para la cuenta de la Dueña / Administradora Principal.")
+                        else:
+                            app_pwd = "20162907"
                             try:
-                                resp_db = supabase.table("usuarios").select("*").or_(f"email.eq.{r_usr_clean},usuario.eq.{r_usr_clean}").execute()
-                                filas = resp_db.data or []
-                                for row in filas:
-                                    supabase.table("usuarios").update({"clave": hashear_clave(r_pwd_clean)}).eq("id", row["id"]).execute()
-                                    actualizado = True
+                                app_pwd = obtener_secreto("APP_PASSWORD", "20162907")
                             except Exception:
                                 pass
-                        
-                        st.success("✅ **¡Contraseña actualizada con éxito!** Ya puede iniciar sesión arriba con su nueva clave.")
+                                
+                            if r_pin_clean != app_pwd and r_pin_clean != "20162907":
+                                st.session_state["master_pin_failures"] = intentos_fallidos + 1
+                                restantes = 3 - st.session_state["master_pin_failures"]
+                                st.error(f"❌ **PIN Maestro Incorrecto.** Quedan {restantes} intento(s) antes del bloqueo de seguridad.")
+                            else:
+                                st.session_state["master_pin_failures"] = 0
+                                actualizado = False
+                                if supabase is not None:
+                                    try:
+                                        resp_db = supabase.table("usuarios").select("*").or_(f"email.eq.{r_usr_clean},usuario.eq.{r_usr_clean}").execute()
+                                        filas = resp_db.data or []
+                                        for row in filas:
+                                            supabase.table("usuarios").update({"clave": hashear_clave(r_pwd_clean)}).eq("id", row["id"]).execute()
+                                            actualizado = True
+                                    except Exception:
+                                        pass
+                                
+                                st.success("✅ **¡Contraseña de la Dueña actualizada con éxito!** Ya puede iniciar sesión arriba con su nueva clave.")
             
             with tab_email:
                 st.caption("Solicite un enlace de restablecimiento a su correo electrónico registrado (Administradores).")
