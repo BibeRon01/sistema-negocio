@@ -1488,22 +1488,23 @@ def login_simple() -> bool:
         if ultimo_check is None or (ahora - ultimo_check).total_seconds() > 60.0:
             try:
                 usr_id = usuario_data.get("id")
-                if usr_id:
+                if usr_id and supabase is not None:
                     resp = supabase.table("usuarios").select("*").eq("id", str(usr_id)).execute()
                     fresh = resp.data[0] if resp.data else None
-                    if not fresh or not fresh.get("activo", True):
-                        st.session_state.pop("usuario_data", None)
-                        st.session_state.pop("ultimo_check_usuario", None)
-                        st.session_state.pop("last_activity", None)
-                        st.error("⚠️ Su cuenta ha sido desactivada o eliminada.")
-                        st.rerun()
-                    if fresh.get("clave") != usuario_data.get("clave") or fresh.get("rol") != usuario_data.get("rol"):
-                        st.session_state.pop("usuario_data", None)
-                        st.session_state.pop("ultimo_check_usuario", None)
-                        st.session_state.pop("last_activity", None)
-                        st.error("⚠️ Sus credenciales o privilegios han cambiado. Inicie sesión de nuevo.")
-                        st.rerun()
-                    st.session_state["usuario_data"] = fresh
+                    if fresh:
+                        if not fresh.get("activo", True):
+                            st.session_state.pop("usuario_data", None)
+                            st.session_state.pop("ultimo_check_usuario", None)
+                            st.session_state.pop("last_activity", None)
+                            st.error("⚠️ Su cuenta ha sido desactivada o eliminada.")
+                            st.rerun()
+                        if fresh.get("rol") != usuario_data.get("rol"):
+                            st.session_state.pop("usuario_data", None)
+                            st.session_state.pop("ultimo_check_usuario", None)
+                            st.session_state.pop("last_activity", None)
+                            st.error("⚠️ Sus privilegios de usuario han cambiado. Inicie sesión de nuevo.")
+                            st.rerun()
+                        st.session_state["usuario_data"] = fresh
                 st.session_state["ultimo_check_usuario"] = ahora
             except Exception:
                 # Tolerar fallos de red temporales para continuidad operativa
