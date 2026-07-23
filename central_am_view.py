@@ -211,9 +211,10 @@ def render_gestion_empresas():
         else:
             emp_opts_plan = [f"{e.get('negocio_nombre') or e.get('propietario')} [{e.get('propietario')}]" for e in empresas_lista]
             sel_emp_plan = st.selectbox("Seleccionar Empresa", range(len(emp_opts_plan)), format_func=lambda i: emp_opts_plan[i], key="plan_sel_emp")
-            emp_cfg_plan = empresas_lista[sel_emp_plan]
-            plan_actual_id = emp_cfg_plan.get("plan") or "premium"
-            plan_actual_info = PLANES_AM.get(plan_actual_id, PLANES_AM["premium"])
+            if sel_emp_plan is not None and sel_emp_plan < len(empresas_lista):
+                emp_cfg_plan = empresas_lista[sel_emp_plan]
+                plan_actual_id = emp_cfg_plan.get("plan") or "premium"
+                plan_actual_info = PLANES_AM.get(plan_actual_id, PLANES_AM["premium"])
 
             st.info(f"**Plan actual:** {plan_actual_info['emoji']} {plan_actual_info['nombre']} — RD$ {plan_actual_info['precio_mensual']:,.0f}/mes")
 
@@ -514,50 +515,57 @@ def render_gestion_empresas():
         st.subheader("🛠️ Configuración de Empresas y Usuarios")
         with st.expander("📊 Ver tabla completa de empresas", expanded=False):
             df_empresas = pd.DataFrame(todas_cfg)
-            cols_mostrar = [c for c in ["propietario","negocio_nombre","nombre_sistema","telefono","rnc","direccion"] if c in df_empresas.columns]
-            st.dataframe(df_empresas[cols_mostrar], use_container_width=True)
+            if not df_empresas.empty:
+                cols_mostrar = [c for c in ["propietario","negocio_nombre","nombre_sistema","telefono","rnc","direccion"] if c in df_empresas.columns]
+                st.dataframe(df_empresas[cols_mostrar], use_container_width=True)
+            else:
+                st.info("No hay empresas registradas aún.")
 
         st.markdown("---")
         st.subheader("✏️ Editar empresa existente")
-        nombres_emp = [f"{e.get('negocio_nombre') or e.get('propietario')} [{e.get('propietario')}]" for e in todas_cfg]
-        sel_emp_idx = st.selectbox("Seleccionar empresa", range(len(nombres_emp)), format_func=lambda i: nombres_emp[i], key="sel_edit_emp")
-        cfg_sel = todas_cfg[sel_emp_idx]
-        
-        actual_slogan = str(cfg_sel.get("slogan") or "")
-        es_suspendida = "[SUSPENDIDO]" in actual_slogan
-        slogan_limpio = actual_slogan.replace("[SUSPENDIDO]", "").strip()
-        
-        c1e, c2e = st.columns(2)
-        with c1e:
-            edit_nombre = st.text_input("Nombre del negocio", value=str(cfg_sel.get("negocio_nombre") or ""), key="edit_emp_nombre_neg")
-            edit_sistema = st.text_input("Nombre del sistema", value=str(cfg_sel.get("nombre_sistema") or ""), key="edit_emp_nom_sis")
-            edit_tel = st.text_input("Teléfono", value=str(cfg_sel.get("telefono") or ""), key="edit_emp_tel")
-        with c2e:
-            edit_rnc = st.text_input("RNC", value=str(cfg_sel.get("rnc") or ""), key="edit_emp_rnc")
-            edit_dir = st.text_input("Dirección", value=str(cfg_sel.get("direccion") or ""), key="edit_emp_dir")
-            edit_slogan = st.text_input("Slogan (Lema)", value=slogan_limpio, key="edit_emp_slogan")
-            
-        st.markdown("**🔒 Suscripción y Licencia**")
-        estado_licencia = st.selectbox("Estado de la Suscripción", ["Activa (Funcionamiento Normal)", "Suspendida (Bloqueo de Acceso)"], index=1 if es_suspendida else 0, key="edit_emp_estado_lic")
-        
-        if st.button("💾 Guardar cambios empresa", key="btn_guardar_emp_edit"):
-            try:
-                # Calcular slogan final aplicando el bloqueo si corresponde
-                slogan_final = edit_slogan
-                if "Suspendida" in estado_licencia:
-                    slogan_final = f"[SUSPENDIDO] {slogan_final}".strip()
-                else:
-                    slogan_final = slogan_final.replace("[SUSPENDIDO]", "").strip()
+        if not todas_cfg:
+            st.info("No hay empresas registradas para editar.")
+        else:
+            nombres_emp = [f"{e.get('negocio_nombre') or e.get('propietario')} [{e.get('propietario')}]" for e in todas_cfg]
+            sel_emp_idx = st.selectbox("Seleccionar empresa", range(len(nombres_emp)), format_func=lambda i: nombres_emp[i], key="sel_edit_emp")
+            if sel_emp_idx is not None and sel_emp_idx < len(todas_cfg):
+                cfg_sel = todas_cfg[sel_emp_idx]
+                
+                actual_slogan = str(cfg_sel.get("slogan") or "")
+                es_suspendida = "[SUSPENDIDO]" in actual_slogan
+                slogan_limpio = actual_slogan.replace("[SUSPENDIDO]", "").strip()
+                
+                c1e, c2e = st.columns(2)
+                with c1e:
+                    edit_nombre = st.text_input("Nombre del negocio", value=str(cfg_sel.get("negocio_nombre") or ""), key="edit_emp_nombre_neg")
+                    edit_sistema = st.text_input("Nombre del sistema", value=str(cfg_sel.get("nombre_sistema") or ""), key="edit_emp_nom_sis")
+                    edit_tel = st.text_input("Teléfono", value=str(cfg_sel.get("telefono") or ""), key="edit_emp_tel")
+                with c2e:
+                    edit_rnc = st.text_input("RNC", value=str(cfg_sel.get("rnc") or ""), key="edit_emp_rnc")
+                    edit_dir = st.text_input("Dirección", value=str(cfg_sel.get("direccion") or ""), key="edit_emp_dir")
+                    edit_slogan = st.text_input("Slogan (Lema)", value=slogan_limpio, key="edit_emp_slogan")
                     
-                supabase.table("configuracion_sistema").update({
-                    "negocio_nombre": edit_nombre, "nombre_sistema": edit_sistema,
-                    "telefono": edit_tel, "rnc": edit_rnc, "direccion": edit_dir, "slogan": slogan_final
-                }).eq("id", cfg_sel["id"]).execute()
-                _obtener_configuracion_interna.clear()
-                st.success(f"✅ Empresa '{edit_nombre}' actualizada.")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Error: {exc}")
+                st.markdown("**🔒 Suscripción y Licencia**")
+                estado_licencia = st.selectbox("Estado de la Suscripción", ["Activa (Funcionamiento Normal)", "Suspendida (Bloqueo de Acceso)"], index=1 if es_suspendida else 0, key="edit_emp_estado_lic")
+                
+                if st.button("💾 Guardar cambios empresa", key="btn_guardar_emp_edit"):
+                    try:
+                        # Calcular slogan final aplicando el bloqueo si corresponde
+                        slogan_final = edit_slogan
+                        if "Suspendida" in estado_licencia:
+                            slogan_final = f"[SUSPENDIDO] {slogan_final}".strip()
+                        else:
+                            slogan_final = slogan_final.replace("[SUSPENDIDO]", "").strip()
+                            
+                        supabase.table("configuracion_sistema").update({
+                            "negocio_nombre": edit_nombre, "nombre_sistema": edit_sistema,
+                            "telefono": edit_tel, "rnc": edit_rnc, "direccion": edit_dir, "slogan": slogan_final
+                        }).eq("id", cfg_sel["id"]).execute()
+                        _obtener_configuracion_interna.clear()
+                        st.success(f"✅ Empresa '{edit_nombre}' actualizada.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Error: {exc}")
 
         # Check if the company has any user accounts and show helper to create one
         try:
