@@ -1,0 +1,3 @@
+-- Archivo conservado por compatibilidad.
+-- No pegar este archivo de forma aislada.
+-- Use, en orden, los archivos versionados de supabase/migrations/.
