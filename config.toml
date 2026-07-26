@@ -1,0 +1,10 @@
+project_id = "replace-with-your-project-ref"
+
+[functions.invite-user]
+verify_jwt = true
+
+[functions.manage-user]
+verify_jwt = true
+
+[functions.manage-company]
+verify_jwt = true
