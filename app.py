@@ -43,6 +43,12 @@ except Exception as _e_inicio:
     st.error(f"⚠️ **Error cargando módulos iniciales:** `{_e_inicio}`")
     st.stop()
 
+# Garantizar que create_client esté siempre definido antes de la validación
+try:
+    from supabase import create_client
+except Exception:
+    create_client = globals().get("create_client", None)
+
 # Validar instalación de dependencias en Streamlit Cloud
 if create_client is None:
     st.error("⚠️ **Falta la librería `supabase` en el servidor de Streamlit Cloud**")
