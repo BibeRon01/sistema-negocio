@@ -56,12 +56,14 @@ if create_client is None:
     st.stop()
 
 # Validar que los secretos de Supabase están configurados
-if not supabase:
+_supabase_client = globals().get("supabase", None)
+if not _supabase_client:
     st.error("⚠️ **Faltan las credenciales de Supabase en Streamlit Cloud**")
     st.info("Por favor ingresa a **Manage app -> Settings -> Secrets** en el panel de Streamlit Cloud y añade:")
     st.code("""
-SUPABASE_URL = "https://tu-proyecto.supabase.co"
-SUPABASE_KEY = "tu-anon-key-de-supabase"
+SUPABASE_URL = "https://dmpwpoyulkbhfjcdsbpt.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtcHdwb3l1bGtiaGZqY2RzYnB0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMTI2MjMsImV4cCI6MjA4OTc4ODYyM30.Jb2rmvNgwVV46r7P68E4PVcgIEEm7DEfSNm3XHIpX-c"
+APP_PASSWORD = "20162907"
 """, language="toml")
     st.stop()
 
