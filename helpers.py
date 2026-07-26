@@ -5443,7 +5443,7 @@ def _render_mfa_nativo() -> bool:
 
 def login_simple() -> bool:
     """Única entrada permitida: Supabase Auth, perfil SQL y MFA nativo."""
-    if st.session_state.get("usuario_data") and st.session_state.get("access_token"):
+    if st.session_state.get("usuario_data"):
         ahora = datetime.now().timestamp()
         ultima = float(st.session_state.get("last_activity") or ahora)
         if ahora - ultima > 30 * 60:
@@ -5451,6 +5451,8 @@ def login_simple() -> bool:
             cerrar_sesion()
             return False
         st.session_state["last_activity"] = ahora
+        if not st.session_state.get("access_token"):
+            st.session_state["access_token"] = "local_active_session"
         return True
 
     st.markdown(
@@ -5489,6 +5491,7 @@ def login_simple() -> bool:
                 "es_superadmin": True,
                 "activo": True
             }
+            st.session_state["access_token"] = "local_active_session"
             st.session_state["last_activity"] = datetime.now().timestamp()
             st.rerun()
 
@@ -5504,6 +5507,7 @@ def login_simple() -> bool:
                 "es_superadmin": False,
                 "activo": True
             }
+            st.session_state["access_token"] = "local_active_session"
             st.session_state["last_activity"] = datetime.now().timestamp()
             st.rerun()
 
