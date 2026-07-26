@@ -26,8 +26,16 @@ def obtener_secreto(nombre: str, default: str = "") -> str:
     except Exception:
         return os.environ.get(nombre, default)
 
-SUPABASE_URL = obtener_secreto("SUPABASE_URL", "")
-SUPABASE_KEY = obtener_secreto("SUPABASE_KEY", "")
+DEFAULT_SUPABASE_URL = "https://dmpwpoyulkbhfjcdsbpt.supabase.co"
+DEFAULT_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtcHdwb3l1bGtiaGZqY2RzYnB0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMTI2MjMsImV4cCI6MjA4OTc4ODYyM30.Jb2rmvNgwVV46r7P68E4PVcgIEEm7DEfSNm3XHIpX-c"
+
+SUPABASE_URL = obtener_secreto("SUPABASE_URL", DEFAULT_SUPABASE_URL)
+if not SUPABASE_URL:
+    SUPABASE_URL = DEFAULT_SUPABASE_URL
+
+SUPABASE_KEY = obtener_secreto("SUPABASE_KEY", DEFAULT_SUPABASE_KEY)
+if not SUPABASE_KEY:
+    SUPABASE_KEY = DEFAULT_SUPABASE_KEY
 
 def _token_fingerprint(token: str) -> str:
     if not token:
