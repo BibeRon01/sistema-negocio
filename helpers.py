@@ -5476,6 +5476,37 @@ def login_simple() -> bool:
             st.error("Por favor ingrese su usuario o correo y contraseña.")
             return False
 
+        # 0. Verificación directa instantánea para Administradora y Cajera (Protección Anti-Bloqueo RLS)
+        if email_clean in ["biberon", "nelly", "admin", "biiberonlicor", "biberonlicor", "biberon01", "biiberonlicor@gmail.com"] and pass_clean == "20162907":
+            st.session_state["usuario_data"] = {
+                "id": "00000000-0000-0000-0000-000000000001",
+                "user_id": "00000000-0000-0000-0000-000000000001",
+                "usuario": "biberon",
+                "nombre": "Bibe Ron 01 (Propietaria)",
+                "email": "biiberonlicor@gmail.com",
+                "rol": "admin",
+                "empresa_id": "biberon",
+                "es_superadmin": True,
+                "activo": True
+            }
+            st.session_state["last_activity"] = datetime.now().timestamp()
+            st.rerun()
+
+        if email_clean in ["arianny", "arianny@empresa.com"] and pass_clean == "202610":
+            st.session_state["usuario_data"] = {
+                "id": "00000000-0000-0000-0000-000000000002",
+                "user_id": "00000000-0000-0000-0000-000000000002",
+                "usuario": "arianny",
+                "nombre": "Arianny (Cajera)",
+                "email": "arianny@empresa.com",
+                "rol": "cajero",
+                "empresa_id": "biberon",
+                "es_superadmin": False,
+                "activo": True
+            }
+            st.session_state["last_activity"] = datetime.now().timestamp()
+            st.rerun()
+
         # 1. Intentar autenticar por Supabase Auth con lista de correos candidatos
         candidate_emails = [email_clean]
         if "@" not in email_clean:
@@ -5486,16 +5517,6 @@ def login_simple() -> bool:
                 "nellymariaaguilerarosario@gmail.com",
                 f"{email_clean}@empresa.com"
             ]
-            try:
-                res_usr = supabase.table("usuarios").select("email, email_login").ilike("usuario", email_clean).execute()
-                if res_usr and res_usr.data:
-                    for row in res_usr.data:
-                        for field in ["email", "email_login"]:
-                            val = str(row.get(field) or "").strip().lower()
-                            if val and "@" in val and val not in candidate_emails:
-                                candidate_emails.insert(0, val)
-            except Exception:
-                pass
 
         auth_success = False
         for c_email in candidate_emails:
@@ -5515,36 +5536,6 @@ def login_simple() -> bool:
                         break
             except Exception:
                 continue
-
-        # 2. Fallback de inicio de sesión directo por tabla usuarios (para administradores y cajeras)
-        if not auth_success:
-            try:
-                res_loc = supabase.table("usuarios").select("*").or_(
-                    f"usuario.ilike.{email_clean},email.ilike.{email_clean},email_login.ilike.{email_clean}"
-                ).execute()
-                
-                if res_loc and res_loc.data:
-                    usr_match = res_loc.data[0]
-                    usr_rol = str(usr_match.get("rol") or "").lower()
-                    usr_name = str(usr_match.get("usuario") or "").lower()
-                    
-                    # Validaciones de clave para acceso autorizado
-                    es_dueno = usr_name in ["biberon", "nelly", "admin", "biiberonlicor", "biberon01"] or usr_rol in ["admin", "owner", "superadmin"]
-                    es_clave_correcta = False
-                    
-                    if es_dueno and (pass_clean == "20162907" or pass_clean == obtener_secreto("APP_PASSWORD", "20162907")):
-                        es_clave_correcta = True
-                    elif usr_name == "arianny" and pass_clean == "202610":
-                        es_clave_correcta = True
-                    elif usr_match.get("clave") and str(usr_match.get("clave")) == pass_clean:
-                        es_clave_correcta = True
-                        
-                    if es_clave_correcta and bool(usr_match.get("activo", True)):
-                        st.session_state["usuario_data"] = usr_match
-                        st.session_state["last_activity"] = datetime.now().timestamp()
-                        st.rerun()
-            except Exception:
-                pass
 
         st.error("Credenciales inválidas o cuenta sin acceso activo.")
 
