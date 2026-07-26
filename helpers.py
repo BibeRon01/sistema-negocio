@@ -5478,17 +5478,33 @@ def login_simple() -> bool:
             st.error("Por favor ingrese su usuario o correo y contraseña.")
             return False
 
-        # 0. Verificación directa instantánea para Administradora y Cajera (Protección Anti-Bloqueo RLS)
-        if email_clean in ["biberon", "nelly", "admin", "biiberonlicor", "biberonlicor", "biberon01", "biiberonlicor@gmail.com"] and pass_clean == "20162907":
+        # 0. Verificación directa instantánea para Super-Admin Plataforma A&M, Cliente Bibe Ron y Cajera
+        if email_clean in ["admin", "superadmin", "nelly", "am_admin"] and pass_clean == "20162907":
+            st.session_state["usuario_data"] = {
+                "id": "00000000-0000-0000-0000-000000000000",
+                "user_id": "00000000-0000-0000-0000-000000000000",
+                "usuario": "admin",
+                "nombre": "Nelly (Super-Admin Plataforma A&M)",
+                "email": "nellymariaaguilerarosario@gmail.com",
+                "rol": "superadmin",
+                "empresa_id": "global",
+                "es_superadmin": True,
+                "activo": True
+            }
+            st.session_state["access_token"] = "local_active_session"
+            st.session_state["last_activity"] = datetime.now().timestamp()
+            st.rerun()
+
+        if email_clean in ["biberon", "biiberonlicor", "biberonlicor", "biberon01", "biiberonlicor@gmail.com"] and pass_clean == "20162907":
             st.session_state["usuario_data"] = {
                 "id": "00000000-0000-0000-0000-000000000001",
                 "user_id": "00000000-0000-0000-0000-000000000001",
                 "usuario": "biberon",
-                "nombre": "Bibe Ron 01 (Propietaria)",
+                "nombre": "Propietario Bibe Ron 01",
                 "email": "biiberonlicor@gmail.com",
                 "rol": "admin",
                 "empresa_id": "biberon",
-                "es_superadmin": True,
+                "es_superadmin": False,
                 "activo": True
             }
             st.session_state["access_token"] = "local_active_session"
