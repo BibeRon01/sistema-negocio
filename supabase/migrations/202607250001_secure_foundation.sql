@@ -709,12 +709,41 @@ as $$
     )
 $$;
 
+-- Compatibilidad con tablas históricas cuyo empresa_id fue creado como UUID.
+-- La autorización sigue usando tenant_id TEXT como fuente canónica y convierte
+-- únicamente el identificador recibido, sin modificar datos existentes.
+create or replace function public.has_tenant_access(p_tenant uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth
+as $$
+    select public.has_tenant_access(p_tenant::text)
+$$;
+
+create or replace function public.has_tenant_permission(
+    p_tenant uuid,
+    p_permission text
+) returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth
+as $$
+    select public.has_tenant_permission(p_tenant::text, p_permission)
+$$;
+
 revoke all on function public.is_platform_superadmin() from public, anon;
 revoke all on function public.has_tenant_access(text) from public, anon;
+revoke all on function public.has_tenant_access(uuid) from public, anon;
 revoke all on function public.has_tenant_permission(text,text) from public, anon;
+revoke all on function public.has_tenant_permission(uuid,text) from public, anon;
 grant execute on function public.is_platform_superadmin() to authenticated;
 grant execute on function public.has_tenant_access(text) to authenticated;
+grant execute on function public.has_tenant_access(uuid) to authenticated;
 grant execute on function public.has_tenant_permission(text,text) to authenticated;
+grant execute on function public.has_tenant_permission(uuid,text) to authenticated;
 
 create or replace function public.api_my_session(p_tenant_id text default null)
 returns jsonb

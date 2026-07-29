@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+from urllib.parse import urlparse
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
@@ -28,6 +29,47 @@ def obtener_secreto(nombre: str, default: str = "") -> str:
 
 SUPABASE_URL = obtener_secreto("SUPABASE_URL", "")
 SUPABASE_KEY = obtener_secreto("SUPABASE_KEY", "")
+
+
+def _jwt_role_sin_verificar(token: str) -> str:
+    """Lee únicamente el rol declarado para rechazar llaves privadas por error.
+
+    Esto no autentica el JWT ni se usa para autorizar usuarios. La autorización
+    real continúa en Supabase Auth, RLS y las RPC del servidor.
+    """
+    parts = str(token or "").split(".")
+    if len(parts) != 3:
+        return ""
+    try:
+        payload = parts[1] + ("=" * (-len(parts[1]) % 4))
+        decoded = base64.urlsafe_b64decode(payload.encode("ascii"))
+        return str(json.loads(decoded.decode("utf-8")).get("role") or "").lower()
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+
+
+def validar_configuracion_supabase() -> tuple[bool, str]:
+    """Impide publicar AIS con una URL inválida o una llave privilegiada."""
+    url = str(SUPABASE_URL or "").strip()
+    key = str(SUPABASE_KEY or "").strip()
+    if not url or not key:
+        return False, "Faltan SUPABASE_URL y SUPABASE_KEY."
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        return False, "SUPABASE_URL debe ser una dirección HTTPS válida."
+    if parsed.query or parsed.fragment:
+        return False, "SUPABASE_URL no debe contener parámetros ni fragmentos."
+
+    key_lower = key.lower()
+    if key_lower.startswith(("sb_secret_", "sb_service_", "service_role")):
+        return False, "SUPABASE_KEY debe ser la llave pública, nunca una llave secreta."
+
+    jwt_role = _jwt_role_sin_verificar(key)
+    if jwt_role and jwt_role != "anon":
+        return False, "La llave JWT configurada no corresponde al rol público anon."
+    return True, ""
+
 
 def _token_fingerprint(token: str) -> str:
     if not token:
@@ -327,6 +369,9 @@ def invalidar_cache_tabla(nombre_tabla: str):
 def limpiar_cache_datos():
     if "session_cache_tablas" in st.session_state:
         st.session_state["session_cache_tablas"].clear()
+    for key in list(st.session_state.keys()):
+        if str(key).startswith("_session_data_cache_"):
+            st.session_state.pop(key, None)
     try:
         st.cache_data.clear()
     except Exception:
@@ -889,7 +934,7 @@ class SessionScopedDataDict:
         try:
             usr = st.session_state.get("usuario_data", {})
             u_id = usr.get("user_id") or usr.get("id") or "anon"
-            t_id = usr.get("empresa_id") or "anon"
+            t_id = obtener_tenant_actual() or "anon"
             key = f"_session_data_cache_{u_id}_{t_id}"
             if key not in st.session_state:
                 st.session_state[key] = {}

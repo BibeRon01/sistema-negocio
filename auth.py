@@ -1,7 +1,8 @@
 import streamlit as st
 from db import (
     usuario_sesion, nombre_usuario_actual, obtener_tenant_actual,
-    es_superadmin_plataforma, supabase, renovar_cliente_sesion
+    es_superadmin_plataforma, supabase, renovar_cliente_sesion,
+    limpiar_cache_datos,
 )
 from utils import normalizar_texto
 
@@ -30,10 +31,12 @@ def cerrar_sesion():
         "usuario_data", "access_token", "refresh_token", "sesion_token",
         "tenant_actual", "mfa_pendiente", "login_pending_mfa",
         "superadmin_tenant_seleccionado", "last_activity",
-        "ultimo_check_usuario", "_supabase_session_client",
+        "ultimo_check_usuario", "_last_session_validation",
+        "_supabase_session_client",
         "_supabase_session_fingerprint", "session_cache_tablas",
     ]:
         st.session_state.pop(k, None)
+    limpiar_cache_datos()
     try:
         renovar_cliente_sesion()
     except Exception:

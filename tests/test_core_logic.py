@@ -144,6 +144,10 @@ def test_api_mantenimiento_cubre_cuenta_compra_nomina_y_cierre():
     assert foundation.count(
         "'alter table public.%I add column if not exists empresa_id text'"
     ) >= 4
+    assert "public.has_tenant_access(p_tenant uuid)" in foundation
+    assert "public.has_tenant_permission(\n    p_tenant uuid" in foundation
+    assert "public.has_tenant_access(p_tenant::text)" in foundation
+    assert "public.has_tenant_permission(p_tenant::text, p_permission)" in foundation
 
 
 def test_rls_no_contiene_politica_publica_total():
@@ -296,3 +300,36 @@ def test_edicion_de_permisos_conserva_flags_no_visibles():
         "puede_configurar",
     ]:
         assert f'permisos["{permission}"]' in auth_code
+
+
+def test_publicacion_rechaza_llaves_privadas_y_sanea_la_marca():
+    db_code = (ROOT / "db.py").read_text(encoding="utf-8")
+    app_code = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert "sb_secret_" in db_code
+    assert "jwt_role != \"anon\"" in db_code
+    assert "_texto_html_seguro" in app_code
+    assert "_logo_html_seguro" in app_code
+    assert 'menu = "POS"' not in app_code
+
+
+def test_login_publicable_exige_correo_y_revalida_la_sesion():
+    helpers = (ROOT / "helpers.py").read_text(encoding="utf-8")
+    secure_login = helpers[helpers.index("def login_simple()"):]
+    assert 'st.text_input("Correo electrónico"' in secure_login
+    assert "@empresa.com" not in secure_login
+    assert "_last_session_validation" in secure_login
+    assert "_cargar_perfil_verificado()" in secure_login
+
+
+def test_cliente_de_ventas_no_reintenta_otra_rpc():
+    code = (ROOT / "api_client.py").read_text(encoding="utf-8")
+    function = code[code.index("def registrar_venta"):code.index("def editar_venta")]
+    assert "api_registrar_venta" in function
+    assert "guardar_venta_rpc" not in function
+    assert "except" not in function
+
+
+def test_cache_de_datos_usa_el_tenant_seleccionado():
+    for name in ("db.py", "helpers.py"):
+        code = (ROOT / name).read_text(encoding="utf-8")
+        assert "t_id = obtener_tenant_actual() or \"anon\"" in code
