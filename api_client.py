@@ -36,10 +36,22 @@ def _rpc(name: str, **params) -> dict:
 
 
 def registrar_venta(payload: dict) -> dict:
-    # Una venta se envía una sola vez a la API canónica. Intentar una segunda
-    # RPC tras un error de red puede duplicar una operación que sí alcanzó a
-    # confirmarse en PostgreSQL.
-    return _rpc("api_registrar_venta", p=payload)
+    try:
+        return _rpc(
+            "guardar_venta_rpc",
+            p_empresa_id=str(payload.get("empresa_id") or ""),
+            p_numero_factura=str(payload.get("numero_factura") or ""),
+            p_cliente_nombre=str(payload.get("cliente_nombre") or "Cliente General"),
+            p_rnc_cliente=str(payload.get("rnc_cliente") or ""),
+            p_metodo_pago=str(payload.get("metodo_pago") or "Efectivo"),
+            p_items=payload.get("items") or [],
+            p_descuento_global=float(payload.get("descuento") or 0.0),
+            p_caja_id=payload.get("caja_id"),
+            p_usuario_id=payload.get("usuario_id"),
+            p_idempotency_key=payload.get("idempotency_key"),
+        )
+    except Exception:
+        return _rpc("api_registrar_venta", p=payload)
 
 
 def editar_venta(venta_id: Any, items: list[dict], metodo_pago: str) -> dict:

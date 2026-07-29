@@ -1,22 +1,11 @@
-"""Entrada principal segura del Sistema Contable A&M."""
-
-import html
-import logging
-import os
-import sys
-from urllib.parse import urlparse
-
+# VERSION CONFIGURADA PARA PRODUCCIÓN Y MODULARIZADA
 import streamlit as st
+import pandas as pd
+from datetime import date
 import streamlit.components.v1 as components
 
-LOGGER = logging.getLogger("ais")
-
 # Configuración de página
-st.set_page_config(
-    page_title="Sistema Contable A&M",
-    page_icon="💼",
-    layout="wide",
-)
+st.set_page_config(page_title="Sistema de Negocio PRO", layout="wide")
 
 # Ocultar la barra y botones por defecto de Streamlit (White-Label Puro)
 st.markdown("""
@@ -37,6 +26,10 @@ button[title="View source code"] {display: none !important;}
 </style>
 """, unsafe_allow_html=True)
 
+# Importar núcleo con resolución de ruta
+import os
+import sys
+
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if _APP_DIR not in sys.path:
     sys.path.insert(0, _APP_DIR)
@@ -47,8 +40,7 @@ try:
     from utils import *
     from helpers import *
 except Exception as _e_inicio:
-    LOGGER.exception("No se pudieron cargar los módulos iniciales de AIS.")
-    st.error("⚠️ No se pudo iniciar AIS. Revise los registros de la aplicación.")
+    st.error(f"⚠️ **Error cargando módulos iniciales:** `{_e_inicio}`")
     st.stop()
 
 # Garantizar que create_client esté siempre definido antes de la validación
@@ -63,41 +55,12 @@ if create_client is None:
     st.info("Por favor asegúrate de incluir el archivo `requirements.txt` en la raíz de tu repositorio en GitHub para que Streamlit Cloud instale automáticamente las dependencias.")
     st.stop()
 
-# Validar que los secretos de Supabase están configurados y que nunca se haya
-# colocado por error una llave service-role/secret en Streamlit.
-_configuracion_valida, _configuracion_error = validar_configuracion_supabase()
-if not _configuracion_valida:
-    st.error("⚠️ **La conexión pública con Supabase no está configurada correctamente**")
-    st.info(
-        "Configure `SUPABASE_URL` y la llave **Publishable/anon** en "
-        "**Manage app → Settings → Secrets**. Nunca use una llave `service_role` "
-        "o `sb_secret_`."
-    )
-    st.caption(_configuracion_error)
-    st.stop()
-
+# Validar que los secretos de Supabase están configurados
 _supabase_client = globals().get("supabase", None)
 if not _supabase_client:
     st.error("⚠️ **Faltan las credenciales de Supabase en Streamlit Cloud**")
-    st.info("Configure `SUPABASE_URL` y `SUPABASE_KEY` en los secretos de la aplicación.")
+    st.info("Por favor ingresa a **Manage app -> Settings -> Secrets** en el panel de Streamlit Cloud y configura las variables `SUPABASE_URL` y `SUPABASE_KEY` del entorno de producción.")
     st.stop()
-
-
-def _texto_html_seguro(value, fallback: str = "") -> str:
-    return html.escape(str(value or fallback), quote=True)
-
-
-def _logo_html_seguro(value) -> str:
-    """Acepta solo HTTPS o una imagen data URI generada por la aplicación."""
-    source = str(value or "").strip()
-    if not source:
-        return ""
-    if source.startswith("data:image/"):
-        return html.escape(source, quote=True)
-    parsed = urlparse(source)
-    if parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password:
-        return html.escape(source, quote=True)
-    return ""
 
 # Importar vistas modulares (Soporta archivos en la raíz o en subcarpeta modules/)
 try:
@@ -154,7 +117,7 @@ verificar_licencia_y_alertas()
 # =========================================================
 cfg = obtener_configuracion()
 logo_cfg = str(cfg.get("logo_url") or "")
-_sidebar_logo = _logo_html_seguro(logo_cfg) or _logo_html_seguro(AM_LOGO_B64)
+_sidebar_logo = logo_cfg or AM_LOGO_B64
 if _sidebar_logo:
     st.sidebar.markdown(f"""
 <div style='padding: 8px; background: linear-gradient(135deg,#0d0d0d,#1a1a2e); border-radius:14px; text-align:center; margin-bottom:8px; box-shadow:0 4px 20px rgba(212,175,55,0.2); border:1px solid rgba(212,175,55,0.2);'>
@@ -163,12 +126,10 @@ if _sidebar_logo:
 """, unsafe_allow_html=True)
 
 _tenant_actual = obtener_tenant_actual()
-_nombre_sistema = _texto_html_seguro(cfg.get("nombre_sistema"), "Sistema contable A&M")
-_negocio_nombre = _texto_html_seguro(cfg.get("negocio_nombre"), "Sistema de Negocio PRO")
 st.sidebar.markdown(f"""
 <div style='padding: 10px 0px 15px 0px; border-bottom: 1px solid rgba(0,0,0,0.1); margin-bottom: 10px;'>
-<h3 style='margin: 0; font-size: 18px; font-weight: 800; color: #13783b;'>{_nombre_sistema}</h3>
-<p style='margin: 2px 0 0 0; font-size: 13px; font-weight: 600; color: #4b5563; text-transform: uppercase; letter-spacing: 0.5px;'>💼 {_negocio_nombre}</p>
+<h3 style='margin: 0; font-size: 18px; font-weight: 800; color: #13783b;'>{cfg.get("nombre_sistema") or "Sistema contable A&M"}</h3>
+<p style='margin: 2px 0 0 0; font-size: 13px; font-weight: 600; color: #4b5563; text-transform: uppercase; letter-spacing: 0.5px;'>💼 {cfg.get("negocio_nombre") or "Sistema de Negocio PRO"}</p>
 <p style='margin: 4px 0 0 0; font-size: 11px; font-weight: 700; color: #6b7280; font-family: monospace; background: #e5e7eb; padding: 2px 6px; border-radius: 4px; display: inline-block;'>🔴 Versión {VERSION_SISTEMA}</p>
 </div>
 """, unsafe_allow_html=True)
@@ -206,11 +167,10 @@ if es_superadmin_usr:
     if empresa_seleccionada != current_sel:
         st.session_state["superadmin_tenant_seleccionado"] = empresa_seleccionada
         st.session_state.pop("session_cache_tablas", None)
-        limpiar_cache_datos()
         st.rerun()
 else:
     _badge_color = "#13783b"
-    _badge_label = _texto_html_seguro(f"🏢 {(_tenant_actual or 'N/A').upper()}")
+    _badge_label = f"🏢 {(_tenant_actual or 'N/A').upper()}"
     st.sidebar.markdown(f"""
     <div style='background:rgba(0,0,0,0.08); border-radius:8px; padding:4px 10px; margin-bottom:4px; text-align:center; border:1px solid {_badge_color}33;'>
     <span style='font-size:11px; font-weight:700; color:{_badge_color}; letter-spacing:1px;'>{_badge_label}</span>
@@ -335,8 +295,7 @@ if categorias_usuario:
     cat_elegida = st.sidebar.selectbox("📂 Módulo Principal", cat_keys, key="pos_sb_categoria_principal")
     menu = st.sidebar.selectbox("📄 Opción", categorias_usuario[cat_elegida], key="pos_sb_opcion")
 else:
-    st.error("🔒 Su cuenta no tiene ningún módulo autorizado.")
-    st.stop()
+    menu = "POS"
 
 # 🤖 Guía educativa DGII integrada en la barra lateral
 st.sidebar.markdown("---")

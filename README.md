@@ -35,10 +35,6 @@ transaccional dentro de PostgreSQL/Supabase.
 Nunca coloque la service-role, una contraseña, un certificado fiscal o una llave
 de respaldo en Streamlit, GitHub o el código fuente.
 
-Para publicar la aplicación en Streamlit Community Cloud, siga
-`SUBIR_A_STREAMLIT.md` y suba siempre el proyecto completo, no solamente
-`app.py`.
-
 ## Migraciones
 
 La única fuente autorizada es `supabase/migrations/`. Deben ejecutarse en orden:
