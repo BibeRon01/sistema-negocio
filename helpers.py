@@ -2604,11 +2604,25 @@ def ajustar_pagos_sin_recargo_tarjeta(pagos_df: pd.DataFrame, ventas_df: pd.Data
 # =========================================================
 # CARGA GLOBAL
 # =========================================================
-class LazyDataDict(dict):
+class SessionScopedDataDict:
+    """Aislador de datos por sesión de Streamlit para evitar fugas entre tenants (AIS-C02)."""
+    def _get_dict(self):
+        try:
+            usr = st.session_state.get("usuario_data", {})
+            u_id = usr.get("user_id") or usr.get("id") or "anon"
+            t_id = usr.get("empresa_id") or "anon"
+            key = f"_session_data_cache_{u_id}_{t_id}"
+            if key not in st.session_state:
+                st.session_state[key] = {}
+            return st.session_state[key]
+        except Exception:
+            return {}
+
     def __getitem__(self, key):
-        if key not in self:
-            self[key] = leer_tabla(key)
-        return super().__getitem__(key)
+        d = self._get_dict()
+        if key not in d:
+            d[key] = leer_tabla(key)
+        return d[key]
 
     def get(self, key, default=None):
         try:
@@ -2616,28 +2630,25 @@ class LazyDataDict(dict):
         except Exception:
             return default
 
-    def copy(self):
-        return self
+    def __setitem__(self, key, value):
+        d = self._get_dict()
+        d[key] = value
 
     def update(self, other=None, **kwargs):
-        self.clear()
+        d = self._get_dict()
+        d.clear()
         if other:
             if isinstance(other, dict):
                 for k, v in other.items():
-                    self[k] = v
+                    d[k] = v
             elif hasattr(other, "keys"):
                 for k in other.keys():
-                    self[k] = other[k]
+                    d[k] = other[k]
 
+def cargar_datos():
+    return SessionScopedDataDict()
 
-def cargar_datos() -> LazyDataDict:
-    # No limpiamos la caché global en cada renderizado de Streamlit para permitir
-    # que la caché en memoria (session_cache_tablas) con TTL de 30s en leer_tabla funcione correctamente.
-    # Esto elimina las consultas de red redundantes y acelera drásticamente todo el sistema (especialmente el POS).
-    return LazyDataDict()
-
-
-DATA = cargar_datos()
+DATA = SessionScopedDataDict()
 
 if "pos_post_venta" not in st.session_state:
     st.session_state["pos_post_venta"] = None
@@ -5478,62 +5489,12 @@ def login_simple() -> bool:
             st.error("Por favor ingrese su usuario o correo y contraseña.")
             return False
 
-        # 0. Verificación directa instantánea para Super-Admin Plataforma A&M, Cliente Bibe Ron y Cajera
-        if email_clean in ["admin", "superadmin", "nelly", "am_admin"] and pass_clean == "20162907":
-            st.session_state["usuario_data"] = {
-                "id": "00000000-0000-0000-0000-000000000000",
-                "user_id": "00000000-0000-0000-0000-000000000000",
-                "usuario": "admin",
-                "nombre": "Nelly (Super-Admin Plataforma A&M)",
-                "email": "nellymariaaguilerarosario@gmail.com",
-                "rol": "superadmin",
-                "empresa_id": "global",
-                "es_superadmin": True,
-                "activo": True
-            }
-            st.session_state["access_token"] = "local_active_session"
-            st.session_state["last_activity"] = datetime.now().timestamp()
-            st.rerun()
-
-        if email_clean in ["biberon", "biiberonlicor", "biberonlicor", "biberon01", "biiberonlicor@gmail.com"] and pass_clean == "20162907":
-            st.session_state["usuario_data"] = {
-                "id": "00000000-0000-0000-0000-000000000001",
-                "user_id": "00000000-0000-0000-0000-000000000001",
-                "usuario": "biberon",
-                "nombre": "Propietario Bibe Ron 01",
-                "email": "biiberonlicor@gmail.com",
-                "rol": "admin",
-                "empresa_id": "biberon",
-                "es_superadmin": False,
-                "activo": True
-            }
-            st.session_state["access_token"] = "local_active_session"
-            st.session_state["last_activity"] = datetime.now().timestamp()
-            st.rerun()
-
-        if email_clean in ["arianny", "arianny@empresa.com"] and pass_clean == "202610":
-            st.session_state["usuario_data"] = {
-                "id": "00000000-0000-0000-0000-000000000002",
-                "user_id": "00000000-0000-0000-0000-000000000002",
-                "usuario": "arianny",
-                "nombre": "Arianny (Cajera)",
-                "email": "arianny@empresa.com",
-                "rol": "cajero",
-                "empresa_id": "biberon",
-                "es_superadmin": False,
-                "activo": True
-            }
-            st.session_state["access_token"] = "local_active_session"
-            st.session_state["last_activity"] = datetime.now().timestamp()
-            st.rerun()
-
-        # 1. Intentar autenticar por Supabase Auth con lista de correos candidatos
+        # 1. Resolver candidate_emails (si se ingresó un nombre de usuario)
         candidate_emails = [email_clean]
         if "@" not in email_clean:
             candidate_emails = [
                 f"{email_clean}@gmail.com",
                 "biiberonlicor@gmail.com",
-                "biberon01@gmail.com",
                 "nellymariaaguilerarosario@gmail.com",
                 f"{email_clean}@empresa.com"
             ]
@@ -5545,19 +5506,50 @@ def login_simple() -> bool:
                     "email": c_email,
                     "password": pass_clean,
                 })
-                if auth_response and hasattr(auth_response, "session") and auth_response.session:
-                    _guardar_tokens_auth(auth_response.session)
+                session_obj = _auth_obj_value(auth_response, "session", None)
+                if session_obj:
+                    _guardar_tokens_auth(session_obj)
                     profile = _cargar_perfil_verificado()
-                    if bool(profile.get("activo", True)):
-                        st.session_state["usuario_data"] = profile
-                        st.session_state["last_activity"] = datetime.now().timestamp()
-                        auth_success = True
+                    if not bool(profile.get("activo", True)):
+                        raise RuntimeError("La cuenta está desactivada.")
+
+                    # Enforzar MFA AAL2 para roles administrativos o permisos privilegiados (AIS-C03)
+                    high_risk_permissions = {
+                        "puede_configurar",
+                        "puede_editar_todo",
+                        "puede_editar_ventas",
+                        "puede_anular",
+                        "puede_cerrar_periodo",
+                    }
+                    privileged = (
+                        bool(profile.get("es_superadmin"))
+                        or normalizar_texto(profile.get("rol", "")) in {"admin", "superadmin"}
+                        or any(bool(profile.get(flag)) for flag in high_risk_permissions)
+                    )
+                    
+                    if privileged and str(profile.get("aal") or "").lower() != "aal2":
+                        st.session_state["login_pending_mfa"] = {"profile": profile}
                         st.rerun()
-                        break
+
+                    st.session_state["usuario_data"] = profile
+                    st.session_state["last_activity"] = datetime.now().timestamp()
+                    auth_success = True
+                    st.rerun()
+                    break
             except Exception:
                 continue
 
-        st.error("Credenciales inválidas o cuenta sin acceso activo.")
+        if not auth_success:
+            try:
+                supabase.auth.sign_out()
+            except Exception:
+                pass
+            for key in [
+                "usuario_data", "access_token", "refresh_token",
+                "_supabase_session_client", "_supabase_session_fingerprint",
+            ]:
+                st.session_state.pop(key, None)
+            st.error("Credenciales inválidas o cuenta sin acceso activo.")
 
     with st.expander("¿Olvidó su contraseña?", expanded=False):
         reset_email = st.text_input("Correo registrado", key="secure_reset_email")

@@ -26,16 +26,8 @@ def obtener_secreto(nombre: str, default: str = "") -> str:
     except Exception:
         return os.environ.get(nombre, default)
 
-DEFAULT_SUPABASE_URL = "https://dmpwpoyulkbhfjcdsbpt.supabase.co"
-DEFAULT_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtcHdwb3l1bGtiaGZqY2RzYnB0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMTI2MjMsImV4cCI6MjA4OTc4ODYyM30.Jb2rmvNgwVV46r7P68E4PVcgIEEm7DEfSNm3XHIpX-c"
-
-SUPABASE_URL = obtener_secreto("SUPABASE_URL", DEFAULT_SUPABASE_URL)
-if not SUPABASE_URL:
-    SUPABASE_URL = DEFAULT_SUPABASE_URL
-
-SUPABASE_KEY = obtener_secreto("SUPABASE_KEY", DEFAULT_SUPABASE_KEY)
-if not SUPABASE_KEY:
-    SUPABASE_KEY = DEFAULT_SUPABASE_KEY
+SUPABASE_URL = obtener_secreto("SUPABASE_URL", "")
+SUPABASE_KEY = obtener_secreto("SUPABASE_KEY", "")
 
 def _token_fingerprint(token: str) -> str:
     if not token:
@@ -891,11 +883,25 @@ def registrar_auditoria_pro(
 # =========================================================
 # LAZY DATA LOAD
 # =========================================================
-class LazyDataDict(dict):
+class SessionScopedDataDict:
+    """Aislador de datos por sesión de Streamlit para evitar fugas entre tenants (AIS-C02)."""
+    def _get_dict(self):
+        try:
+            usr = st.session_state.get("usuario_data", {})
+            u_id = usr.get("user_id") or usr.get("id") or "anon"
+            t_id = usr.get("empresa_id") or "anon"
+            key = f"_session_data_cache_{u_id}_{t_id}"
+            if key not in st.session_state:
+                st.session_state[key] = {}
+            return st.session_state[key]
+        except Exception:
+            return {}
+
     def __getitem__(self, key):
-        if key not in self:
-            self[key] = leer_tabla(key)
-        return super().__getitem__(key)
+        d = self._get_dict()
+        if key not in d:
+            d[key] = leer_tabla(key)
+        return d[key]
 
     def get(self, key, default=None):
         try:
@@ -903,23 +909,25 @@ class LazyDataDict(dict):
         except Exception:
             return default
 
-    def copy(self):
-        return self
+    def __setitem__(self, key, value):
+        d = self._get_dict()
+        d[key] = value
 
     def update(self, other=None, **kwargs):
-        self.clear()
+        d = self._get_dict()
+        d.clear()
         if other:
             if isinstance(other, dict):
                 for k, v in other.items():
-                    self[k] = v
+                    d[k] = v
             elif hasattr(other, "keys"):
                 for k in other.keys():
-                    self[k] = other[k]
+                    d[k] = other[k]
 
-def cargar_datos() -> LazyDataDict:
-    return LazyDataDict()
+def cargar_datos():
+    return SessionScopedDataDict()
 
-DATA = cargar_datos()
+DATA = SessionScopedDataDict()
 
 def leer_actualizado(tabla: str) -> pd.DataFrame:
     try:
