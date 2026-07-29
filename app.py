@@ -59,12 +59,7 @@ if create_client is None:
 _supabase_client = globals().get("supabase", None)
 if not _supabase_client:
     st.error("⚠️ **Faltan las credenciales de Supabase en Streamlit Cloud**")
-    st.info("Por favor ingresa a **Manage app -> Settings -> Secrets** en el panel de Streamlit Cloud y añade:")
-    st.code("""
-SUPABASE_URL = "https://dmpwpoyulkbhfjcdsbpt.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRtcHdwb3l1bGtiaGZqY2RzYnB0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMTI2MjMsImV4cCI6MjA4OTc4ODYyM30.Jb2rmvNgwVV46r7P68E4PVcgIEEm7DEfSNm3XHIpX-c"
-APP_PASSWORD = "20162907"
-""", language="toml")
+    st.info("Por favor ingresa a **Manage app -> Settings -> Secrets** en el panel de Streamlit Cloud y configura las variables `SUPABASE_URL` y `SUPABASE_KEY` del entorno de producción.")
     st.stop()
 
 # Importar vistas modulares (Soporta archivos en la raíz o en subcarpeta modules/)
@@ -267,8 +262,11 @@ else:
         menu_opciones += ["Academia DGII", "🔮 Predicciones IA"]
 
     menu_opciones = [m for m in menu_base if m in menu_opciones]
-    menu_opciones = list(dict.fromkeys(menu_opciones)) or ["Caja", "POS"]
+    menu_opciones = list(dict.fromkeys(menu_opciones))
     menu_opciones = [m for m in menu_opciones if m in ["🏢 Gestión de Empresas", "🔒 Mi Perfil"] or verificar_plan_permite(m)]
+
+if not menu_opciones:
+    st.warning("🔒 Su cuenta no tiene permisos asignados para acceder a los módulos de negocio. Contacte al administrador.")
 
 if not es_admin() and "Dinero Real" in menu_opciones:
     menu_opciones = [m for m in menu_opciones if m != "Dinero Real"]
