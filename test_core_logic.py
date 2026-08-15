@@ -113,11 +113,16 @@ def test_no_hay_comparaciones_de_password_con_literales_ni_perfiles_fabricados()
 
 def test_sesion_exige_supabase_auth_api_my_session_y_cierre_ante_error():
     helpers = (ROOT / "helpers.py").read_text(encoding="utf-8")
+    secure_login = helpers[helpers.index("def login_simple()") :]
     assert 'client.auth.get_user(access_token)' in helpers
     assert 'client.rpc("api_my_session", params)' in helpers
     assert "ahora - ultima_validacion" not in helpers
     assert "limpiar_estado_sesion(cerrar_auth=True)" in helpers
     assert 'str(profile.get("aal") or "").lower() != "aal2"' in helpers
+    assert "active_session" not in secure_login
+    assert 'profile["aal"] = "aal2"' not in secure_login
+    assert "otorgando paso a perfil verificado" not in secure_login
+    assert "accediendo con perfil verificado" not in secure_login
     invalid_code = helpers.index('if not factor_id or len(str(code).strip()) != 6')
     assert "limpiar_estado_sesion(cerrar_auth=True)" in helpers[invalid_code:invalid_code + 350]
 

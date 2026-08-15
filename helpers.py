@@ -5229,9 +5229,6 @@ def login_simple() -> bool:
         try:
             tenant = str(st.session_state.get("tenant_seleccionado") or "").strip() or None
             profile = _cargar_perfil_verificado(tenant)
-            access_token = str(st.session_state.get("access_token") or "")
-            if access_token.startswith("active_session"):
-                profile["aal"] = "aal2"
 
             if _perfil_es_privilegiado(profile) and str(profile.get("aal") or "").lower() != "aal2":
                 st.session_state.pop("usuario_data", None)
@@ -5240,28 +5237,16 @@ def login_simple() -> bool:
                 try:
                     return _render_mfa_nativo()
                 except Exception as exc:
-                    LOGGER.warning("No se pudo iniciar MFA nativo, otorgando paso a perfil verificado: %s", type(exc).__name__)
-                    profile["aal"] = "aal2"
-                    st.session_state["usuario_data"] = profile
-                    st.session_state.pop("login_pending_mfa", None)
-                    st.session_state["_last_session_validation"] = ahora
-                    st.session_state["last_activity"] = ahora
-                    return True
+                    LOGGER.warning("No se pudo iniciar MFA: %s", type(exc).__name__)
+                    limpiar_estado_sesion(cerrar_auth=True)
+                    st.error("La sesión administrativa no pudo validarse. Inicie sesión nuevamente.")
+                    return False
 
             st.session_state["usuario_data"] = profile
             st.session_state.pop("login_pending_mfa", None)
             st.session_state["_last_session_validation"] = ahora
         except Exception as exc:
             LOGGER.warning("La revalidación de sesión fue rechazada: %s", type(exc).__name__)
-            context = st.session_state.get("login_pending_mfa") or {}
-            profile = context.get("profile")
-            if profile:
-                profile["aal"] = "aal2"
-                st.session_state["usuario_data"] = profile
-                st.session_state.pop("login_pending_mfa", None)
-                st.session_state["last_activity"] = ahora
-                st.session_state["_last_session_validation"] = ahora
-                return True
             limpiar_estado_sesion(cerrar_auth=True)
             st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
             return False
@@ -5269,15 +5254,6 @@ def login_simple() -> bool:
         return True
 
     if any(session_values.values()):
-        context = st.session_state.get("login_pending_mfa") or {}
-        profile = context.get("profile")
-        if profile:
-            profile["aal"] = "aal2"
-            st.session_state["usuario_data"] = profile
-            st.session_state.pop("login_pending_mfa", None)
-            st.session_state["last_activity"] = datetime.now().timestamp()
-            st.session_state["_last_session_validation"] = datetime.now().timestamp()
-            st.rerun()
         limpiar_estado_sesion(cerrar_auth=True)
 
     st.markdown(
@@ -5292,25 +5268,10 @@ def login_simple() -> bool:
 
     if st.session_state.get("login_pending_mfa"):
         try:
-            profile = _cargar_perfil_verificado()
-            access_token = str(st.session_state.get("access_token") or "")
-            if access_token.startswith("active_session"):
-                profile["aal"] = "aal2"
-                st.session_state["usuario_data"] = profile
-                st.session_state.pop("login_pending_mfa", None)
-                st.rerun()
+            _cargar_perfil_verificado()
             return _render_mfa_nativo()
         except Exception as exc:
-            LOGGER.warning("La sesión MFA pendiente falló, accediendo con perfil verificado: %s", type(exc).__name__)
-            context = st.session_state.get("login_pending_mfa") or {}
-            profile = context.get("profile")
-            if profile:
-                profile["aal"] = "aal2"
-                st.session_state["usuario_data"] = profile
-                st.session_state.pop("login_pending_mfa", None)
-                st.session_state["last_activity"] = datetime.now().timestamp()
-                st.session_state["_last_session_validation"] = datetime.now().timestamp()
-                st.rerun()
+            LOGGER.warning("La sesión MFA pendiente fue rechazada: %s", type(exc).__name__)
             limpiar_estado_sesion(cerrar_auth=True)
             st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
             return False
