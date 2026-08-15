@@ -5070,6 +5070,51 @@ def _factores_totp_verificados() -> list:
     ]
 
 
+def _mfa_qr_svg_markup(qr_code: str) -> str:
+    """Extrae un SVG TOTP limitado para el renderizador saneado de Streamlit."""
+    from urllib.parse import unquote
+
+    value = str(qr_code or "").strip()
+    if not value:
+        raise ValueError("MFA_QR_REQUIRED")
+
+    svg_markup = ""
+    if value.lower().startswith("data:image/svg+xml"):
+        header, separator, payload = value.partition(",")
+        if not separator:
+            raise ValueError("MFA_QR_INVALID")
+        if ";base64" in header.lower():
+            try:
+                svg_markup = base64.b64decode(
+                    payload, validate=True
+                ).decode("utf-8")
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise ValueError("MFA_QR_INVALID") from exc
+        else:
+            svg_markup = unquote(payload)
+    else:
+        svg_markup = value
+
+    candidate = svg_markup.lstrip("\ufeff \t\r\n")
+    if not re.match(
+        r"^(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)",
+        candidate,
+        flags=re.IGNORECASE,
+    ):
+        raise ValueError("MFA_QR_INVALID")
+    if re.search(
+        r"<\s*(?:script|style|foreignObject|iframe|object|embed)\b|"
+        r"<!\s*(?:DOCTYPE|ENTITY)\b|"
+        r"\bon[a-z]+\s*=|"
+        r"\b(?:href|src)\s*=",
+        candidate,
+        flags=re.IGNORECASE,
+    ):
+        raise ValueError("MFA_QR_INVALID")
+
+    return svg_markup
+
+
 def _render_mfa_nativo() -> bool:
     context = st.session_state.get("login_pending_mfa") or {}
     if not context:
@@ -5096,7 +5141,6 @@ def _render_mfa_nativo() -> bool:
                 enrollment = {
                     "factor_id": str(_auth_obj_value(response, "id", "") or ""),
                     "qr_code": str(_auth_obj_value(totp, "qr_code", "") or ""),
-                    "secret": str(_auth_obj_value(totp, "secret", "") or ""),
                 }
                 context["enrollment"] = enrollment
                 context["factor_id"] = enrollment["factor_id"]
@@ -5104,13 +5148,9 @@ def _render_mfa_nativo() -> bool:
             factor_id = str(enrollment.get("factor_id") or "")
             st.warning("Primera entrada administrativa: registre el segundo factor antes de continuar.")
             qr_code = str(enrollment.get("qr_code") or "")
-            secret = str(enrollment.get("secret") or "")
             if qr_code:
-                qr_data = base64.b64encode(qr_code.encode("utf-8")).decode("ascii")
-                st.image(f"data:image/svg+xml;base64,{qr_data}", width=220)
-            if secret:
-                st.code(secret, language=None)
-                st.caption("Guarde esta clave solo en su aplicación autenticadora. No la envíe por mensajes.")
+                st.html(_mfa_qr_svg_markup(qr_code), width=220)
+                st.caption("Escanee el QR únicamente con su aplicación autenticadora.")
 
     code = st.text_input("Código de 6 dígitos", max_chars=6, type="password", key="secure_mfa_code")
     left, right = st.columns(2)
