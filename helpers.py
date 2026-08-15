@@ -5071,7 +5071,7 @@ def _factores_totp_verificados() -> list:
 
 
 def _mfa_qr_svg_markup(qr_code: str) -> str:
-    """Extrae un SVG TOTP limitado para el renderizador saneado de Streamlit."""
+    """Extrae el SVG TOTP para que Streamlit lo sanee con DOMPurify."""
     from urllib.parse import unquote
 
     value = str(qr_code or "").strip()
@@ -5098,15 +5098,6 @@ def _mfa_qr_svg_markup(qr_code: str) -> str:
     candidate = svg_markup.lstrip("\ufeff \t\r\n")
     if not re.match(
         r"^(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)",
-        candidate,
-        flags=re.IGNORECASE,
-    ):
-        raise ValueError("MFA_QR_INVALID")
-    if re.search(
-        r"<\s*(?:script|style|foreignObject|iframe|object|embed)\b|"
-        r"<!\s*(?:DOCTYPE|ENTITY)\b|"
-        r"\bon[a-z]+\s*=|"
-        r"\b(?:href|src)\s*=",
         candidate,
         flags=re.IGNORECASE,
     ):
