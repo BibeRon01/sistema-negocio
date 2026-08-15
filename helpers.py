@@ -5061,13 +5061,35 @@ def _perfil_es_privilegiado(profile: dict) -> bool:
     )
 
 
-def _factores_totp_verificados() -> list:
+def _factores_totp_estado() -> tuple[list, list]:
+    """Separa factores TOTP verificados de inscripciones abandonadas."""
     factors_response = supabase.auth.mfa.list_factors()
-    factors = _auth_obj_value(factors_response, "totp", []) or []
-    return [
+    factors = _auth_obj_value(factors_response, "all", []) or []
+    verified = [
         factor for factor in factors
-        if str(_auth_obj_value(factor, "status", "")).lower() == "verified"
+        if str(_auth_obj_value(factor, "factor_type", "")).lower() == "totp"
+        and str(_auth_obj_value(factor, "status", "")).lower() == "verified"
     ]
+    unverified = [
+        factor for factor in factors
+        if str(_auth_obj_value(factor, "factor_type", "")).lower() == "totp"
+        and str(_auth_obj_value(factor, "status", "")).lower() == "unverified"
+    ]
+    return verified, unverified
+
+
+def _descartar_factores_totp_no_verificados(factors: list) -> None:
+    """Elimina únicamente factores TOTP que nunca alcanzaron aal2."""
+    for factor in factors:
+        factor_id = str(_auth_obj_value(factor, "id", "") or "")
+        if not factor_id:
+            continue
+        try:
+            supabase.auth.mfa.unenroll({"factor_id": factor_id})
+        except Exception as exc:
+            code = str(getattr(exc, "code", "") or "")
+            if code != "mfa_factor_not_found":
+                raise
 
 
 def _mfa_qr_svg_markup(qr_code: str) -> str:
@@ -5116,12 +5138,13 @@ def _render_mfa_nativo() -> bool:
 
     factor_id = str(context.get("factor_id") or "")
     if not factor_id:
-        verified = _factores_totp_verificados()
+        verified, unverified = _factores_totp_estado()
         if verified:
             factor_id = str(_auth_obj_value(verified[0], "id", "") or "")
             context["factor_id"] = factor_id
             st.session_state["login_pending_mfa"] = context
         else:
+            _descartar_factores_totp_no_verificados(unverified)
             enrollment = context.get("enrollment")
             if not enrollment:
                 response = supabase.auth.mfa.enroll({"factor_type": "totp"})
@@ -5167,6 +5190,13 @@ def _render_mfa_nativo() -> bool:
             st.error("No se pudo verificar el segundo factor. Inténtelo nuevamente.")
 
     if right.button("Cancelar", use_container_width=True):
+        enrollment = context.get("enrollment") or {}
+        pending_id = str(enrollment.get("factor_id") or "")
+        if pending_id:
+            try:
+                supabase.auth.mfa.unenroll({"factor_id": pending_id})
+            except Exception:
+                pass
         limpiar_estado_sesion(cerrar_auth=True)
         st.rerun()
     return False

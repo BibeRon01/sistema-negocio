@@ -429,6 +429,10 @@ def test_qr_mfa_se_renderiza_saneado_sin_mostrar_el_secreto():
     assert '"secret": str(_auth_obj_value(totp' not in source
     assert "st.code(secret" not in source
     assert '"friendly_name": "AIS Administrador"' not in source
+    assert 'factors_response, "all"' in source
+    assert '== "unverified"' in source
+    assert "_descartar_factores_totp_no_verificados(unverified)" in source
+    assert 'supabase.auth.mfa.unenroll({"factor_id": pending_id})' in source
     mfa_render = source[source.index("def _render_mfa_nativo"):]
     mfa_render = mfa_render[:mfa_render.index("def login_simple")]
     assert "unsafe_allow_javascript" not in mfa_render
