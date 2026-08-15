@@ -1,6 +1,5 @@
 from pathlib import Path
 import ast
-import base64
 
 import pytest
 
@@ -399,38 +398,36 @@ def test_helpers_no_ejecuta_login_durante_importacion():
     assert top_level_calls == []
 
 
-def test_qr_mfa_se_renderiza_saneado_sin_mostrar_el_secreto():
+def test_qr_mfa_usa_uri_totp_validada_sin_mostrar_el_secreto():
     source = (ROOT / "helpers.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     function = next(
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef)
-        and node.name == "_mfa_qr_svg_markup"
+        and node.name == "_validar_uri_totp"
     )
     isolated = ast.Module(body=[function], type_ignores=[])
-    namespace = {"base64": base64, "re": __import__("re")}
+    namespace = {}
     exec(
         compile(ast.fix_missing_locations(isolated), "helpers.py", "exec"),
         namespace,
     )
-    normalize = namespace["_mfa_qr_svg_markup"]
+    validate = namespace["_validar_uri_totp"]
+    valid_uri = "otpauth://totp/AIS:usuario?secret=TESTONLY&issuer=AIS"
 
-    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10"></svg>'
-    encoded_svg = base64.b64encode(svg.encode("utf-8")).decode("ascii")
-
-    assert normalize(svg) == svg
-    assert normalize(
-        "data:image/svg+xml;utf-8,"
-        "%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20"
-        "width%3D%2210%22%3E%3C/svg%3E"
-    ) == svg
-    assert normalize(f"data:image/svg+xml;base64,{encoded_svg}") == svg
+    assert validate(valid_uri) == valid_uri
 
     with pytest.raises(ValueError, match="MFA_QR_INVALID"):
-        normalize("data:image/svg+xml;utf-8,contenido-invalido")
+        validate("https://example.com/?secret=TESTONLY")
+    with pytest.raises(ValueError, match="MFA_QR_INVALID"):
+        validate("otpauth://totp/AIS:usuario?issuer=AIS")
 
-    assert "st.html(_mfa_qr_svg_markup(qr_code), width=220)" in source
+    assert 'otpauth_uri = str(_auth_obj_value(totp, "uri", "") or "")' in source
+    assert '"qr_png": _mfa_qr_png(otpauth_uri)' in source
+    assert "st.image(qr_png, width=220)" in source
+    assert "_mfa_qr_svg_markup" not in source
+    assert '"qr_code": str(_auth_obj_value(totp' not in source
     assert '"secret": str(_auth_obj_value(totp' not in source
     assert "st.code(secret" not in source
     assert '"friendly_name": "AIS Administrador"' not in source
@@ -441,6 +438,18 @@ def test_qr_mfa_se_renderiza_saneado_sin_mostrar_el_secreto():
     mfa_render = source[source.index("def _render_mfa_nativo"):]
     mfa_render = mfa_render[:mfa_render.index("def login_simple")]
     assert "unsafe_allow_javascript" not in mfa_render
+
+
+def test_mfa_pendiente_conserva_inscripcion_entre_recargas():
+    source = (ROOT / "helpers.py").read_text(encoding="utf-8")
+    secure_login = source[source.index("def login_simple"):]
+
+    assert 'pending_mfa = st.session_state.get("login_pending_mfa")' in secure_login
+    assert 'pending_mfa["profile"] = profile' in secure_login
+    assert secure_login.count(
+        'st.session_state["login_pending_mfa"] = {"profile": profile}'
+    ) == 1
+    assert "active_session" not in secure_login
 
 
 def test_permisos_sql_coinciden_con_la_aplicacion():

@@ -4,6 +4,7 @@ supabase==2.30.0
 plotly==6.7.0
 numpy==2.4.3
 pillow==12.3.0
+qrcode[pil]==8.2
 requests==2.33.0
 openpyxl==3.1.5
 cryptography==50.0.0

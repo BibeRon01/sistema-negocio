@@ -5092,40 +5092,41 @@ def _descartar_factores_totp_no_verificados(factors: list) -> None:
                 raise
 
 
-def _mfa_qr_svg_markup(qr_code: str) -> str:
-    """Extrae el SVG TOTP para que Streamlit lo sanee con DOMPurify."""
-    from urllib.parse import unquote
+def _validar_uri_totp(otpauth_uri: str) -> str:
+    """Acepta únicamente una URI TOTP de Supabase con un secreto presente."""
+    from urllib.parse import parse_qs, urlparse
 
-    value = str(qr_code or "").strip()
-    if not value:
-        raise ValueError("MFA_QR_REQUIRED")
-
-    svg_markup = ""
-    if value.lower().startswith("data:image/svg+xml"):
-        header, separator, payload = value.partition(",")
-        if not separator:
-            raise ValueError("MFA_QR_INVALID")
-        if ";base64" in header.lower():
-            try:
-                svg_markup = base64.b64decode(
-                    payload, validate=True
-                ).decode("utf-8")
-            except (ValueError, UnicodeDecodeError) as exc:
-                raise ValueError("MFA_QR_INVALID") from exc
-        else:
-            svg_markup = unquote(payload)
-    else:
-        svg_markup = value
-
-    candidate = svg_markup.lstrip("\ufeff \t\r\n")
-    if not re.match(
-        r"^(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)",
-        candidate,
-        flags=re.IGNORECASE,
+    value = str(otpauth_uri or "").strip()
+    parsed = urlparse(value)
+    secrets = parse_qs(parsed.query).get("secret", [])
+    if (
+        parsed.scheme.lower() != "otpauth"
+        or parsed.netloc.lower() != "totp"
+        or len(secrets) != 1
+        or not str(secrets[0]).strip()
     ):
         raise ValueError("MFA_QR_INVALID")
+    return value
 
-    return svg_markup
+
+def _mfa_qr_png(otpauth_uri: str) -> bytes:
+    """Genera un PNG local; la URI TOTP nunca se muestra ni se registra."""
+    import io
+    import qrcode
+
+    uri = _validar_uri_totp(otpauth_uri)
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=4,
+    )
+    qr.add_data(uri)
+    qr.make(fit=True)
+    image = qr.make_image(fill_color="black", back_color="white")
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
 
 
 def _render_mfa_nativo() -> bool:
@@ -5149,19 +5150,24 @@ def _render_mfa_nativo() -> bool:
             if not enrollment:
                 response = supabase.auth.mfa.enroll({"factor_type": "totp"})
                 totp = _auth_obj_value(response, "totp", None)
+                factor_id = str(_auth_obj_value(response, "id", "") or "")
+                otpauth_uri = str(_auth_obj_value(totp, "uri", "") or "")
+                if not factor_id:
+                    raise ValueError("MFA_ENROLLMENT_INVALID")
                 enrollment = {
-                    "factor_id": str(_auth_obj_value(response, "id", "") or ""),
-                    "qr_code": str(_auth_obj_value(totp, "qr_code", "") or ""),
+                    "factor_id": factor_id,
+                    "qr_png": _mfa_qr_png(otpauth_uri),
                 }
                 context["enrollment"] = enrollment
                 context["factor_id"] = enrollment["factor_id"]
                 st.session_state["login_pending_mfa"] = context
             factor_id = str(enrollment.get("factor_id") or "")
             st.warning("Primera entrada administrativa: registre el segundo factor antes de continuar.")
-            qr_code = str(enrollment.get("qr_code") or "")
-            if qr_code:
-                st.html(_mfa_qr_svg_markup(qr_code), width=220)
-                st.caption("Escanee el QR únicamente con su aplicación autenticadora.")
+            qr_png = enrollment.get("qr_png")
+            if not isinstance(qr_png, bytes) or not qr_png:
+                raise ValueError("MFA_QR_REQUIRED")
+            st.image(qr_png, width=220)
+            st.caption("Escanee el QR únicamente con su aplicación autenticadora.")
 
     code = st.text_input("Código de 6 dígitos", max_chars=6, type="password", key="secure_mfa_code")
     left, right = st.columns(2)
@@ -5232,7 +5238,11 @@ def login_simple() -> bool:
 
             if _perfil_es_privilegiado(profile) and str(profile.get("aal") or "").lower() != "aal2":
                 st.session_state.pop("usuario_data", None)
-                st.session_state["login_pending_mfa"] = {"profile": profile}
+                pending_mfa = st.session_state.get("login_pending_mfa")
+                if not isinstance(pending_mfa, dict):
+                    pending_mfa = {}
+                pending_mfa["profile"] = profile
+                st.session_state["login_pending_mfa"] = pending_mfa
                 st.session_state["_last_session_validation"] = ahora
                 try:
                     return _render_mfa_nativo()
