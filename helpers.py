@@ -5133,10 +5133,7 @@ def _render_mfa_nativo() -> bool:
         else:
             enrollment = context.get("enrollment")
             if not enrollment:
-                response = supabase.auth.mfa.enroll({
-                    "factor_type": "totp",
-                    "friendly_name": "AIS Administrador",
-                })
+                response = supabase.auth.mfa.enroll({"factor_type": "totp"})
                 totp = _auth_obj_value(response, "totp", None)
                 enrollment = {
                     "factor_id": str(_auth_obj_value(response, "id", "") or ""),
