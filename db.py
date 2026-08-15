@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import logging
 import os
 import re
 from urllib.parse import urlparse
@@ -8,6 +9,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
 from typing import Any
+from utils import mostrar_error_seguro
 try:
     from supabase import Client, create_client
 except Exception:
@@ -15,6 +17,7 @@ except Exception:
     create_client = None
 
 VERSION_SISTEMA = "v3.0.0-secure"
+LOGGER = logging.getLogger("ais")
 
 # =========================================================
 # SECRETS / CONEXIÓN
@@ -176,21 +179,22 @@ def es_superadmin_plataforma() -> bool:
     return bool(usuario_sesion().get("es_superadmin") is True)
 
 def obtener_tenant_actual() -> str:
+    """Retorna exclusivamente el tenant confirmado por api_my_session."""
     usuario_data = usuario_sesion()
     if not usuario_data:
         return ""
 
-    tenant_sesion = str(usuario_data.get("tenant_id") or usuario_data.get("empresa_id") or "").strip()
-    if es_superadmin_plataforma():
-        seleccionado = str(st.session_state.get("superadmin_tenant_seleccionado") or tenant_sesion).strip()
-        permitidos = {
-            str(item.get("tenant_id") or "").strip()
-            for item in (usuario_data.get("tenants") or [])
-            if isinstance(item, dict)
-        }
-        if seleccionado == "global" or seleccionado in permitidos:
-            return seleccionado
-    return tenant_sesion
+    tenant_sesion = str(
+        usuario_data.get("tenant_id") or usuario_data.get("empresa_id") or ""
+    ).strip()
+    permitidos = {
+        str(item.get("tenant_id") or "").strip()
+        for item in (usuario_data.get("tenants") or [])
+        if isinstance(item, dict) and item.get("tenant_id")
+    }
+    if tenant_sesion == "global":
+        return tenant_sesion if es_superadmin_plataforma() else ""
+    return tenant_sesion if tenant_sesion in permitidos else ""
 
 
 def obtener_configuracion() -> dict:
@@ -230,7 +234,8 @@ def _obtener_configuracion_interna(tenant: str) -> dict:
 # =========================================================
 TABLAS_MULTI_TENANT = {
     "ventas", "detalle_venta", "caja", "productos", "clientes", "proveedores",
-    "compras", "gastos", "empleados", "pagos_empleados", "perdidas",
+    "compras", "facturas_compra", "detalle_factura_compra", "gastos",
+    "empleados", "pagos_empleados", "perdidas",
     "gastos_dueno", "activos_fijos", "capital_base", "creditos",
     "auditoria_eventos", "usuarios", "ajustes_inventario", "conteo_inventario",
     "distribuciones", "notas_credito", "suscripciones_empresas", "secuencia_ncf",
@@ -245,41 +250,26 @@ class WrappedQueryBuilder:
     def select(self, *args, **kwargs):
         builder = self.original_builder.select(*args, **kwargs)
         tenant = obtener_tenant_actual()
-        if tenant and self.table_name in TABLAS_MULTI_TENANT:
-            if self.table_name == "usuarios":
-                if tenant != "global":
-                    return builder.eq("email", tenant)
-            else:
-                if tenant == "global":
-                    return builder.or_("empresa_id.eq.global,empresa_id.is.null")
-                else:
-                    return builder.eq("empresa_id", tenant)
+        if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
+            return builder.eq("empresa_id", tenant)
         return builder
 
     def update(self, datos, *args, **kwargs):
         tenant = obtener_tenant_actual()
         if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
-            if self.table_name != "usuarios" and "empresa_id" not in datos:
+            if "empresa_id" not in datos:
                 datos["empresa_id"] = tenant
-            elif self.table_name == "usuarios" and "email" not in datos:
-                datos["email"] = tenant
         
         builder = self.original_builder.update(datos, *args, **kwargs)
         if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
-            if self.table_name == "usuarios":
-                return builder.eq("email", tenant)
-            else:
-                return builder.eq("empresa_id", tenant)
+            return builder.eq("empresa_id", tenant)
         return builder
 
     def delete(self, *args, **kwargs):
         builder = self.original_builder.delete(*args, **kwargs)
         tenant = obtener_tenant_actual()
         if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
-            if self.table_name == "usuarios":
-                return builder.eq("email", tenant)
-            else:
-                return builder.eq("empresa_id", tenant)
+            return builder.eq("empresa_id", tenant)
         return builder
 
     def insert(self, datos, *args, **kwargs):
@@ -287,20 +277,12 @@ class WrappedQueryBuilder:
         if isinstance(datos, list):
             for d in datos:
                 if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
-                    if self.table_name == "usuarios":
-                        if "email" not in d or not d["email"]:
-                            d["email"] = tenant
-                    else:
-                        if "empresa_id" not in d or not d["empresa_id"]:
-                            d["empresa_id"] = tenant
+                    if "empresa_id" not in d or not d["empresa_id"]:
+                        d["empresa_id"] = tenant
         elif isinstance(datos, dict):
             if tenant and tenant != "global" and self.table_name in TABLAS_MULTI_TENANT:
-                if self.table_name == "usuarios":
-                    if "email" not in datos or not datos["email"]:
-                        datos["email"] = tenant
-                else:
-                    if "empresa_id" not in datos or not datos["empresa_id"]:
-                        datos["empresa_id"] = tenant
+                if "empresa_id" not in datos or not datos["empresa_id"]:
+                    datos["empresa_id"] = tenant
                         
         return self.original_builder.insert(datos, *args, **kwargs)
 
@@ -434,15 +416,8 @@ def _leer_tabla_de_supabase(nombre_tabla: str, order_by: str = "id", tenant: str
     aplicar_auth_token()
     try:
         query = supabase.table(nombre_tabla).select("*")
-        if tenant and nombre_tabla in TABLAS_MULTI_TENANT:
-            if nombre_tabla == "usuarios":
-                if tenant != "global":
-                    query = query.eq("empresa_id", tenant)
-            else:
-                if tenant == "global":
-                    query = query.or_("empresa_id.eq.global,empresa_id.is.null")
-                else:
-                    query = query.eq("empresa_id", tenant)
+        if tenant and tenant != "global" and nombre_tabla in TABLAS_MULTI_TENANT:
+            query = query.eq("empresa_id", tenant)
         try:
             ordered_query = query.order(order_by)
         except Exception:
@@ -626,7 +601,7 @@ def insertar(nombre_tabla: str, datos: dict) -> bool:
         if "23505" in exc_str or "unique constraint" in exc_str.lower():
             st.error("⚠️ **Error de Código Duplicado:** Ya existe un registro con este mismo código en la base de datos de esta empresa.")
         else:
-            st.error(f"Error al insertar en {nombre_tabla}: {exc}")
+            mostrar_error_seguro(f"No se pudo crear el registro en {nombre_tabla}.", exc)
         return False
 
 def _campos_pk(nombre_tabla: str) -> list[str]:
@@ -684,7 +659,7 @@ def actualizar(nombre_tabla: str, fila_id: Any, datos: dict) -> bool:
     if "23505" in exc_str or "unique constraint" in exc_str.lower():
         st.error(f"⚠️ **Error de Código Duplicado:** Ya existe un registro con este mismo código en la base de datos de esta empresa.")
     else:
-        st.error(f"Error al actualizar en {nombre_tabla}: {ultimo_error}")
+        mostrar_error_seguro(f"No se pudo actualizar el registro en {nombre_tabla}.", ultimo_error)
     return False
 
 def eliminar(nombre_tabla: str, fila_id: Any) -> bool:
@@ -742,7 +717,7 @@ def eliminar(nombre_tabla: str, fila_id: Any) -> bool:
             return True
         except Exception as exc:
             ultimo_error = exc
-    st.error(f"Error al eliminar en {nombre_tabla}: {ultimo_error}")
+    mostrar_error_seguro(f"No se pudo eliminar el registro de {nombre_tabla}.", ultimo_error)
     return False
 
 def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
@@ -777,7 +752,7 @@ def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
             return True
         except Exception as exc:
             ultimo_error = exc
-    st.error(f"Error al anular en {nombre_tabla}: {ultimo_error}")
+    mostrar_error_seguro(f"No se pudo anular el registro de {nombre_tabla}.", ultimo_error)
     return False
 
 def rpc(func_name: str, params: dict) -> Any:
@@ -785,14 +760,16 @@ def rpc(func_name: str, params: dict) -> Any:
     return supabase.rpc(func_name, params).execute()
 
 def guardar_venta_rpc(params: dict) -> dict:
+    """Compatibilidad: delega al único cliente seguro sin exponer el error SQL."""
     try:
-        res = rpc("api_registrar_venta", {"p": params})
-        data = res.data[0] if isinstance(res.data, list) and res.data else res.data
-        if isinstance(data, dict) and data.get("success"):
-            return data
-        return {"success": False, "error": data.get("error") if isinstance(data, dict) else "Sin respuesta del servidor"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        from api_client import ApiError, registrar_venta
+
+        return registrar_venta(params)
+    except ApiError as exc:
+        return {"success": False, "error": str(exc)}
+    except Exception as exc:
+        LOGGER.error("No se pudo registrar la venta (%s)", type(exc).__name__, exc_info=exc)
+        return {"success": False, "error": "No se pudo completar la venta."}
 
 # =========================================================
 # AUDITORÍA / LOGGING
@@ -923,7 +900,11 @@ def registrar_auditoria_pro(
             "p_metadata": metadata,
         }).execute()
     except Exception as exc:
-        st.warning(f"No se pudo registrar la evidencia de auditoría: {exc}")
+        mostrar_error_seguro(
+            "No se pudo registrar la evidencia de auditoría.",
+            exc,
+            nivel="warning",
+        )
 
 # =========================================================
 # LAZY DATA LOAD

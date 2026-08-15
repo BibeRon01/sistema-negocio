@@ -1,11 +1,14 @@
 import base64
 import html as _html_mod
+import logging
 import re
 import unicodedata
 from datetime import date, datetime, timedelta
 from typing import Any
 import pandas as pd
 import streamlit as st
+
+LOGGER = logging.getLogger("ais")
 
 # =========================================================
 # S-03 · SANITIZACIÓN XSS — usar en todo HTML dinámico
@@ -19,6 +22,24 @@ def html_escape(valor: Any) -> str:
     if valor is None:
         return ""
     return _html_mod.escape(str(valor), quote=True)
+
+
+def mostrar_error_seguro(
+    mensaje: str,
+    exc: BaseException | None = None,
+    *,
+    nivel: str = "error",
+) -> None:
+    """Registra el detalle internamente y muestra solo un texto controlado."""
+    if exc is not None:
+        LOGGER.error(
+            "%s (%s)",
+            mensaje,
+            type(exc).__name__,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+    renderer = getattr(st, nivel, st.error)
+    renderer(mensaje)
 
 
 def limpiar_texto(valor: Any) -> str:

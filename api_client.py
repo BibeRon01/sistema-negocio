@@ -7,31 +7,69 @@ nunca llegue al navegador ni al servidor Streamlit.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import requests
 import streamlit as st
 
-from db import SUPABASE_KEY, SUPABASE_URL, supabase
+from db import SUPABASE_KEY, SUPABASE_URL, obtener_tenant_actual, supabase
+
+
+LOGGER = logging.getLogger("ais")
+
+_API_ERROR_MESSAGES = {
+    "AUTH_REQUIRED": "La sesión expiró. Inicie sesión nuevamente.",
+    "MFA_AAL2_REQUIRED": "Esta operación requiere confirmar el segundo factor.",
+    "PURCHASE_PERMISSION_DENIED": "No tiene permiso para registrar compras en esta empresa.",
+    "PRODUCT_NOT_FOUND_OR_FORBIDDEN": "Uno de los productos no existe o no pertenece a la empresa activa.",
+    "INVALID_PURCHASE_ITEM": "Revise las cantidades y costos de los productos.",
+    "INVALID_PURCHASE_QUANTITY": "Todas las cantidades deben ser mayores que cero.",
+    "INVALID_PURCHASE_COST": "Los costos de compra no pueden ser negativos.",
+    "DUPLICATE_PURCHASE_PRODUCT": "Cada producto debe aparecer una sola vez en la factura.",
+    "IDEMPOTENCY_PAYLOAD_MISMATCH": "La factura cambió después de un intento previo; recargue el formulario.",
+    "PERIODO_CERRADO": "No se permiten movimientos en un período contable cerrado.",
+}
 
 
 class ApiError(RuntimeError):
     pass
 
 
+def _mensaje_api_seguro(error: Any, fallback: str = "No se pudo completar la operación.") -> str:
+    raw = str(error or "")
+    for code, message in _API_ERROR_MESSAGES.items():
+        if code in raw:
+            return message
+    return fallback
+
+
 def _rpc(name: str, **params) -> dict:
+    payload = params.get("p")
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        tenant_id = obtener_tenant_actual()
+        if not tenant_id:
+            raise ApiError("No hay una empresa autorizada activa.")
+        # La empresa verificada por api_my_session prevalece sobre cualquier
+        # identificador enviado por una vista o un cliente manipulado.
+        payload["tenant_id"] = tenant_id
+        payload["empresa_id"] = tenant_id
+        params["p"] = payload
     try:
         response = supabase.rpc(name, params).execute()
     except Exception as exc:
-        raise ApiError(str(exc)) from exc
+        LOGGER.error("RPC %s rechazada (%s)", name, type(exc).__name__, exc_info=exc)
+        raise ApiError(_mensaje_api_seguro(exc)) from exc
 
     data = response.data
     if isinstance(data, list):
         data = data[0] if data else None
     if not isinstance(data, dict):
-        raise ApiError(f"{name} no devolvió una respuesta válida.")
+        LOGGER.error("RPC %s devolvió un tipo inesperado: %s", name, type(data).__name__)
+        raise ApiError("El servidor devolvió una respuesta inválida.")
     if data.get("success") is False:
-        raise ApiError(str(data.get("error") or "Operación rechazada."))
+        raise ApiError(_mensaje_api_seguro(data.get("error"), "La operación fue rechazada."))
     return data
 
 
@@ -61,6 +99,10 @@ def reemplazar_cuenta_abierta(venta_id: Any, payload: dict) -> dict:
 
 def registrar_compra_producto(payload: dict) -> dict:
     return _rpc("api_registrar_compra_producto", p=payload)
+
+
+def registrar_factura_compra(payload: dict) -> dict:
+    return _rpc("api_registrar_factura_compra", p=payload)
 
 
 def anular_venta(venta_id: Any, motivo: str) -> dict:
@@ -168,14 +210,15 @@ def invitar_usuario_seguro(
             timeout=20,
         )
     except requests.RequestException as exc:
-        raise ApiError(f"No se pudo contactar el servicio de usuarios: {exc}") from exc
+        LOGGER.error("Servicio de invitaciones no disponible (%s)", type(exc).__name__, exc_info=exc)
+        raise ApiError("No se pudo contactar el servicio de usuarios.") from exc
 
     try:
         body = response.json()
     except ValueError:
         body = {}
     if response.status_code >= 400 or body.get("success") is False:
-        raise ApiError(str(body.get("error") or f"Error HTTP {response.status_code}"))
+        raise ApiError(_mensaje_api_seguro(body.get("error"), "El servicio rechazó la invitación."))
     return body
 
 
@@ -216,14 +259,15 @@ def gestionar_usuario_seguro(
             timeout=20,
         )
     except requests.RequestException as exc:
-        raise ApiError(f"No se pudo contactar el servicio de usuarios: {exc}") from exc
+        LOGGER.error("Servicio de usuarios no disponible (%s)", type(exc).__name__, exc_info=exc)
+        raise ApiError("No se pudo contactar el servicio de usuarios.") from exc
 
     try:
         body = response.json()
     except ValueError:
         body = {}
     if response.status_code >= 400 or body.get("success") is False:
-        raise ApiError(str(body.get("error") or f"Error HTTP {response.status_code}"))
+        raise ApiError(_mensaje_api_seguro(body.get("error"), "El servicio rechazó el cambio de usuario."))
     return body
 
 
@@ -258,12 +302,13 @@ def gestionar_empresa_seguro(
             timeout=20,
         )
     except requests.RequestException as exc:
-        raise ApiError(f"No se pudo contactar el servicio de empresas: {exc}") from exc
+        LOGGER.error("Servicio de empresas no disponible (%s)", type(exc).__name__, exc_info=exc)
+        raise ApiError("No se pudo contactar el servicio de empresas.") from exc
 
     try:
         body = response.json()
     except ValueError:
         body = {}
     if response.status_code >= 400 or body.get("success") is False:
-        raise ApiError(str(body.get("error") or f"Error HTTP {response.status_code}"))
+        raise ApiError(_mensaje_api_seguro(body.get("error"), "El servicio rechazó el cambio de empresa."))
     return body

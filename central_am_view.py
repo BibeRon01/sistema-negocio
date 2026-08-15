@@ -12,6 +12,7 @@ from api_client import (
 )
 from auth import es_superadmin_plataforma
 from db import limpiar_cache_datos, supabase
+from utils import mostrar_error_seguro
 
 
 def _cargar_empresas() -> pd.DataFrame:
@@ -30,7 +31,7 @@ def render_gestion_empresas():
     try:
         empresas = _cargar_empresas()
     except Exception as exc:
-        st.error(f"No se pudo consultar el catálogo de empresas: {exc}")
+        mostrar_error_seguro("No se pudo consultar el catálogo de empresas.", exc)
         return
 
     total = len(empresas)
@@ -74,7 +75,7 @@ def render_gestion_empresas():
                         st.success("Empresa actualizada.")
                         st.rerun()
                     except ApiError as exc:
-                        st.error(f"No se pudo actualizar: {exc}")
+                        st.error(str(exc))
 
     with tab_crear:
         with st.form("secure_company_create"):
@@ -107,7 +108,7 @@ def render_gestion_empresas():
                     st.success("Empresa creada. Ahora cree su primer administrador.")
                     st.rerun()
                 except ApiError as exc:
-                    st.error(f"No se pudo crear la empresa: {exc}")
+                    st.error(str(exc))
 
     with tab_usuario:
         if empresas.empty:
@@ -155,4 +156,4 @@ def render_gestion_empresas():
                             "y solicite cambiarla."
                         )
                     except ApiError as exc:
-                        st.error(f"No se pudo crear el usuario: {exc}")
+                        st.error(str(exc))

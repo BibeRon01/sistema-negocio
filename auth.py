@@ -6,6 +6,25 @@ from db import (
 )
 from utils import normalizar_texto
 
+
+_SESSION_KEYS = (
+    "usuario_data",
+    "access_token",
+    "refresh_token",
+    "sesion_token",
+    "tenant_actual",
+    "tenant_seleccionado",
+    "mfa_pendiente",
+    "login_pending_mfa",
+    "superadmin_tenant_seleccionado",
+    "last_activity",
+    "ultimo_check_usuario",
+    "_last_session_validation",
+    "_supabase_session_client",
+    "_supabase_session_fingerprint",
+    "session_cache_tablas",
+)
+
 def es_admin() -> bool:
     if es_superadmin_plataforma():
         return True
@@ -22,20 +41,15 @@ def tiene_permiso(flag: str) -> bool:
         return True
     return bool(user.get(flag, False))
 
-def cerrar_sesion():
-    try:
-        supabase.auth.sign_out()
-    except Exception:
-        pass
-    for k in [
-        "usuario_data", "access_token", "refresh_token", "sesion_token",
-        "tenant_actual", "mfa_pendiente", "login_pending_mfa",
-        "superadmin_tenant_seleccionado", "last_activity",
-        "ultimo_check_usuario", "_last_session_validation",
-        "_supabase_session_client",
-        "_supabase_session_fingerprint", "session_cache_tablas",
-    ]:
-        st.session_state.pop(k, None)
+def limpiar_estado_sesion(*, cerrar_auth: bool = False) -> None:
+    """Invalida todo estado local; ningún error conserva una sesión utilizable."""
+    if cerrar_auth:
+        try:
+            supabase.auth.sign_out()
+        except Exception:
+            pass
+    for key in _SESSION_KEYS:
+        st.session_state.pop(key, None)
     limpiar_cache_datos()
     try:
         renovar_cliente_sesion()
@@ -45,6 +59,10 @@ def cerrar_sesion():
         st.cache_data.clear()
     except Exception:
         pass
+
+
+def cerrar_sesion():
+    limpiar_estado_sesion(cerrar_auth=True)
     st.rerun()
 
 # =========================================================

@@ -64,11 +64,14 @@ def render_sucursales():
                 activa_s = bool(suc_row.get("activa", True))
                 color_s  = "#4caf50" if activa_s else "#9e9e9e"
                 estado_s = "✅ Activa" if activa_s else "⏸ Inactiva"
+                nombre_s_html = html_escape(nombre_s)
+                dir_s_html = html_escape(dir_s)
+                tel_s_html = html_escape(tel_s)
                 col.markdown(f"""
 <div style="background:rgba(26,35,126,0.3);border:1px solid {color_s}44;border-radius:12px;padding:16px;margin-bottom:12px;">
-  <div style="font-size:18px;font-weight:700;color:#fff;">🏢 {nombre_s}</div>
-  <div style="font-size:12px;color:#aaa;margin-top:4px;">📍 {dir_s}</div>
-  <div style="font-size:12px;color:#aaa;">📞 {tel_s}</div>
+  <div style="font-size:18px;font-weight:700;color:#fff;">🏢 {nombre_s_html}</div>
+  <div style="font-size:12px;color:#aaa;margin-top:4px;">📍 {dir_s_html}</div>
+  <div style="font-size:12px;color:#aaa;">📞 {tel_s_html}</div>
   <div style="font-size:12px;color:{color_s};margin-top:8px;font-weight:600;">{estado_s}</div>
 </div>
                 """, unsafe_allow_html=True)
@@ -139,7 +142,7 @@ def render_sucursales():
                         else:
                             st.error("No se pudo crear. Verifica que la tabla 'sucursales' existe en Supabase.")
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        mostrar_error_seguro("No se pudo guardar la sucursal.", e)
 
         with st.expander("🔧 SQL para crear la tabla sucursales en Supabase"):
             st.code("""

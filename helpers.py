@@ -20,11 +20,12 @@ from db import (
     _df_actual, leer_actualizado, invalidar_cache_tabla, limpiar_cache_datos,
     guardar_venta_rpc, custom_table, WrappedQueryBuilder, TABLAS_MULTI_TENANT,
     AM_LOGO_B64, get_am_logo_b64, total_contable_sin_recargo, aplicar_total_contable_df,
-    es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask, obtener_secreto
+    es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask, obtener_secreto,
+    obtener_cliente_sesion
 )
 
 from auth import (
-    es_admin, es_cajera, tiene_permiso, cerrar_sesion,
+    es_admin, es_cajera, tiene_permiso, cerrar_sesion, limpiar_estado_sesion,
     puede_editar_global, puede_ver_utilidad_global, puede_vender, puede_abrir_caja,
     puede_cerrar_caja, puede_ver_ventas_propias, puede_ver_todas_ventas,
     puede_editar_ventas, puede_anular_ventas, puede_eliminar_ventas,
@@ -43,7 +44,7 @@ from utils import (
     selector_fechas_universal, normalizar_item_carrito, recalcular_item_carrito,
     carrito_limpio, buscar_nombre_producto_por_item, nombre_item, numero_factura_visible,
     predecir_categoria_y_tipo_gasto, generar_codigo_secuencial, generar_codigo_producto,
-    agregar_columna_codigo_secuencial
+    agregar_columna_codigo_secuencial, mostrar_error_seguro
 )
 def valor_simple(valor: Any):
     if isinstance(valor, pd.Series):
@@ -87,7 +88,7 @@ def optimizar_y_codificar_imagen(file_bytes_or_url, is_url=False) -> str | None:
         b64 = base64.b64encode(webp_data).decode("utf-8")
         return f"data:image/webp;base64,{b64}"
     except Exception as e:
-        st.error(f"Error procesando imagen: {e}")
+        mostrar_error_seguro("No se pudo procesar la imagen.", e)
         return None
 
 
@@ -1070,26 +1071,6 @@ def get_producto_por_codigo(codigo: str):
         return None
     return match.iloc[0]
 
-
-
-def obtener_tenant_actual() -> str:
-    """Empresa autorizada por la sesión verificada en PostgreSQL."""
-    usuario_data = st.session_state.get("usuario_data") or {}
-    if not usuario_data:
-        return ""
-
-    tenant_sesion = str(usuario_data.get("tenant_id") or usuario_data.get("empresa_id") or "").strip()
-    if bool(usuario_data.get("es_superadmin")):
-        seleccionado = str(st.session_state.get("superadmin_tenant_seleccionado") or tenant_sesion).strip()
-        permitidos = {
-            str(item.get("tenant_id") or "").strip()
-            for item in (usuario_data.get("tenants") or [])
-            if isinstance(item, dict)
-        }
-        if seleccionado == "global" or seleccionado in permitidos:
-            return seleccionado
-    return tenant_sesion
-
 def obtener_configuracion() -> dict:
     tenant = obtener_tenant_actual()
     return _obtener_configuracion_interna(tenant)
@@ -1145,7 +1126,7 @@ def guardar_logo_en_configuracion(file_bytes: bytes, mime: str) -> bool:
         registrar_auditoria("actualizar_logo", "configuracion_sistema", "Logo actualizado")
         return True
     except Exception as exc:
-        st.error(f"No se pudo guardar el logo: {exc}")
+        mostrar_error_seguro("No se pudo guardar el logo.", exc)
         return False
 
 # =========================================================
@@ -1382,361 +1363,8 @@ def guardar_tema_en_db(tema_nombre: str):
     except Exception:
         return False
 
-def _legacy_login_desactivado() -> bool:
-    raise RuntimeError("El acceso legado fue retirado; use Supabase Auth con MFA.")
-    usuario_data = st.session_state.get("usuario_data")
-    if usuario_data:
-        # Control de tiempo de inactividad de sesión (cierre automático tras 15 minutos)
-        max_inactividad = 900
-        ultimo_acceso = st.session_state.get("last_activity")
-        ahora = datetime.now()
-        if ultimo_acceso is not None:
-            if (ahora - ultimo_acceso).total_seconds() > max_inactividad:
-                st.session_state.pop("usuario_data", None)
-                st.session_state.pop("last_activity", None)
-                st.session_state.pop("ultimo_check_usuario", None)
-                st.error("⚠️ Sesión cerrada automáticamente por inactividad.")
-                st.rerun()
-        st.session_state["last_activity"] = ahora
+# La ruta de acceso heredada fue eliminada; login_simple es la única entrada.
 
-        # Revalidar sesión cada 60 segundos contra Supabase para detectar desactivaciones/cambios
-        ultimo_check = st.session_state.get("ultimo_check_usuario")
-        if ultimo_check is None or (ahora - ultimo_check).total_seconds() > 60.0:
-            try:
-                usr_id = usuario_data.get("id")
-                if usr_id and supabase is not None:
-                    resp = supabase.table("usuarios").select("*").eq("id", str(usr_id)).execute()
-                    fresh = resp.data[0] if resp.data else None
-                    if fresh:
-                        if not fresh.get("activo", True):
-                            st.session_state.pop("usuario_data", None)
-                            st.session_state.pop("ultimo_check_usuario", None)
-                            st.session_state.pop("last_activity", None)
-                            st.error("⚠️ Su cuenta ha sido desactivada o eliminada.")
-                            st.rerun()
-                        if fresh.get("rol") != usuario_data.get("rol"):
-                            st.session_state.pop("usuario_data", None)
-                            st.session_state.pop("ultimo_check_usuario", None)
-                            st.session_state.pop("last_activity", None)
-                            st.error("⚠️ Sus privilegios de usuario han cambiado. Inicie sesión de nuevo.")
-                            st.rerun()
-                        st.session_state["usuario_data"] = fresh
-                st.session_state["ultimo_check_usuario"] = ahora
-            except Exception:
-                # Tolerar fallos de red temporales para continuidad operativa
-                pass
-        return True
-
-    # Retrieve logo dynamically to ensure fresh updates are shown immediately
-    logo_b64 = get_am_logo_b64()
-
-    # Render a truly professional macOS-style executive login interface
-    st.markdown(f"""
-    <style>
-        /* Full-screen sleek macOS-style light slate background */
-        [data-testid="stAppViewContainer"], .stApp {{
-            background-color: #f5f5f7 !important;
-            background-image: 
-                radial-gradient(at 0% 0%, #fafafa 0px, transparent 50%),
-                radial-gradient(at 100% 0%, #eaeaea 0px, transparent 50%),
-                radial-gradient(at 50% 100%, #f0f0f3 0px, transparent 50%) !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            min-height: 100vh !important;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
-        }}
-
-        /* Hide Streamlit default toolbars and headers */
-        [data-testid="stHeader"] {{
-            display: none !important;
-        }}
-        [data-testid="stSidebar"] {{
-            display: none !important;
-        }}
-        [data-testid="stToolbar"] {{
-            display: none !important;
-        }}
-
-        /* Bulletproof centering and sizing for the login card container */
-        html body [data-testid="stAppViewContainer"] [data-testid="stAppViewBlockContainer"],
-        html body [data-testid="stAppViewContainer"] .stMainBlockContainer,
-        html body [data-testid="stAppViewContainer"] .main .block-container,
-        div[data-testid="stAppViewBlockContainer"],
-        div.stMainBlockContainer,
-        .main .block-container {{
-            max-width: 440px !important;
-            width: 440px !important;
-            min-width: 320px !important;
-            padding: 3rem 2.5rem !important;
-            background: #ffffff !important; /* Pure solid crisp white for ultimate executive quality */
-            border-radius: 16px !important;
-            border: 1px solid #d2d2d7 !important; /* Elegant light gray border */
-            box-shadow: 
-                0 20px 40px rgba(0, 0, 0, 0.05),
-                0 1px 3px rgba(0, 0, 0, 0.02) !important;
-            margin: 10vh auto !important;
-            box-sizing: border-box !important;
-            display: block !important;
-        }}
-
-        /* Ensure input wrapper doesn't stretch beyond card boundaries */
-        div[data-testid="stTextInput"] {{
-            width: 100% !important;
-            max-width: 100% !important;
-        }}
-
-        /* macOS-style elegant input labels */
-        div[data-testid="stTextInput"] label {{
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif !important;
-            font-size: 13px !important;
-            font-weight: 600 !important;
-            color: #1d1d1f !important;
-            margin-bottom: 8px !important;
-            padding-left: 1px !important;
-        }}
-
-        /* macOS-style premium input elements */
-        div[data-testid="stTextInput"] input {{
-            border-radius: 8px !important;
-            border: 1px solid #d2d2d7 !important;
-            background: #ffffff !important;
-            color: #1d1d1f !important;
-            padding: 10px 12px !important;
-            font-size: 14px !important;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif !important;
-            box-shadow: none !important;
-            transition: all 0.15s ease-in-out !important;
-            width: 100% !important;
-        }}
-
-        div[data-testid="stTextInput"] input:focus {{
-            border-color: #8e8e93 !important; /* Neutral premium gray focus ring */
-            background: #ffffff !important;
-            box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.05) !important;
-            outline: none !important;
-        }}
-
-        div[data-testid="stTextInput"] div[data-testid="InputInstructions"] {{
-            display: none !important;
-        }}
-
-        /* macOS-style Executive Solid Dark Button */
-        div[data-testid="stButton"] button {{
-            background: #1d1d1f !important;
-            color: #ffffff !important;
-            border: none !important;
-            border-radius: 8px !important;
-            padding: 10px 20px !important;
-            font-size: 14px !important;
-            font-weight: 500 !important;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif !important;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) !important;
-            transition: all 0.15s ease-in-out !important;
-            width: 100% !important;
-            height: 42px !important;
-            margin-top: 1.2rem !important;
-            cursor: pointer !important;
-        }}
-
-        div[data-testid="stButton"] button:hover {{
-            background: #000000 !important;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12) !important;
-        }}
-
-        div[data-testid="stButton"] button:active {{
-            background: #2c2c2e !important;
-        }}
-
-        /* Header elements */
-        .login-header {{
-            text-align: center !important;
-            margin-bottom: 2rem !important;
-        }}
-        .logo-container {{
-            width: 72px !important;
-            height: 72px !important;
-            margin: 0 auto 1.2rem auto !important;
-            background: #ffffff !important;
-            border-radius: 16px !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
-            border: 1px solid #e5e5ea !important;
-        }}
-        .logo-img {{
-            width: 50px !important;
-            height: 50px !important;
-            object-fit: contain !important;
-            border-radius: 10px !important;
-        }}
-        .brand-title {{
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif !important;
-            font-size: 1.7rem !important;
-            font-weight: 700 !important;
-            letter-spacing: -0.03em !important;
-            color: #1d1d1f !important;
-            margin-bottom: 0.25rem !important;
-        }}
-        .brand-subtitle {{
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif !important;
-            font-size: 0.9rem !important;
-            font-weight: 450 !important;
-            color: #86868b !important;
-            letter-spacing: -0.01em !important;
-            margin-bottom: 0.5rem !important;
-        }}
-        .login-footer {{
-            text-align: center !important;
-            font-size: 11px !important;
-            color: #86868b !important;
-            font-weight: 400 !important;
-            margin-top: 2rem !important;
-            letter-spacing: -0.01em !important;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif !important;
-        }}
-    </style>
-    """, unsafe_allow_html=True)
-
-    # Centered branding panel
-    st.markdown(f"""
-    <div class="login-header">
-        <div class="logo-container">
-            <img class="logo-img" src="{logo_b64}" alt="Logo A&M" />
-        </div>
-        <div class="brand-title">SISTEMA CONTABLE A&M</div>
-        <div class="brand-subtitle">Sistema Contable con Punto de Venta</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Flujo de login en dos pasos si el segundo factor está activado
-    pending_mfa = st.session_state.get("login_pending_mfa")
-    
-    if pending_mfa:
-        st.warning("🔒 Se requiere el Segundo Factor de Autenticación (MFA)")
-        mfa_code = st.text_input("Ingrese el código de 6 dígitos de su aplicación autenticadora", key="login_mfa_code", max_chars=6)
-        
-        c1, c2 = st.columns(2)
-        if c1.button("Verificar", key="btn_verify_mfa", use_container_width=True):
-            secret = str(pending_mfa.get("totp_secret") or "").strip()
-            if secret and verificar_codigo_totp(secret, mfa_code):
-                st.session_state["usuario_data"] = pending_mfa
-                st.session_state.pop("login_pending_mfa", None)
-                st.success("MFA verificado. Iniciando sesión...")
-                st.rerun()
-            else:
-                st.error("Código de verificación incorrecto o expirado.")
-                
-        if c2.button("Cancelar", key="btn_cancel_mfa", use_container_width=True):
-            st.session_state.pop("login_pending_mfa", None)
-            st.rerun()
-            
-    else:
-        usuario_in = st.text_input("Correo Electrónico o Usuario", placeholder="ejemplo@correo.com o tu_usuario", key="login_usuario")
-        clave_in = st.text_input("Clave", type="password", key="login_clave")
-
-        if st.button("Entrar", key="btn_login_usuario", use_container_width=True):
-            usr_in_clean = str(usuario_in or "").strip()
-            pwd_in_clean = str(clave_in or "").strip()
-            
-            verificar_bloqueo_login(usr_in_clean)
-            
-            encontrado = None
-            error_login = None
-            usr_clean_lower = usr_in_clean.lower()
-            
-            # Paso 1: Autenticar vía Supabase Auth (admite Correo Completo o Usuario)
-            try:
-                if supabase is not None:
-                    email_auth = usr_clean_lower
-                    if "@" not in email_auth:
-                        email_auth = f"{email_auth}@ais-erp.com"
-                    
-                    auth_resp = supabase.auth.sign_in_with_password({
-                        "email": email_auth,
-                        "password": pwd_in_clean
-                    })
-                    
-                    session = auth_resp.session
-                    st.session_state["access_token"] = session.access_token
-                    supabase.postgrest.auth(session.access_token)
-                    
-                    resp = supabase.table("usuarios").select("*").eq("id", auth_resp.user.id).execute()
-                    filas = resp.data or []
-                    if filas:
-                        encontrado = filas[0]
-            except Exception as exc:
-                error_login = exc
-
-            # No existen rutas alternativas. Si falla Supabase Auth, el acceso se deniega.
-
-            if encontrado is not None:
-                limpiar_intentos_fallidos(usr_in_clean)
-                # S-02: Bloquear admins sin MFA antes de dar acceso
-                if mfa_requerido_para_admin(encontrado):
-                    st.stop()
-                username_lc = str(encontrado.get("usuario") or usr_clean_lower).lower()
-                tenant_lc = "global"
-                if username_lc not in ["admin", "nelly"]:
-                    parent_lc = encontrado.get("email") or ""
-                    if parent_lc.strip() and "@" not in parent_lc:
-                        tenant_lc = parent_lc.strip().lower()
-                    else:
-                        tenant_lc = username_lc
-                
-                if tenant_lc != "global":
-                    try:
-                        cfg_resp = supabase.table("configuracion_sistema").select("slogan").eq("propietario", tenant_lc).execute()
-                        if cfg_resp.data:
-                            slogan_val = cfg_resp.data[0].get("slogan") or ""
-                            if "[SUSPENDIDO]" in slogan_val:
-                                st.error("⚠️ Su empresa ha sido suspendida. Comuníquese con el administrador A&M.")
-                                st.stop()
-                    except Exception:
-                        pass
-
-                if encontrado.get("mfa_enabled") and encontrado.get("totp_secret"):
-                    st.session_state["login_pending_mfa"] = encontrado
-                    st.rerun()
-                else:
-                    st.session_state["usuario_data"] = encontrado
-                    st.rerun()
-            else:
-                registrar_intento_fallido(usr_in_clean)
-                st.error("Credenciales inválidas, usuario/correo no encontrado o cuenta inactiva.")
-
-        # Opción de Restablecimiento de Contraseña
-        with st.expander("🔑 ¿Olvidaste tu contraseña?", expanded=False):
-            tab_email = st.container()
-            with tab_email:
-                st.caption("Solicite un enlace de restablecimiento a su correo electrónico registrado (Administradores).")
-                recup_in = st.text_input("Correo registrado", key="login_recup_input", placeholder="ejemplo@correo.com")
-                if st.button("Enviar Enlace al Correo", key="btn_solicitar_recup", use_container_width=True):
-                    recup_clean = str(recup_in or "").strip().lower()
-                    if not recup_clean or "@" not in recup_clean:
-                        st.warning("⚠️ Ingrese un correo electrónico válido.")
-                    else:
-                        if supabase is not None:
-                            try:
-                                supabase.auth.reset_password_for_email(recup_clean)
-                            except Exception:
-                                pass
-                        st.info(f"📩 Si el correo **{recup_clean}** está registrado, recibirá instrucciones de recuperación.")
-
-    # Premium footer
-    st.markdown("""
-    <div class="login-footer">
-        🔒 Conexión Cifrada y Protegida &middot; Nivel Bancario
-    </div>
-    """, unsafe_allow_html=True)
-
-    return False
-
-
-# ═══════════════════════════════════════════════════════════════
-# CENTRAL A&M — PLANES DE SERVICIO Y CONTROL DE ACCESO POR PLAN
-# ═══════════════════════════════════════════════════════════════
 PLANES_AM = {
     "gratuito": {
         "nombre": "Gratuito",
@@ -1990,7 +1618,7 @@ def registrar_compra_producto(producto_row: pd.Series, cantidad: float, costo_un
         limpiar_cache_datos()
         return True
     except Exception as exc:
-        st.error(f"No se pudo registrar la compra: {exc}")
+        mostrar_error_seguro("No se pudo registrar la compra.", exc)
         return False
 
 
@@ -2092,7 +1720,7 @@ def leer_archivo_subido(archivo) -> pd.DataFrame:
         df = mapear_columnas(df)
         return df
     except Exception as exc:
-        st.error(f"No se pudo leer el archivo: {exc}")
+        mostrar_error_seguro("No se pudo leer el archivo. Verifique su formato.", exc)
         return pd.DataFrame()
 
 def filtrar_por_fechas(df: pd.DataFrame, desde, hasta) -> pd.DataFrame:
@@ -2561,7 +2189,7 @@ def anular(nombre_tabla: str, fila_id: Any, motivo: str = "") -> bool:
             return True
         except Exception as exc:
             ultimo_error = exc
-    st.error(f"Error al anular en {nombre_tabla}: {ultimo_error}")
+    mostrar_error_seguro(f"No se pudo anular el registro de {nombre_tabla}.", ultimo_error)
     return False
 
 
@@ -2833,7 +2461,7 @@ def revertir_inventario_de_venta(venta_id: Any, marcar_detalle_anulado: bool = F
         resp = supabase.table("detalle_venta").select("*").eq("venta_id", str(venta_id)).execute()
         detalles = resp.data or []
     except Exception as exc:
-        st.error(f"No se pudo leer el detalle de venta: {exc}")
+        mostrar_error_seguro("No se pudo leer el detalle de la venta.", exc)
         return False
     for det in detalles:
         producto_id = det.get("producto_id")
@@ -2896,7 +2524,7 @@ def anular_venta_completa_app(venta_id: Any, motivo: str = "") -> bool:
             invalidar_cache_tabla(tabla)
         return True
     except Exception as exc:
-        st.error(f"No se pudo anular la venta completa: {exc}")
+        mostrar_error_seguro("No se pudo anular la venta completa.", exc)
         return False
 
 
@@ -3397,7 +3025,7 @@ def aplicar_venta_pos(payload: dict):
         if resp.data:
             venta_id_nuevo = resp.data[0].get("id")
     except Exception as e:
-        st.error(f"Error inserting venta POS: {e}")
+        mostrar_error_seguro("No se pudo registrar la venta.", e)
         raise
 
     # ── Asientos Contables Automáticos ──────────────────────────────────
@@ -3567,7 +3195,8 @@ def abrir_caja(monto_inicial: float, observacion: str = "") -> tuple[bool, str]:
         limpiar_cache_datos()
         return True, "Caja abierta correctamente."
     except Exception as exc:
-        return False, f"No se pudo abrir caja: {exc}"
+        LOGGER.error("No se pudo abrir caja (%s)", type(exc).__name__, exc_info=exc)
+        return False, "No se pudo abrir la caja. Inténtelo nuevamente."
 
 
 def cerrar_caja(caja_row: dict, monto_cierre: float, observacion: str = "") -> tuple[bool, str]:
@@ -3578,7 +3207,8 @@ def cerrar_caja(caja_row: dict, monto_cierre: float, observacion: str = "") -> t
         limpiar_cache_datos()
         return True, "Caja cerrada correctamente."
     except Exception as exc:
-        return False, f"No se pudo cerrar caja: {exc}"
+        LOGGER.error("No se pudo cerrar caja (%s)", type(exc).__name__, exc_info=exc)
+        return False, "No se pudo cerrar la caja. Inténtelo nuevamente."
 
 
 
@@ -3627,8 +3257,11 @@ def construir_html_impresion(post_venta: dict, tipo: str = "factura") -> str:
     cambio = float(post_venta.get("cambio", 0) or 0)
     nota_txt = limpiar_texto(post_venta.get("nota") or "")
 
-    logo_url = logo_actual() or AM_LOGO_B64
-    logo_img = f"<img src='{logo_url}' style='max-width: 150px; margin-bottom: 10px; border-radius: 8px;'/>" if logo_url else ""
+    logo_url = str(logo_actual() or AM_LOGO_B64 or "").strip()
+    if not (logo_url.startswith("https://") or logo_url.startswith("data:image/")):
+        logo_url = ""
+    logo_url_html = html_escape(logo_url)
+    logo_img = f"<img src='{logo_url_html}' style='max-width: 150px; margin-bottom: 10px; border-radius: 8px;'/>" if logo_url_html else ""
 
     # Información del negocio para el encabezado (teléfono, rnc, dirección)
     info_negocio_extra = ""
@@ -4432,7 +4065,7 @@ def registrar_abono_credito_seguro(fila, monto, metodo_pago, observacion=""):
         )
         return True
     except Exception as exc:
-        st.error(f"No se pudo registrar el abono: {exc}")
+        mostrar_error_seguro("No se pudo registrar el abono.", exc)
         return False
 
     monto = float(limpiar_numero(monto) or 0)
@@ -4482,7 +4115,7 @@ def registrar_abono_credito_seguro(fila, monto, metodo_pago, observacion=""):
                 "usuario": nombre_usuario_actual(),
             })).execute()
         except Exception as e:
-            st.error(f"No se pudo guardar el abono: {e}")
+            mostrar_error_seguro("No se pudo guardar el abono.", e)
             return False
 
     # Actualizar cuenta por cobrar
@@ -4615,7 +4248,12 @@ def registrar_movimiento_contable(modulo, referencia_id, cuenta_codigo, cuenta_n
         supabase.table("movimientos_contables").insert(payload).execute()
         return True
     except Exception as e:
-        raise RuntimeError(f"Error al registrar movimiento contable obligatorio: {e}")
+        LOGGER.error(
+            "No se pudo registrar el movimiento contable (%s)",
+            type(e).__name__,
+            exc_info=e,
+        )
+        raise RuntimeError("No se pudo registrar el movimiento contable obligatorio.") from e
 
 def obtener_inventario_a_costo_fecha(fecha_limite=None) -> float:
     try:
@@ -5047,7 +4685,7 @@ def guardar_distribucion_beneficios(
         data = resp.data or []
         dist_id = data[0].get("id") if data else ""
     except Exception as e:
-        st.error(f"No se pudo guardar la distribución: {e}")
+        mostrar_error_seguro("No se pudo guardar la distribución.", e)
         return False
 
     def _registrar_salida_mixta(persona, monto, metodo, cuenta_contable_codigo, cuenta_contable_nombre, tipo_cuenta, descripcion):
@@ -5294,7 +4932,11 @@ def reconstruir_movimientos_caja_desde_ventas_pagos(venta_id):
         return True
     except Exception as e:
         try:
-            st.warning(f"No se pudo reconstruir movimientos de caja: {e}")
+            mostrar_error_seguro(
+                "No se pudieron reconstruir los movimientos de caja.",
+                e,
+                nivel="warning",
+            )
         except Exception:
             pass
         return False
@@ -5358,25 +5000,48 @@ def _guardar_tokens_auth(session) -> None:
 
 
 def _cargar_perfil_verificado(tenant_id: str | None = None) -> dict:
+    client = obtener_cliente_sesion()
     access_token = str(st.session_state.get("access_token") or "")
-    if access_token.startswith("active_session") and st.session_state.get("usuario_data"):
-        return st.session_state["usuario_data"]
+    refresh_token = str(st.session_state.get("refresh_token") or "")
+    if client is None or not access_token or not refresh_token:
+        raise RuntimeError("AUTH_SESSION_REQUIRED")
 
-    try:
-        params = {"p_tenant_id": tenant_id} if tenant_id else {}
-        response = supabase.rpc("api_my_session", params).execute()
-        data = response.data
-        if isinstance(data, list):
-            data = data[0] if data else None
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
+    # Supabase Auth valida el JWT en su servidor en cada ejecución de la app.
+    # El perfil local nunca es una fuente alternativa de autenticación.
+    auth_response = client.auth.get_user(access_token)
+    auth_user = _auth_obj_value(auth_response, "user", auth_response)
+    auth_user_id = str(_auth_obj_value(auth_user, "id", "") or "")
+    if not auth_user_id:
+        raise RuntimeError("AUTH_USER_REQUIRED")
 
-    if st.session_state.get("usuario_data"):
-        return st.session_state["usuario_data"]
+    params = {"p_tenant_id": tenant_id} if tenant_id else {}
+    response = client.rpc("api_my_session", params).execute()
+    data = response.data
+    if isinstance(data, list):
+        data = data[0] if data else None
+    if not isinstance(data, dict):
+        raise RuntimeError("PROFILE_REQUIRED")
+    profile_user_id = str(data.get("user_id") or data.get("id") or "")
+    if not profile_user_id or profile_user_id != auth_user_id:
+        raise RuntimeError("PROFILE_AUTH_MISMATCH")
+    if data.get("activo") is not True:
+        raise RuntimeError("INACTIVE_PROFILE")
+    return data
 
-    raise RuntimeError("No existe un perfil activo vinculado a esta cuenta.")
+
+def cambiar_tenant_autorizado(tenant_id: str) -> dict:
+    """Cambia de empresa únicamente si api_my_session la autoriza."""
+    tenant = str(tenant_id or "").strip()
+    if not tenant:
+        raise RuntimeError("TENANT_REQUIRED")
+    profile = _cargar_perfil_verificado(tenant)
+    if str(profile.get("tenant_id") or "") != tenant:
+        raise RuntimeError("TENANT_AUTH_MISMATCH")
+    st.session_state["usuario_data"] = profile
+    st.session_state["tenant_seleccionado"] = tenant
+    st.session_state["_last_session_validation"] = datetime.now().timestamp()
+    limpiar_cache_datos()
+    return profile
 
 
 _PERMISOS_ALTO_RIESGO = {
@@ -5451,7 +5116,8 @@ def _render_mfa_nativo() -> bool:
     left, right = st.columns(2)
     if left.button("Verificar y entrar", type="primary", use_container_width=True):
         if not factor_id or len(str(code).strip()) != 6 or not str(code).strip().isdigit():
-            st.error("Escriba un código válido de 6 dígitos.")
+            limpiar_estado_sesion(cerrar_auth=True)
+            st.error("No se pudo verificar el segundo factor. Inicie sesión nuevamente.")
             return False
         try:
             verified = supabase.auth.mfa.challenge_and_verify({
@@ -5469,62 +5135,66 @@ def _render_mfa_nativo() -> bool:
             st.rerun()
         except Exception as exc:
             LOGGER.warning("Falló la verificación MFA: %s", type(exc).__name__)
+            limpiar_estado_sesion(cerrar_auth=True)
             st.error("No se pudo verificar el segundo factor. Inténtelo nuevamente.")
 
     if right.button("Cancelar", use_container_width=True):
-        try:
-            supabase.auth.sign_out()
-        except Exception:
-            pass
-        for key in [
-            "login_pending_mfa", "usuario_data", "access_token", "refresh_token",
-            "_last_session_validation", "_supabase_session_client",
-            "_supabase_session_fingerprint",
-        ]:
-            st.session_state.pop(key, None)
+        limpiar_estado_sesion(cerrar_auth=True)
         st.rerun()
     return False
 
 
 def login_simple() -> bool:
     """Única entrada permitida: Supabase Auth, perfil SQL y MFA nativo."""
-    if st.session_state.get("usuario_data") and st.session_state.get("access_token"):
+    session_values = {
+        "profile": st.session_state.get("usuario_data"),
+        "access": st.session_state.get("access_token"),
+        "refresh": st.session_state.get("refresh_token"),
+        "mfa": st.session_state.get("login_pending_mfa"),
+    }
+    has_complete_session = bool(
+        session_values["access"]
+        and session_values["refresh"]
+        and (session_values["profile"] or session_values["mfa"])
+    )
+
+    if has_complete_session:
         ahora = datetime.now().timestamp()
         ultima = float(st.session_state.get("last_activity") or ahora)
         if ahora - ultima > 30 * 60:
             st.warning("La sesión terminó por 30 minutos de inactividad.")
-            cerrar_sesion()
+            limpiar_estado_sesion(cerrar_auth=True)
             return False
 
-        access_token = str(st.session_state.get("access_token") or "")
-        if not access_token.startswith("active_session"):
-            ultima_validacion = float(st.session_state.get("_last_session_validation") or 0)
-            if ahora - ultima_validacion >= 5 * 60:
+        # No existe ventana de confianza local: Auth y api_my_session deben
+        # validar cada ejecución de Streamlit. Cualquier error invalida todo.
+        try:
+            tenant = str(st.session_state.get("tenant_seleccionado") or "").strip() or None
+            profile = _cargar_perfil_verificado(tenant)
+            if _perfil_es_privilegiado(profile) and str(profile.get("aal") or "").lower() != "aal2":
+                st.session_state.pop("usuario_data", None)
+                st.session_state["login_pending_mfa"] = {"profile": profile}
+                st.session_state["_last_session_validation"] = ahora
                 try:
-                    profile = _cargar_perfil_verificado()
-                    if not bool(profile.get("activo", True)):
-                        raise RuntimeError("INACTIVE_PROFILE")
-                    if _perfil_es_privilegiado(profile) and str(profile.get("aal") or "").lower() != "aal2":
-                        raise RuntimeError("MFA_AAL2_REQUIRED")
-                    st.session_state["usuario_data"] = profile
-                    st.session_state["_last_session_validation"] = ahora
+                    return _render_mfa_nativo()
                 except Exception as exc:
-                    LOGGER.warning("La revalidación de sesión fue rechazada: %s", type(exc).__name__)
-                    try:
-                        supabase.auth.sign_out()
-                    except Exception:
-                        pass
-                    for key in [
-                        "usuario_data", "access_token", "refresh_token",
-                        "_last_session_validation", "_supabase_session_client",
-                        "_supabase_session_fingerprint",
-                    ]:
-                        st.session_state.pop(key, None)
-                    st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
+                    LOGGER.warning("No se pudo iniciar MFA: %s", type(exc).__name__)
+                    limpiar_estado_sesion(cerrar_auth=True)
+                    st.error("La sesión administrativa no pudo validarse. Inicie sesión nuevamente.")
                     return False
-
+            st.session_state["usuario_data"] = profile
+            st.session_state.pop("login_pending_mfa", None)
+            st.session_state["_last_session_validation"] = ahora
+        except Exception as exc:
+            LOGGER.warning("La revalidación de sesión fue rechazada: %s", type(exc).__name__)
+            limpiar_estado_sesion(cerrar_auth=True)
+            st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
+            return False
         st.session_state["last_activity"] = ahora
         return True
+
+    if any(session_values.values()):
+        limpiar_estado_sesion(cerrar_auth=True)
 
     st.markdown(
         """
@@ -5537,7 +5207,14 @@ def login_simple() -> bool:
     )
 
     if st.session_state.get("login_pending_mfa"):
-        return _render_mfa_nativo()
+        try:
+            _cargar_perfil_verificado()
+            return _render_mfa_nativo()
+        except Exception as exc:
+            LOGGER.warning("La sesión MFA pendiente fue rechazada: %s", type(exc).__name__)
+            limpiar_estado_sesion(cerrar_auth=True)
+            st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
+            return False
 
     email = st.text_input("Correo electrónico", placeholder="correo@ejemplo.com", key="secure_login_email")
     password = st.text_input("Contraseña", type="password", key="secure_login_password")
@@ -5546,129 +5223,39 @@ def login_simple() -> bool:
         email_clean = str(email or "").strip().lower()
         pass_clean = str(password or "").strip()
         if not email_clean or not pass_clean:
-            st.error("Por favor ingrese su usuario o correo y contraseña.")
+            st.error("Por favor ingrese su correo y contraseña.")
+            return False
+        if "@" not in email_clean:
+            st.error("Ingrese el correo electrónico completo de su cuenta.")
             return False
 
-        # 0. Acceso directo instantáneo garantizado para Nelly (Super-Admin)
-        if email_clean in ["nelly", "admin", "superadmin", "am_admin", "nellymariaaguilerarosario@gmail.com"] and pass_clean == "20162907":
-            st.session_state["usuario_data"] = {
-                "id": "00000000-0000-0000-0000-000000000000",
-                "user_id": "00000000-0000-0000-0000-000000000000",
-                "usuario": "admin",
-                "nombre": "Nelly (Super-Admin Plataforma A&M)",
-                "email": "nellymariaaguilerarosario@gmail.com",
-                "rol": "superadmin",
-                "empresa_id": "global",
-                "es_superadmin": True,
-                "puede_configurar": True,
-                "puede_editar_todo": True,
-                "puede_crear_ventas": True,
-                "puede_editar_ventas": True,
-                "puede_anular": True,
-                "puede_crear_productos": True,
-                "puede_editar_productos": True,
-                "puede_eliminar_productos": True,
-                "puede_crear_gastos": True,
-                "puede_editar_gastos": True,
-                "puede_eliminar_gastos": True,
-                "puede_cerrar_periodo": True,
-                "aal": "aal2",
-                "activo": True
-            }
-            st.session_state["access_token"] = "active_session_nelly"
-            st.session_state["last_activity"] = datetime.now().timestamp()
-            st.session_state["_last_session_validation"] = datetime.now().timestamp()
-            st.rerun()
-
-        # 0. Acceso directo instantáneo para Bibe Ron y Cajera
-        if email_clean in ["biberon", "biiberonlicor", "biberonlicor", "biberon01", "biiberonlicor@gmail.com"] and pass_clean == "20162907":
-            st.session_state["usuario_data"] = {
-                "id": "00000000-0000-0000-0000-000000000001",
-                "user_id": "00000000-0000-0000-0000-000000000001",
-                "usuario": "biberon",
-                "nombre": "Propietario Bibe Ron 01",
-                "email": "biiberonlicor@gmail.com",
-                "rol": "admin",
-                "empresa_id": "biberon",
-                "es_superadmin": False,
-                "puede_configurar": True,
-                "puede_editar_todo": True,
-                "puede_crear_ventas": True,
-                "puede_editar_ventas": True,
-                "puede_anular": True,
-                "puede_crear_productos": True,
-                "puede_editar_productos": True,
-                "puede_eliminar_productos": True,
-                "puede_crear_gastos": True,
-                "puede_editar_gastos": True,
-                "puede_eliminar_gastos": True,
-                "puede_cerrar_periodo": True,
-                "aal": "aal2",
-                "activo": True
-            }
-            st.session_state["access_token"] = "active_session_biberon"
-            st.session_state["last_activity"] = datetime.now().timestamp()
-            st.session_state["_last_session_validation"] = datetime.now().timestamp()
-            st.rerun()
-
-        if email_clean in ["arianny", "arianny@empresa.com"] and pass_clean == "202610":
-            st.session_state["usuario_data"] = {
-                "id": "00000000-0000-0000-0000-000000000002",
-                "user_id": "00000000-0000-0000-0000-000000000002",
-                "usuario": "arianny",
-                "nombre": "Arianny (Cajera)",
-                "email": "arianny@empresa.com",
-                "rol": "cajero",
-                "empresa_id": "biberon",
-                "es_superadmin": False,
-                "puede_crear_ventas": True,
-                "activo": True
-            }
-            st.session_state["access_token"] = "active_session_arianny"
-            st.session_state["last_activity"] = datetime.now().timestamp()
-            st.session_state["_last_session_validation"] = datetime.now().timestamp()
-            st.rerun()
-
-        # Si no fue coincidencia instantánea, intentar firma con Supabase Auth
-        candidate_emails = [email_clean]
-        if "@" not in email_clean:
-            candidate_emails = [f"{email_clean}@gmail.com", f"{email_clean}@empresa.com"]
-
         auth_success = False
-        for c_email in candidate_emails:
-            try:
-                auth_response = supabase.auth.sign_in_with_password({
-                    "email": c_email,
-                    "password": pass_clean,
-                })
-                session_obj = _auth_obj_value(auth_response, "session", None)
-                if session_obj:
-                    _guardar_tokens_auth(session_obj)
-                    profile = _cargar_perfil_verificado()
-                    if not bool(profile.get("activo", True)):
-                        raise RuntimeError("La cuenta está desactivada.")
 
-                    st.session_state["usuario_data"] = profile
-                    st.session_state["access_token"] = getattr(session_obj, "access_token", "active_session")
-                    st.session_state["last_activity"] = datetime.now().timestamp()
-                    st.session_state["_last_session_validation"] = datetime.now().timestamp()
-                    auth_success = True
+        try:
+            auth_response = supabase.auth.sign_in_with_password({
+                "email": email_clean,
+                "password": pass_clean,
+            })
+            session_obj = _auth_obj_value(auth_response, "session", None)
+            if session_obj:
+                _guardar_tokens_auth(session_obj)
+                profile = _cargar_perfil_verificado()
+                # Enforzar MFA AAL2 para roles administrativos o permisos privilegiados (AIS-C03)
+                if _perfil_es_privilegiado(profile) and str(profile.get("aal") or "").lower() != "aal2":
+                    st.session_state["login_pending_mfa"] = {"profile": profile}
                     st.rerun()
-                    break
-            except Exception:
-                continue
+
+                st.session_state["usuario_data"] = profile
+                st.session_state["last_activity"] = datetime.now().timestamp()
+                st.session_state["_last_session_validation"] = datetime.now().timestamp()
+                auth_success = True
+                st.rerun()
+        except Exception as exc:
+            LOGGER.warning("El inicio de sesión fue rechazado: %s", type(exc).__name__)
+            auth_success = False
 
         if not auth_success:
-            try:
-                supabase.auth.sign_out()
-            except Exception:
-                pass
-            for key in [
-                "usuario_data", "access_token", "refresh_token",
-                "_last_session_validation", "_supabase_session_client",
-                "_supabase_session_fingerprint",
-            ]:
-                st.session_state.pop(key, None)
+            limpiar_estado_sesion(cerrar_auth=True)
             st.error("Credenciales inválidas o cuenta sin acceso activo.")
 
     with st.expander("¿Olvidó su contraseña?", expanded=False):

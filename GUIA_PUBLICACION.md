@@ -12,7 +12,8 @@
 
 1. Cree un proyecto Supabase separado para pruebas.
 2. Nunca reutilice la URL de producción.
-3. Ejecute `supabase/checks/001_preflight_readonly.sql`.
+3. Abra `SQL_APLICAR_EN_SUPABASE.md` y ejecute únicamente su bloque 0
+   (preflight de solo lectura).
 4. Guarde un respaldo administrado de producción antes de migrar.
 5. Si existen filas históricas con `empresa_id` vacío, clasifíquelas antes de
    permitir que usuarios trabajen con ellas.
@@ -22,17 +23,19 @@
 
 ## 3. Aplicar el SQL
 
-En el editor SQL de **staging**, abra y ejecute completos, uno por uno y en este
-orden:
+En el editor SQL de **staging**, use exclusivamente
+`SQL_APLICAR_EN_SUPABASE.md`. No ejecute `SQL_PARA_PEGAR.md`. Ejecute completos,
+uno por uno y en este orden:
 
-1. `supabase/migrations/202607250001_secure_foundation.sql`
-2. `supabase/migrations/202607250002_transactional_api.sql`
-3. `supabase/migrations/202607250003_maintenance_and_accounting_api.sql`
+0. Preflight de solo lectura; revise sus resultados antes de continuar.
+1. Base segura, Supabase Auth, tenants, RLS y tablas canónicas.
+2. API transaccional de ventas, caja, créditos e inventario.
+3. Mantenimiento, contabilidad, nómina y factura de compra atómica.
+4. Verificación posterior de solo lectura.
 
-Cada archivo usa una transacción. Si aparece un error, no continúe con el
-siguiente: copie el mensaje completo y corrija primero la causa.
-
-Al terminar, ejecute `supabase/checks/002_postdeploy_readonly.sql`.
+Los bloques 1, 2 y 3 usan transacciones. Si aparece un error, no continúe con el
+siguiente: conserve el mensaje en un canal privado y corrija primero la causa.
+El bloque 4 no reemplaza las pruebas RLS con usuarios reales.
 
 ## 4. Publicar las tres Edge Functions
 
@@ -60,16 +63,17 @@ Desde una computadora administrativa, nunca desde Streamlit:
 
 ```bash
 export SUPABASE_URL="https://PROYECTO-STAGING.supabase.co"
-export SUPABASE_SERVICE_KEY="PEGAR_SOLO_EN_LA_TERMINAL_LOCAL"
+export SUPABASE_SERVICE_KEY="PEGAR_SOLO_EN_LA_TERMINAL_LOCAL"  # pragma: allowlist secret
 python scripts/provision_owner.py \
   --email "propietaria@empresa.com" \
   --name "Nombre de la propietaria" \
   --tenant "codigo_empresa"
 ```
 
-El programa pedirá una contraseña de al menos 12 caracteres y obligará a
-registrar MFA en la primera entrada. Use `--platform-superadmin` únicamente para
-la cuenta que administrará varias empresas.
+El programa pedirá una contraseña de al menos 12 caracteres. En la primera
+entrada a AIS, las cuentas administrativas deberán registrar y verificar el MFA
+nativo de Supabase hasta alcanzar `aal2`. Use `--platform-superadmin` únicamente
+para la cuenta que administrará varias empresas.
 
 ## 6. Configurar Streamlit
 
@@ -86,16 +90,19 @@ Seleccione `app.py` como archivo principal.
 
 1. Cree Empresa A y Empresa B.
 2. Cree un usuario diferente en cada empresa.
-3. Configure MFA de los administradores.
+3. Configure MFA de administradores y superadministradores y confirme `aal2`.
 4. Configure productos, clientes, un empleado y su tasa ARL.
 5. Abra caja, venda, cobre a crédito, abone, anule y cierre caja.
-6. Registre una compra y confirme el lote FIFO.
+6. Registre una factura con varios productos y confirme cabecera, líneas, lotes
+   FIFO, stock y asiento; repita la misma solicitud y confirme idempotencia.
 7. Registre nómina y verifique que el asiento esté balanceado.
 8. Compruebe que cada usuario solo ve su empresa.
 9. Cree una cuenta de permisos mínimos y confirme que no puede leer nómina,
    auditoría, créditos ni reportes financieros.
 10. Ejecute las pruebas RLS con las variables indicadas en `tests/test_rls.py`.
 11. Cree un respaldo cifrado y restáurelo en otro staging vacío.
+12. Fuerce un producto inválido dentro de una factura de prueba y confirme que
+    no quedó cabecera, línea, compra, lote, stock ni asiento parcial.
 
 ## 8. Paso a producción
 

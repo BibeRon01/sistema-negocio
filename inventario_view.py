@@ -4,8 +4,16 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import streamlit.components.v1 as components
+import hashlib
+import json
+import logging
+import uuid
 from datetime import datetime, date, timedelta
 from typing import Any
+
+from api_client import ApiError, registrar_factura_compra
+
+LOGGER = logging.getLogger("ais")
 
 try:
     try:
@@ -132,7 +140,13 @@ def render_productos():
                                 if not ok:
                                     raise Exception("La actualización no fue confirmada por la base de datos.")
                             except Exception as exc_upd:
-                                filas_con_error.append(f"Fila {i+1} ('{nombre}'): Error al actualizar — {exc_upd}")
+                                LOGGER.error(
+                                    "Carga de productos: fallo al actualizar fila %s (%s)",
+                                    i + 1,
+                                    type(exc_upd).__name__,
+                                    exc_info=exc_upd,
+                                )
+                                filas_con_error.append(f"Fila {i+1} ('{nombre}'): no se pudo actualizar.")
                                 errores += 1
                                 continue
 
@@ -169,7 +183,15 @@ def render_productos():
                                 # Recargar cache para que las próximas filas vean este producto
                                 invalidar_cache_tabla("productos")
                             except Exception as exc_ins:
-                                filas_con_error.append(f"Fila {i+1} ('{nombre}', código '{codigo}'): Error al crear — {exc_ins}")
+                                LOGGER.error(
+                                    "Carga de productos: fallo al crear fila %s (%s)",
+                                    i + 1,
+                                    type(exc_ins).__name__,
+                                    exc_info=exc_ins,
+                                )
+                                filas_con_error.append(
+                                    f"Fila {i+1} ('{nombre}', código '{codigo}'): no se pudo crear."
+                                )
                                 errores += 1
                                 continue
 
@@ -186,8 +208,16 @@ def render_productos():
                         procesados += 1
 
                     except Exception as e:
+                        LOGGER.error(
+                            "Carga de productos: fallo inesperado en fila %s (%s)",
+                            i + 1,
+                            type(e).__name__,
+                            exc_info=e,
+                        )
                         errores += 1
-                        filas_con_error.append(f"Fila {i+1} ('{nombre or 'SIN NOMBRE'}'): Error inesperado — {e}")
+                        filas_con_error.append(
+                            f"Fila {i+1} ('{nombre or 'SIN NOMBRE'}'): no se pudo procesar."
+                        )
 
                     if len(df_preview) > 0:
                         barra.progress(min((i + 1) / len(df_preview), 1.0))
@@ -475,7 +505,7 @@ def render_productos():
                             st.success(f"✅ Producto '{pm_nombre}' registrado con éxito con el código '{p_code}'.")
                             st.rerun()
                     except Exception as e:
-                        st.error(f"Error al guardar producto: {e}")
+                        mostrar_error_seguro("No se pudo guardar el producto.", e)
 
         render_crud_generico("productos", df, "🛠️ Editar / eliminar productos")
     else:
@@ -1260,6 +1290,8 @@ def render_compras():
                     row_id = str(row["id"])
                     p_nom = obtener_nombre_producto(row)
                     p_cod = limpiar_texto(row.get("codigo")) or "SIN CODIGO"
+                    p_nom_html = html_escape(p_nom.upper())
+                    p_cod_html = html_escape(p_cod)
                     p_st = obtener_existencia_producto(row)
                     p_bg = "#ffd600" if p_st < 5 else "#1e88e5"
                     p_color = "black" if p_st < 5 else "white"
@@ -1267,9 +1299,9 @@ def render_compras():
                     
                     row_cols = st.columns([2, 3, 1, 1.2, 1.2, 0.8])
                     with row_cols[0]:
-                        st.markdown(f"<div style='font-size:12px; font-family:monospace; padding-top:6px;'>{p_cod}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='font-size:12px; font-family:monospace; padding-top:6px;'>{p_cod_html}</div>", unsafe_allow_html=True)
                     with row_cols[1]:
-                        st.markdown(f"<div style='font-size:12px; font-weight:bold; padding-top:6px;'>{p_nom.upper()}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='font-size:12px; font-weight:bold; padding-top:6px;'>{p_nom_html}</div>", unsafe_allow_html=True)
                     with row_cols[2]:
                         st.markdown(f"<div style='padding-top:4px;'><span class='dialog-badge' style='background-color:{p_bg}; color:{p_color} !important;'>{p_st:,.0f}</span></div>", unsafe_allow_html=True)
                     with row_cols[3]:
@@ -1515,6 +1547,8 @@ def render_compras():
                         item_id = item["producto_id"]
                         item_cod = item["codigo"]
                         item_nom = item["nombre"]
+                        item_cod_html = html_escape(item_cod)
+                        item_nom_html = html_escape(str(item_nom).upper())
                         item_cant = item["cantidad"]
                         item_costo = item["costo_unitario"]
                         item_total = item_cant * item_costo
@@ -1522,11 +1556,11 @@ def render_compras():
                         
                         row_cols = st.columns([2.2, 1.5, 3.3, 2, 2, 0.8])
                         with row_cols[0]:
-                            st.markdown(f"<div style='font-size:12px; font-family:monospace; padding-top:8px;'>{item_cod}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-size:12px; font-family:monospace; padding-top:8px;'>{item_cod_html}</div>", unsafe_allow_html=True)
                         with row_cols[1]:
                             st.number_input("Cant", min_value=1.0, value=item_cant, step=1.0, key=f"comp_cart_cant_{idx}", label_visibility="collapsed")
                         with row_cols[2]:
-                            st.markdown(f"<div style='font-size:12px; font-weight:bold; padding-top:8px;'>{item_nom.upper()}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='font-size:12px; font-weight:bold; padding-top:8px;'>{item_nom_html}</div>", unsafe_allow_html=True)
                         with row_cols[3]:
                             st.number_input("Costo", min_value=0.0, value=item_costo, step=1.0, key=f"comp_cart_costo_{idx}", label_visibility="collapsed")
                         with row_cols[4]:
@@ -1617,8 +1651,7 @@ def render_compras():
                     elif not num_fact.strip():
                         st.error("Debe ingresar el número de factura.")
                     else:
-                        # Guardar compras en cascada
-                        guardados_ok = 0
+                        items_factura = []
                         for item in st.session_state["compra_carrito"]:
                             p_id = item["producto_id"]
                             p_cant = item["cantidad"]
@@ -1633,31 +1666,56 @@ def render_compras():
                                     p_desc += f" - {desc_fact.strip()}"
                             else:
                                 p_desc = desc_fact.strip() or f"Compra de {p_nom}"
-                            
-                            p_rows = productos_df[productos_df["id"].astype(str) == str(p_id)]
-                            if not p_rows.empty:
-                                p_row = p_rows.iloc[0]
-                                ok = registrar_compra_producto(
-                                    producto_row=p_row,
-                                    cantidad=float(p_cant),
-                                    costo_unitario=float(p_costo),
-                                    fecha_compra=str(fecha_fact),
-                                    proveedor=proveedor_sel,
-                                    numero=num_fact.strip(),
-                                    descripcion=p_desc,
-                                    metodo=metodo_pago.lower()
-                                )
-                                if ok:
-                                    guardados_ok += 1
-                                    
-                        if guardados_ok > 0:
+                            items_factura.append({
+                                "producto_id": str(p_id),
+                                "cantidad": float(p_cant),
+                                "costo_unitario": float(p_costo),
+                                "descripcion": p_desc,
+                            })
+
+                        payload_factura = {
+                            "fecha": str(fecha_fact),
+                            "numero": num_fact.strip(),
+                            "referencia": ref_fact.strip(),
+                            "proveedor": proveedor_sel,
+                            "descripcion": desc_fact.strip(),
+                            "metodo": metodo_pago.lower(),
+                            "items": items_factura,
+                        }
+                        fingerprint = hashlib.sha256(
+                            json.dumps(payload_factura, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                        ).hexdigest()
+                        idempotency = st.session_state.get("_compra_idempotency") or {}
+                        if idempotency.get("fingerprint") != fingerprint:
+                            idempotency = {
+                                "fingerprint": fingerprint,
+                                "key": str(uuid.uuid4()),
+                            }
+                            st.session_state["_compra_idempotency"] = idempotency
+                        payload_factura["idempotency_key"] = idempotency["key"]
+
+                        try:
+                            resultado = registrar_factura_compra(payload_factura)
                             st.session_state["compra_carrito"] = []
+                            st.session_state.pop("_compra_idempotency", None)
                             st.session_state.pop("comp_num", None)
                             st.session_state.pop("comp_ref", None)
                             st.session_state.pop("comp_desc", None)
-                            st.success(f"Factura de compra guardada con éxito. Se registraron {guardados_ok} productos.")
+                            st.success(
+                                "Factura de compra guardada completa. "
+                                f"Se registraron {int(resultado.get('items') or len(items_factura))} productos."
+                            )
                             DATA.update(cargar_datos())
                             st.rerun()
+                        except ApiError as exc:
+                            st.error(str(exc))
+                        except Exception as exc:
+                            LOGGER.error(
+                                "No se pudo registrar la factura de compra (%s)",
+                                type(exc).__name__,
+                                exc_info=exc,
+                            )
+                            st.error("No se pudo guardar la factura de compra. Inténtelo nuevamente.")
 
         # =====================================================
         # HISTORIAL DE COMPRAS — EDITOR AVANZADO

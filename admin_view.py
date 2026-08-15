@@ -387,7 +387,7 @@ def render_usuarios():
                                 st.success(f"🎉 ¡Usuario '{user_clean}' creado con éxito!")
                                 st.rerun()
                             except ApiError as exc:
-                                st.error(f"No se pudo crear la cuenta: {exc}")
+                                st.error(str(exc))
                                 
         with tab_edit:
             if df.empty:
@@ -444,7 +444,7 @@ def render_usuarios():
                             st.success(f"🎉 ¡Usuario '{edit_username}' actualizado con éxito!")
                             st.rerun()
                         except ApiError as exc:
-                            st.error(f"Error al actualizar usuario: {exc}")
+                            st.error(str(exc))
                 with c_btn2:
                     if st.button("⛔ Desactivar Usuario", key="btn_delete_user_changes", use_container_width=True):
                         if usr_sel["usuario"] == nombre_usuario_actual():
@@ -463,7 +463,7 @@ def render_usuarios():
                                 st.success(f"Usuario '{usr_sel['usuario']}' desactivado; se conservó el historial.")
                                 st.rerun()
                             except ApiError as exc:
-                                st.error(f"Error al desactivar usuario: {exc}")
+                                st.error(str(exc))
 
 # =========================================================
 # CONFIGURACION
@@ -578,7 +578,7 @@ def render_configuracion():
                         limpiar_cache_datos()
                         st.rerun()
                     except ApiError as exc:
-                        st.error(f"No se pudieron guardar los cambios: {exc}")
+                        st.error(str(exc))
                         
                 if col_btn[1].button("⛔ Desactivar Cuenta", key="btn_delete_emp_account", use_container_width=True):
                     try:
@@ -594,7 +594,7 @@ def render_configuracion():
                         limpiar_cache_datos()
                         st.rerun()
                     except ApiError as exc:
-                        st.error(f"No se pudo desactivar la cuenta: {exc}")
+                        st.error(str(exc))
             else:
                 st.info("No hay usuarios registrados aparte del administrador maestro.")
             
@@ -644,7 +644,7 @@ def render_configuracion():
                             limpiar_cache_datos()
                             st.rerun()
                         except ApiError as exc:
-                            st.error(f"No se pudo crear la cuenta: {exc}")
+                            st.error(str(exc))
 
 
 # =========================================================
@@ -674,12 +674,15 @@ def render_mi_perfil():
             "contador": "📋", "cajero": "🛒"
         }
         icono_rol = ICONOS_ROL.get(rol_actual, "👤")
+        nombre_usuario_html = html_escape(user.get("nombre") or user.get("usuario") or "—")
+        rol_actual_html = html_escape(rol_actual.upper())
+        nombre_negocio_html = html_escape(nombre_negocio)
 
         st.markdown(f"""
         <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;padding:20px;margin-bottom:16px;border:1px solid rgba(212,175,55,0.3);">
           <div style="font-size:48px;text-align:center;">{icono_rol}</div>
-          <div style="text-align:center;color:#fff;font-size:20px;font-weight:700;">{user.get('nombre') or user.get('usuario') or '—'}</div>
-          <div style="text-align:center;color:#aaa;font-size:13px;margin-top:4px;">Rol: <b style="color:#d4af37">{rol_actual.upper()}</b> | {nombre_negocio}</div>
+          <div style="text-align:center;color:#fff;font-size:20px;font-weight:700;">{nombre_usuario_html}</div>
+          <div style="text-align:center;color:#aaa;font-size:13px;margin-top:4px;">Rol: <b style="color:#d4af37">{rol_actual_html}</b> | {nombre_negocio_html}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -720,7 +723,7 @@ def render_mi_perfil():
                         st.success("✅ Perfil actualizado correctamente.")
                         st.rerun()
                     except Exception as exc:
-                        st.error(f"No se pudo actualizar el perfil: {exc}")
+                        mostrar_error_seguro("No se pudo actualizar el perfil.", exc)
 
     with tab_plan:
         st.subheader("📋 Plan Activo y Suscripción")
@@ -760,17 +763,22 @@ def render_mi_perfil():
             color_plan = "#f44336"
             estado_plan = f"❌ Vencido hace {abs(dias_restantes)} días"
 
+        plan_nombre_html = html_escape(plan_nombre)
+        rnc_empresa_html = html_escape(rnc_empresa)
+        estado_plan_html = html_escape(estado_plan)
+        venc_str_html = html_escape(venc_str)
+
         # Panel de plan
         st.markdown(f"""
         <div style="background:linear-gradient(135deg,#0d0d0d,#1a2744);border-radius:16px;padding:24px;border:2px solid {color_plan}44;margin-bottom:16px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <div style="font-size:28px;font-weight:900;color:{color_plan};">PLAN {plan_nombre}</div>
-              <div style="color:#aaa;font-size:13px;margin-top:4px;">{nombre_negocio} | RNC: {rnc_empresa}</div>
+              <div style="font-size:28px;font-weight:900;color:{color_plan};">PLAN {plan_nombre_html}</div>
+              <div style="color:#aaa;font-size:13px;margin-top:4px;">{nombre_negocio_html} | RNC: {rnc_empresa_html}</div>
             </div>
             <div style="text-align:right;">
-              <div style="color:{color_plan};font-weight:700;font-size:14px;">{estado_plan}</div>
-              <div style="color:#888;font-size:12px;">Vence: {venc_str}</div>
+              <div style="color:{color_plan};font-weight:700;font-size:14px;">{estado_plan_html}</div>
+              <div style="color:#888;font-size:12px;">Vence: {venc_str_html}</div>
             </div>
           </div>
         </div>

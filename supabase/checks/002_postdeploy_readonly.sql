@@ -9,7 +9,8 @@ where n.nspname='public'
   and c.relname in (
       'empresas','tenant_memberships','usuarios','productos','clientes',
       'ventas','detalle_venta','ventas_pagos','caja','movimientos_caja',
-      'cuentas_por_cobrar','abonos_credito','compras','gastos',
+      'cuentas_por_cobrar','abonos_credito','compras','facturas_compra',
+      'detalle_factura_compra','gastos',
       'movimientos_contables','periodos_contables','auditoria_eventos',
       'proveedores','empleados','pagos_empleados','perdidas','gastos_dueno',
       'activos_fijos','capital_base','ajustes_inventario','conteo_inventario',
@@ -60,7 +61,8 @@ where table_schema='public'
   and grantee='authenticated'
   and privilege_type in ('INSERT','UPDATE','DELETE')
   and table_name in (
-      'ventas','detalle_venta','ventas_pagos','compras','caja',
+      'ventas','detalle_venta','ventas_pagos','compras','facturas_compra',
+      'detalle_factura_compra','caja',
       'movimientos_caja','cuentas_por_cobrar','abonos_credito',
       'inventario_consumos','movimientos_contables','cierre_caja',
       'periodos_contables','pagos_empleados','usuarios','tenant_memberships',

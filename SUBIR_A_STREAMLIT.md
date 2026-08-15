@@ -2,6 +2,8 @@
 
 ## Antes de comenzar
 
+- Aplique primero en Supabase staging los cinco bloques de
+  `SQL_APLICAR_EN_SUPABASE.md` en orden. No use `SQL_PARA_PEGAR.md`.
 - Suba **esta carpeta completa** a un repositorio privado de GitHub. `app.py`
   no funciona solo: necesita los módulos, `requirements.txt`, la imagen y la
   configuración incluidos aquí.
@@ -32,9 +34,10 @@ Al abrir la aplicación debe aparecer el formulario con:
 - Contraseña;
 - recuperación de contraseña.
 
-No introduzca operaciones reales hasta completar las pruebas de acceso, caja,
-venta, inventario, crédito, nómina y contabilidad. Para administración, AIS
-exigirá MFA.
+No introduzca operaciones reales hasta completar las pruebas de acceso,
+multiempresa, compra atómica, caja, venta, inventario, crédito, nómina y
+contabilidad. Para administración y superadministración, AIS exigirá MFA real
+con nivel `aal2`.
 
 Documentación oficial:
 

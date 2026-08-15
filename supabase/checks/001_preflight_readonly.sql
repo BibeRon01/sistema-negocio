@@ -28,7 +28,7 @@ where table_schema='public'
       ('productos','id'),('ventas','id'),('detalle_venta','id'),
       ('detalle_venta','producto_id'),('detalle_venta','venta_id'),
       ('caja','id'),('clientes','id'),('cuentas_por_cobrar','id'),
-      ('empleados','id'),('pagos_empleados','empleado_id')
+      ('compras','id'),('empleados','id'),('pagos_empleados','empleado_id')
   )
 order by table_name,column_name;
 

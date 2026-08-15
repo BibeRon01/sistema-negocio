@@ -81,7 +81,7 @@ def render_pos():
                                 row_usar = prod_sync if prod_sync is not None else p_row
                                 sincronizar_producto_inventario(row_usar, ahora_str(), f"Restauracion por edicion {v_id}")
             except Exception as e:
-                st.error(f"Error restaurando inventario: {e}")
+                mostrar_error_seguro("No se pudo restaurar el inventario.", e)
 
         def mostrar_cuentas_abiertas_activas():
             st.subheader("📂 Cuentas Abiertas Activas")
@@ -163,7 +163,7 @@ def render_pos():
                                 st.success("Cuenta cancelada e inventario restaurado.")
                                 st.rerun()
                             except Exception as exc:
-                                st.error(f"No se pudo cancelar la cuenta: {exc}")
+                                mostrar_error_seguro("No se pudo cancelar la cuenta.", exc)
             return
 
             if ventas_all.empty:
@@ -1653,9 +1653,11 @@ def render_pos():
                                     payload_unificado,
                                 )
                             else:
-                                rpc_res = guardar_venta_rpc(payload_unificado)
+                                from api_client import registrar_venta
+
+                                rpc_res = registrar_venta(payload_unificado)
                             if not rpc_res.get("success"):
-                                st.error(f"❌ Error al guardar la venta: {rpc_res.get('error')}")
+                                st.error("El servidor rechazó la venta. Revise los datos e inténtelo nuevamente.")
                                 st.stop()
                             
                             venta_id = rpc_res.get("venta_id")
@@ -1707,7 +1709,7 @@ def render_pos():
                     except Exception as exc:
                         import traceback
                         traceback.print_exc()
-                        st.error(f"❌ Error al procesar la venta: {exc}")
+                        mostrar_error_seguro("No se pudo procesar la venta.", exc)
                         st.stop()
         else:
             st.info("Carrito vacío.")
@@ -2159,7 +2161,7 @@ def render_ventas():
                             )
                             st.rerun()
                         except Exception as exc:
-                            st.error(f"No se pudo editar la cuenta: {exc}")
+                            mostrar_error_seguro("No se pudo editar la cuenta.", exc)
                         return
                         try:
                             # 1. devolver inventario viejo y registrar movimientos usando helper oficial
@@ -2262,7 +2264,7 @@ def render_ventas():
                             st.rerun()
 
                         except Exception as exc:
-                            st.error(f"No se pudo guardar la edición completa: {exc}")
+                            mostrar_error_seguro("No se pudo guardar la edición completa.", exc)
 
 
 
@@ -2634,7 +2636,7 @@ def render_caja():
             limpiar_cache_datos()
             return True
         except Exception as exc:
-            st.error(f"No se pudo cerrar la caja: {exc}")
+            mostrar_error_seguro("No se pudo cerrar la caja.", exc)
             return False
 
         usuario_cierre = usuario_cierre or usuario_act
@@ -2734,7 +2736,12 @@ def render_caja():
         diferencia = efectivo_contado - resumen["efectivo_esperado"]
         faltante = abs(diferencia) if diferencia < 0 else 0
         sobrante = diferencia if diferencia > 0 else 0
-        negocio = obtener_configuracion().get("negocio_nombre") or "Sistema de Negocio PRO"
+        negocio = html_escape(
+            obtener_configuracion().get("negocio_nombre") or "Sistema de Negocio PRO"
+        )
+        usuario_caja = html_escape(caja.get("usuario", ""))
+        apertura_caja = html_escape(caja.get("fecha_apertura", ""))
+        estado_caja = html_escape(caja.get("estado", ""))
         return f"""
         <html>
         <head>
@@ -2756,9 +2763,9 @@ def render_caja():
             <div class="box">
                 <h2>{negocio}</h2>
                 <h3>CUADRE DE CAJA</h3>
-                <p><b>Usuario:</b> {caja.get("usuario","")}<br>
-                <b>Apertura:</b> {caja.get("fecha_apertura","")}<br>
-                <b>Estado:</b> {caja.get("estado","")}</p>
+                <p><b>Usuario:</b> {usuario_caja}<br>
+                <b>Apertura:</b> {apertura_caja}<br>
+                <b>Estado:</b> {estado_caja}</p>
                 <table>
                     <tr><td>Caja inicial</td><td>RD$ {resumen["fondo_inicial"]:,.2f}</td></tr>
                     <tr><td>Ventas efectivo</td><td>RD$ {resumen["venta_efectivo"]:,.2f}</td></tr>
@@ -2803,7 +2810,7 @@ def render_caja():
                 st.success("Caja abierta correctamente.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"No se pudo abrir la caja: {exc}")
+                mostrar_error_seguro("No se pudo abrir la caja.", exc)
     else:
         st.success("Tienes una caja abierta.")
         resumen = _calcular_resumen_caja(caja_abierta)
@@ -3348,7 +3355,7 @@ def render_creditos():
             )
             return True
         except Exception as exc:
-            st.error(f"No se pudo registrar el abono: {exc}")
+            mostrar_error_seguro("No se pudo registrar el abono.", exc)
             return False
 
         monto_total = float(monto_total)
@@ -3661,7 +3668,7 @@ def render_creditos():
                                             try:
                                                 supabase.table("abonos_credito").insert(payload_abono).execute()
                                             except Exception as e:
-                                                st.error(f"Error al crear abono: {e}")
+                                                mostrar_error_seguro("No se pudo crear el abono.", e)
                                                 break
                                         else:
                                             st.success("Cuotas creadas exitosamente.")
@@ -3766,7 +3773,7 @@ def render_dinero_real():
             cols_debug = [c for c in ["nombre", "codigo", "stock", "cantidad", "existencia", "costo", "costo_unitario", "costo_promedio", "precio", "precio_venta", "precio_especial"] if c in prod_debug.columns]
             st.dataframe(prod_debug[cols_debug].head(20) if cols_debug else prod_debug.head(20), use_container_width=True)
         except Exception as e:
-            st.warning(f"No se pudo mostrar productos: {e}")
+            mostrar_error_seguro("No se pudieron mostrar los productos.", e, nivel="warning")
 
     st.info(
         "Lectura rápida: Total disponible es efectivo + banco. "

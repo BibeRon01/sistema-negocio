@@ -1,12 +1,13 @@
 # Auditoría de entrega — A&M v3 segura
 
-Fecha de revisión local: 25 de julio de 2026.
+Fecha de revisión local: 8 de agosto de 2026.
 
 ## Dictamen
 
-La copia corregida incorpora controles estructurales para los hallazgos críticos
-de autenticación, aislamiento multiempresa, privilegios, integridad del POS,
-auditoría, respaldo, caja, crédito, compras, nómina y alcance DGII.
+El proyecto definitivo incorpora controles estructurales para los hallazgos
+críticos de autenticación, aislamiento multiempresa, privilegios, integridad del
+POS, auditoría, respaldo, caja, crédito, compras, nómina y alcance DGII. El
+código está preparado para su publicación controlada en staging.
 
 No se emite una certificación de producción. En esta revisión no se proporcionó
 acceso a un proyecto staging ni dos tokens de empresas diferentes, por lo que las
@@ -15,22 +16,33 @@ obligatorias.
 
 ## Evidencia local
 
-- todos los archivos Python parsean sin error;
+- `helpers.py` fue restaurado primero desde la copia segura indicada: se
+  verificaron sus 5,594 líneas, el SHA-256 suministrado, su compilación y sus
+  importaciones antes de continuar con correcciones pequeñas;
 - 48 archivos Python analizados sin errores de sintaxis;
-- 20 pruebas locales de lógica y controles estáticos aprobadas;
+- 33 pruebas locales de lógica, seguridad y controles estáticos aprobadas;
 - 4 pruebas RLS omitidas de forma explícita porque requieren dos cuentas y
   tokens reales de un proyecto staging;
-- los 39 módulos de la aplicación cargan correctamente fuera de Streamlit;
+- dependencias instaladas desde cero con Python 3.12 sin conflictos;
+- `pip-audit` sin vulnerabilidades conocidas en dependencias de ejecución ni de
+  desarrollo;
+- `ruff check` aprobado y Bandit sin hallazgos de severidad media o alta;
+- escaneo de secretos sin candidatos en los archivos publicables;
+- los cinco bloques de `SQL_APLICAR_EN_SUPABASE.md` coinciden exactamente con
+  sus fuentes y pasan el parser PostgreSQL;
+- `app.py` ejecutado mediante AppTest sin excepciones y servidor Streamlit con
+  endpoint de salud correcto;
 - pruebas RLS preparadas en modo solo lectura;
 - las pruebas RLS se omiten si no existen credenciales staging, para no fabricar
   resultados;
-- no se copiaron respaldos, secretos, entornos virtuales ni historial Git;
-- el sistema original del Escritorio no fue modificado.
+- no se modificó Supabase, no se publicó, no se hizo commit ni push.
 
 ## Controles implementados
 
-1. Supabase Auth como única entrada.
-2. MFA AAL2 para administradores.
+1. Supabase Auth como única entrada y revalidación obligatoria con
+   `api_my_session` en cada ejecución de Streamlit.
+2. MFA nativo AAL2 para administradores, superadministradores y permisos de alto
+   riesgo, aplicado también en las funciones SQL canónicas de autorización.
 3. Eliminación de claves maestras y acceso alternativo.
 4. Cliente Supabase aislado por sesión.
 5. RLS canónico basado en `auth.uid()` y membresías activas.
@@ -45,7 +57,9 @@ obligatorias.
 14. Anulación sin borrado, con restauración de inventario y reverso contable.
 15. Abonos FIFO con bloqueo y límite de saldo.
 16. Apertura y cierre de caja transaccionales.
-17. Compras de producto con lote, stock y asiento en una transacción.
+17. Factura de compra completa con idempotencia: cabecera, todas las líneas,
+    compras históricas, stock, lotes, cuentas por pagar, asiento y auditoría en
+    una sola transacción con rollback total.
 18. Períodos cerrados protegidos por trigger.
 19. Cierre permitido solo con libro balanceado e inventario no negativo.
 20. Nómina basada en salario mensual y parámetros versionados.
@@ -61,6 +75,12 @@ obligatorias.
 29. Permisos de lectura por módulo aplicados también en RLS, no solo en el menú.
 30. Protección concurrente para conservar al menos una administración activa
     por empresa.
+31. Selector multiempresa construido solo con tenants devueltos por
+    `api_my_session`; el cliente sobrescribe cualquier `tenant_id` manipulable.
+32. Escape de datos dinámicos en HTML, recibos y cuadre de caja.
+33. Excepciones completas limitadas al registro interno; la interfaz muestra
+    mensajes controlados.
+34. Dependencias vulnerables actualizadas y verificadas en un entorno limpio.
 
 ## Funciones desactivadas deliberadamente
 
@@ -76,7 +96,8 @@ pruebas de concurrencia, auditoría y autorización explícita.
 
 ## Pendientes para aprobación real
 
-1. Ejecutar las tres migraciones en staging.
+1. Ejecutar en staging los bloques 0 a 4 de
+   `SQL_APLICAR_EN_SUPABASE.md`, en orden, y no usar el SQL obsoleto.
 2. Resolver filas históricas sin `empresa_id`.
 3. Ejecutar el chequeo posterior sin errores.
 4. Desplegar y probar las Edge Functions.

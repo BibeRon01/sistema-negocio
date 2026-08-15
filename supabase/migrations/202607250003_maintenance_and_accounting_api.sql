@@ -211,6 +211,240 @@ $$;
 revoke all on function public.api_reemplazar_cuenta_abierta(text,jsonb) from public, anon;
 grant execute on function public.api_reemplazar_cuenta_abierta(text,jsonb) to authenticated;
 
+-- Factura de compra completa: cabecera, líneas, compras históricas, stock,
+-- lotes FIFO, contabilidad y auditoría se confirman o revierten juntas.
+create or replace function public.api_registrar_factura_compra(p jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_tenant text := nullif(trim(p->>'tenant_id'),'');
+    v_idempotency_key uuid;
+    v_request_hash text;
+    v_existing public.facturas_compra%rowtype;
+    v_factura_id uuid;
+    v_compra_id uuid;
+    v_usuario text;
+    v_fecha timestamptz := coalesce(nullif(p->>'fecha','')::timestamptz,now());
+    v_numero text := trim(coalesce(p->>'numero',''));
+    v_referencia text := trim(coalesce(p->>'referencia',''));
+    v_proveedor text := trim(coalesce(p->>'proveedor',''));
+    v_descripcion text := trim(coalesce(p->>'descripcion',''));
+    v_metodo text := lower(trim(coalesce(p->>'metodo','efectivo')));
+    v_items jsonb := coalesce(p->'items','[]'::jsonb);
+    v_item jsonb;
+    v_producto public.productos%rowtype;
+    v_producto_id uuid;
+    v_cantidad numeric(18,4);
+    v_costo numeric(18,4);
+    v_total_linea numeric(18,2);
+    v_total numeric(18,2) := 0;
+    v_stock numeric(18,4);
+    v_costo_anterior numeric(18,4);
+    v_costo_promedio numeric(18,4);
+    v_productos_validos integer;
+    v_item_count integer;
+begin
+    if v_uid is null then raise exception 'AUTH_REQUIRED'; end if;
+    if v_tenant is null then raise exception 'TENANT_REQUIRED'; end if;
+    if not public.has_tenant_permission(v_tenant,'puede_registrar_compras') then
+        raise exception 'PURCHASE_PERMISSION_DENIED';
+    end if;
+
+    begin
+        v_idempotency_key := nullif(p->>'idempotency_key','')::uuid;
+    exception when others then
+        raise exception 'INVALID_IDEMPOTENCY_KEY';
+    end;
+    if v_idempotency_key is null then raise exception 'IDEMPOTENCY_KEY_REQUIRED'; end if;
+    if jsonb_typeof(v_items) <> 'array' then raise exception 'INVALID_PURCHASE_ITEMS'; end if;
+    v_item_count := jsonb_array_length(v_items);
+    if v_item_count < 1 or v_item_count > 500 then raise exception 'INVALID_PURCHASE_ITEM_COUNT'; end if;
+    if v_numero = '' then raise exception 'PURCHASE_NUMBER_REQUIRED'; end if;
+    if v_proveedor = '' then raise exception 'PURCHASE_SUPPLIER_REQUIRED'; end if;
+    if v_metodo not in ('efectivo','transferencia','tarjeta','credito') then
+        raise exception 'INVALID_PURCHASE_METHOD';
+    end if;
+
+    v_request_hash := encode(
+        digest(convert_to((p - 'idempotency_key')::text,'UTF8'),'sha256'),
+        'hex'
+    );
+    perform pg_advisory_xact_lock(
+        hashtextextended(v_tenant || ':' || v_idempotency_key::text,0)
+    );
+
+    select * into v_existing
+    from public.facturas_compra fc
+    where fc.empresa_id=v_tenant and fc.idempotency_key=v_idempotency_key;
+    if found then
+        if v_existing.request_hash <> v_request_hash then
+            raise exception 'IDEMPOTENCY_PAYLOAD_MISMATCH';
+        end if;
+        return jsonb_build_object(
+            'success',true,'idempotent',true,'factura_id',v_existing.id,
+            'total',v_existing.total,'items',v_item_count
+        );
+    end if;
+
+    if exists (
+        select 1
+        from jsonb_array_elements(v_items) item
+        group by item->>'producto_id'
+        having count(*) > 1
+    ) then
+        raise exception 'DUPLICATE_PURCHASE_PRODUCT';
+    end if;
+
+    -- Validar tipos antes de bloquear; ningún cambio se realiza en esta fase.
+    for v_item in select value from jsonb_array_elements(v_items)
+    loop
+        begin
+            v_producto_id := nullif(v_item->>'producto_id','')::uuid;
+            v_cantidad := round(coalesce((v_item->>'cantidad')::numeric,0),4);
+            v_costo := round(coalesce((v_item->>'costo_unitario')::numeric,0),4);
+        exception when others then
+            raise exception 'INVALID_PURCHASE_ITEM';
+        end;
+        if v_producto_id is null then raise exception 'PURCHASE_PRODUCT_REQUIRED'; end if;
+        if v_cantidad <= 0 then raise exception 'INVALID_PURCHASE_QUANTITY'; end if;
+        if v_costo < 0 then raise exception 'INVALID_PURCHASE_COST'; end if;
+    end loop;
+
+    -- Orden estable de bloqueo para impedir interbloqueos entre facturas.
+    perform 1
+    from public.productos pr
+    where pr.empresa_id=v_tenant
+      and pr.id in (
+        select (item->>'producto_id')::uuid
+        from jsonb_array_elements(v_items) item
+    )
+    order by pr.id
+    for update;
+
+    select count(*) into v_productos_validos
+    from public.productos pr
+    where pr.empresa_id=v_tenant
+      and coalesce(pr.activo,true)
+      and not coalesce(pr.anulado,false)
+      and pr.id in (
+          select (item->>'producto_id')::uuid
+          from jsonb_array_elements(v_items) item
+      );
+    if v_productos_validos <> v_item_count then
+        raise exception 'PRODUCT_NOT_FOUND_OR_FORBIDDEN';
+    end if;
+
+    for v_item in select value from jsonb_array_elements(v_items)
+    loop
+        v_cantidad := round((v_item->>'cantidad')::numeric,4);
+        v_costo := round((v_item->>'costo_unitario')::numeric,4);
+        v_total := v_total + round(v_cantidad*v_costo,2);
+    end loop;
+    v_total := round(v_total,2);
+
+    select coalesce(u.nombre,u.usuario,v_uid::text) into v_usuario
+    from public.usuarios u where u.user_id=v_uid limit 1;
+
+    insert into public.facturas_compra(
+        empresa_id,idempotency_key,request_hash,fecha,numero,referencia,
+        proveedor,descripcion,metodo,total,monto_abonado,saldo_pendiente,
+        usuario,usuario_id
+    ) values (
+        v_tenant,v_idempotency_key,v_request_hash,v_fecha,left(v_numero,100),
+        left(v_referencia,200),left(v_proveedor,200),left(v_descripcion,2000),
+        v_metodo,v_total,case when v_metodo='credito' then 0 else v_total end,
+        case when v_metodo='credito' then v_total else 0 end,v_usuario,v_uid
+    ) returning id into v_factura_id;
+
+    for v_item in select value from jsonb_array_elements(v_items)
+    loop
+        v_producto_id := (v_item->>'producto_id')::uuid;
+        v_cantidad := round((v_item->>'cantidad')::numeric,4);
+        v_costo := round((v_item->>'costo_unitario')::numeric,4);
+        v_total_linea := round(v_cantidad*v_costo,2);
+        select * into strict v_producto
+        from public.productos pr where pr.id=v_producto_id and pr.empresa_id=v_tenant;
+
+        v_stock := coalesce(v_producto.stock,v_producto.existencia,v_producto.cantidad,0);
+        v_costo_anterior := coalesce(v_producto.costo_unitario,v_producto.costo,0);
+        v_costo_promedio := case
+            when v_stock+v_cantidad>0 then round(
+                ((v_stock*v_costo_anterior)+(v_cantidad*v_costo))/(v_stock+v_cantidad),4
+            )
+            else v_costo
+        end;
+
+        insert into public.compras(
+            empresa_id,fecha,numero,proveedor,descripcion,monto,total,metodo,
+            producto_id,producto,cantidad,costo_unitario,costo,usuario,usuario_id,
+            anulado,monto_abonado,saldo_pendiente,factura_compra_id
+        ) values (
+            v_tenant,v_fecha,left(v_numero,100),left(v_proveedor,200),
+            left(coalesce(nullif(trim(v_item->>'descripcion'),''),nullif(v_descripcion,''),'Compra de '||v_producto.nombre),2000),
+            v_total_linea,v_total_linea,v_metodo,v_producto.id,v_producto.nombre,
+            v_cantidad,v_costo,v_costo,v_usuario,v_uid,false,
+            case when v_metodo='credito' then 0 else v_total_linea end,
+            case when v_metodo='credito' then v_total_linea else 0 end,v_factura_id
+        ) returning id into v_compra_id;
+
+        update public.productos
+        set stock=v_stock+v_cantidad,existencia=v_stock+v_cantidad,
+            cantidad=v_stock+v_cantidad,costo=v_costo_promedio,
+            costo_unitario=v_costo_promedio,updated_at=now()
+        where id=v_producto.id and empresa_id=v_tenant;
+
+        insert into public.inventario_lotes(
+            empresa_id,producto_id,producto,compra_id,cantidad_inicial,
+            cantidad_restante,costo_unitario,fecha_compra,activo
+        ) values (
+            v_tenant,v_producto.id,v_producto.nombre,v_compra_id,v_cantidad,
+            v_cantidad,v_costo,v_fecha,true
+        );
+
+        insert into public.detalle_factura_compra(
+            empresa_id,factura_id,compra_id,producto_id,producto,cantidad,
+            costo_unitario,total_linea
+        ) values (
+            v_tenant,v_factura_id,v_compra_id,v_producto.id,v_producto.nombre,
+            v_cantidad,v_costo,v_total_linea
+        );
+    end loop;
+
+    insert into public.movimientos_contables(
+        empresa_id,fecha,modulo,referencia_id,cuenta_codigo,cuenta_nombre,
+        tipo_cuenta,debito,credito,descripcion,usuario,usuario_id
+    ) values
+        (v_tenant,v_fecha,'compras',v_factura_id::text,'1301','Inventario',
+         'activo',v_total,0,'Factura de compra '||left(v_numero,100),v_usuario,v_uid),
+        (v_tenant,v_fecha,'compras',v_factura_id::text,
+         case when v_metodo='credito' then '2101' when v_metodo='efectivo' then '1101' else '1102' end,
+         case when v_metodo='credito' then 'Cuentas por Pagar' when v_metodo='efectivo' then 'Efectivo / Caja' else 'Banco / Depósito' end,
+         case when v_metodo='credito' then 'pasivo' else 'activo' end,
+         0,v_total,'Contrapartida factura de compra',v_usuario,v_uid);
+
+    insert into public.auditoria_eventos(
+        empresa_id,usuario_id,usuario,accion,modulo,tabla,registro_id,detalle,metadata
+    ) values (
+        v_tenant,v_uid::text,v_usuario,'factura_compra_registrada','Compras',
+        'facturas_compra',v_factura_id::text,
+        'Factura, inventario y contabilidad registrados atómicamente',
+        jsonb_build_object('numero',left(v_numero,100),'items',v_item_count,'total',v_total)
+    );
+
+    return jsonb_build_object(
+        'success',true,'idempotent',false,'factura_id',v_factura_id,
+        'total',v_total,'items',v_item_count
+    );
+end;
+$$;
+
+revoke all on function public.api_registrar_factura_compra(jsonb) from public, anon;
+grant execute on function public.api_registrar_factura_compra(jsonb) to authenticated;
+
 -- Entrada de mercancía: compra, stock, lote FIFO, saldo y asiento en una sola
 -- transacción. Los totales enviados por el cliente no se utilizan.
 create or replace function public.api_registrar_compra_producto(p jsonb)
@@ -221,7 +455,7 @@ set search_path = public, auth
 as $$
 declare
     v_uid uuid := auth.uid();
-    v_tenant text;
+    v_tenant text := nullif(trim(p->>'tenant_id'),'');
     v_usuario text;
     v_producto public.productos%rowtype;
     v_producto_id uuid := nullif(p->>'producto_id','')::uuid;
@@ -241,15 +475,20 @@ begin
     if v_metodo not in ('efectivo','transferencia','tarjeta','credito') then
         raise exception 'INVALID_PURCHASE_METHOD';
     end if;
-    select tm.tenant_id into v_tenant
-    from public.tenant_memberships tm
-    where tm.user_id=v_uid and tm.active
-      and (
-          tm.role='admin'
-          or coalesce(tm.permissions->'puede_registrar_compras','false'::jsonb)='true'::jsonb
-      )
-    order by tm.created_at limit 1;
-    if v_tenant is null then raise exception 'PURCHASE_PERMISSION_DENIED'; end if;
+    if v_tenant is null then
+        select tm.tenant_id into v_tenant
+        from public.tenant_memberships tm
+        where tm.user_id=v_uid and tm.active
+          and (
+              tm.role='admin'
+              or coalesce(tm.permissions->'puede_registrar_compras','false'::jsonb)='true'::jsonb
+          )
+        order by tm.created_at limit 1;
+    end if;
+    if v_tenant is null
+       or not public.has_tenant_permission(v_tenant,'puede_registrar_compras') then
+        raise exception 'PURCHASE_PERMISSION_DENIED';
+    end if;
     select * into v_producto
     from public.productos pr
     where pr.id=v_producto_id and pr.empresa_id=v_tenant

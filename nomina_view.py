@@ -427,7 +427,7 @@ def render_nomina():
                         )
                         st.rerun()
                     except Exception as exc:
-                        st.error(f"No se pudo registrar la nómina: {exc}")
+                        mostrar_error_seguro("No se pudo registrar la nómina.", exc)
                     return
 
                     # C-06: Control de límites salariales en nómina
@@ -482,7 +482,7 @@ def render_nomina():
                             st.success(f"✅ Nómina registrada. Neto pagado: **RD$ {d['neto_pagar']:,.2f}**")
                             st.rerun()
                     except Exception as e:
-                        st.error(f"Error registrando nómina: {e}")
+                        mostrar_error_seguro("No se pudo registrar la nómina.", e)
 
             with col_btn2:
                 html_comp = generar_comprobante_nomina_html(

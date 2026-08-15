@@ -226,7 +226,8 @@ declare
     v_table text;
 begin
     foreach v_table in array array[
-        'productos','clientes','proveedores','compras','gastos','empleados',
+        'productos','clientes','proveedores','compras','facturas_compra',
+        'detalle_factura_compra','gastos','empleados',
         'pagos_empleados','perdidas','gastos_dueno','activos_fijos','capital_base',
         'ajustes_inventario','conteo_inventario','inventario_actual','inventario_lotes','sucursales',
         'configuracion_sistema','ventas','detalle_venta','ventas_pagos',
@@ -405,6 +406,48 @@ alter table if exists public.compras add column if not exists usuario_id uuid;
 alter table if exists public.compras add column if not exists anulado boolean not null default false;
 alter table if exists public.compras add column if not exists monto_abonado numeric(18,2) not null default 0;
 alter table if exists public.compras add column if not exists saldo_pendiente numeric(18,2) not null default 0;
+alter table if exists public.compras add column if not exists factura_compra_id uuid;
+
+-- Cabecera y detalle canónicos de una factura de compra. La tabla histórica
+-- compras continúa recibiendo una fila por producto para conservar reportes.
+create table if not exists public.facturas_compra (
+    id uuid primary key default gen_random_uuid(),
+    empresa_id text not null,
+    idempotency_key uuid not null,
+    request_hash text not null,
+    fecha timestamptz not null default now(),
+    numero text not null,
+    referencia text,
+    proveedor text not null,
+    descripcion text,
+    metodo text not null,
+    total numeric(18,2) not null check (total >= 0),
+    monto_abonado numeric(18,2) not null default 0,
+    saldo_pendiente numeric(18,2) not null default 0,
+    usuario text,
+    usuario_id uuid not null,
+    created_at timestamptz not null default now(),
+    unique (empresa_id, idempotency_key)
+);
+
+create table if not exists public.detalle_factura_compra (
+    id uuid primary key default gen_random_uuid(),
+    empresa_id text not null,
+    factura_id uuid not null references public.facturas_compra(id),
+    compra_id uuid,
+    producto_id uuid not null,
+    producto text not null,
+    cantidad numeric(18,4) not null check (cantidad > 0),
+    costo_unitario numeric(18,4) not null check (costo_unitario >= 0),
+    total_linea numeric(18,2) not null check (total_linea >= 0),
+    created_at timestamptz not null default now(),
+    unique (factura_id, producto_id)
+);
+
+create index if not exists idx_facturas_compra_empresa_fecha
+    on public.facturas_compra(empresa_id, fecha desc);
+create index if not exists idx_detalle_factura_compra_factura
+    on public.detalle_factura_compra(factura_id);
 
 create table if not exists public.movimientos_contables (
     id uuid primary key default gen_random_uuid(),
@@ -673,7 +716,10 @@ security definer
 set search_path = public, auth
 as $$
     select auth.uid() is not null and (
-        public.is_platform_superadmin()
+        (
+            public.is_platform_superadmin()
+            and coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2'
+        )
         or exists (
             select 1
             from public.tenant_memberships tm
@@ -681,6 +727,10 @@ as $$
             where tm.user_id = auth.uid()
               and tm.tenant_id = p_tenant
               and tm.active
+              and (
+                  tm.role <> 'admin'
+                  or coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2'
+              )
         )
     )
 $$;
@@ -693,7 +743,10 @@ security definer
 set search_path = public, auth
 as $$
     select auth.uid() is not null and (
-        public.is_platform_superadmin()
+        (
+            public.is_platform_superadmin()
+            and coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2'
+        )
         or exists (
             select 1
             from public.tenant_memberships tm
@@ -704,6 +757,17 @@ as $$
               and (
                   tm.role = 'admin'
                   or coalesce(tm.permissions -> p_permission, 'false'::jsonb) = 'true'::jsonb
+              )
+              and (
+                  (
+                      tm.role <> 'admin'
+                      and p_permission not in (
+                          'puede_configurar','puede_editar_todo',
+                          'puede_editar_ventas','puede_anular',
+                          'puede_cerrar_periodo'
+                      )
+                  )
+                  or coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2'
               )
         )
     )
@@ -767,6 +831,7 @@ begin
 
     select coalesce(jsonb_agg(jsonb_build_object(
         'tenant_id', tm.tenant_id,
+        'nombre', e.nombre,
         'role', tm.role,
         'permissions', tm.permissions
     ) order by tm.tenant_id), '[]'::jsonb)
@@ -786,6 +851,7 @@ begin
         v_role := 'superadmin';
         select coalesce(jsonb_agg(jsonb_build_object(
             'tenant_id', e.tenant_id,
+            'nombre', e.nombre,
             'role', 'superadmin',
             'permissions', '{}'::jsonb
         ) order by e.tenant_id), '[]'::jsonb)
@@ -846,7 +912,8 @@ declare
     r record;
 begin
     foreach v_table in array array[
-        'productos','clientes','proveedores','compras','gastos','empleados',
+        'productos','clientes','proveedores','compras','facturas_compra',
+        'detalle_factura_compra','gastos','empleados',
         'pagos_empleados','perdidas','gastos_dueno','activos_fijos','capital_base',
         'ajustes_inventario','conteo_inventario','inventario_actual','inventario_lotes',
         'sucursales','configuracion_sistema','ventas','detalle_venta','ventas_pagos',
@@ -882,6 +949,8 @@ begin
             ('clientes','ver_clientes'),
             ('proveedores','puede_registrar_compras'),
             ('compras','puede_registrar_compras'),
+            ('facturas_compra','puede_registrar_compras'),
+            ('detalle_factura_compra','puede_registrar_compras'),
             ('gastos','puede_registrar_gastos'),
             ('empleados','puede_configurar'),
             ('pagos_empleados','puede_configurar'),
@@ -952,7 +1021,8 @@ declare
     v_table text;
 begin
     foreach v_table in array array[
-        'ventas','detalle_venta','ventas_pagos','compras','caja','movimientos_caja','cuentas_por_cobrar',
+        'ventas','detalle_venta','ventas_pagos','compras','facturas_compra',
+        'detalle_factura_compra','caja','movimientos_caja','cuentas_por_cobrar',
         'abonos_credito','inventario_consumos','movimientos_contables','cierre_caja',
         'periodos_contables','pagos_empleados'
     ]
@@ -998,6 +1068,12 @@ begin
                 'puede_ver_compras','puede_registrar_compras','puede_ver_reportes'
             ]::text[]),
             ('compras', array[
+                'puede_ver_compras','puede_registrar_compras','puede_ver_reportes'
+            ]::text[]),
+            ('facturas_compra', array[
+                'puede_ver_compras','puede_registrar_compras','puede_ver_reportes'
+            ]::text[]),
+            ('detalle_factura_compra', array[
                 'puede_ver_compras','puede_registrar_compras','puede_ver_reportes'
             ]::text[]),
             ('abonos_proveedores', array[
@@ -1512,7 +1588,8 @@ declare
     v_table text;
 begin
     foreach v_table in array array[
-        'ventas','detalle_venta','ventas_pagos','compras','gastos','movimientos_caja',
+        'ventas','detalle_venta','ventas_pagos','compras','facturas_compra',
+        'detalle_factura_compra','gastos','movimientos_caja',
         'movimientos_contables','pagos_empleados','abonos_credito','inventario_lotes'
     ]
     loop

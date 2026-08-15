@@ -169,7 +169,7 @@ def render_cxp():
                         st.success(f"✅ Pago de **RD$ {monto_pago:,.2f}** a **{prov_sel}** registrado correctamente.")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error al registrar pago: {e}")
+                        mostrar_error_seguro("No se pudo registrar el pago.", e)
 
     with tab_antiguedad:
         st.subheader("📊 Reporte de Antigüedad de Saldos (CxP)")

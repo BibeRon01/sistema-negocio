@@ -176,38 +176,38 @@ st.sidebar.markdown(f"""
 usuario_data_map = st.session_state.get("usuario_data", {})
 es_superadmin_usr = es_superadmin_plataforma()
 
+opciones_tenant = {}
 if es_superadmin_usr:
-    try:
-        cfgs = supabase.table("configuracion_sistema").select("propietario, negocio_nombre").execute().data or []
-    except Exception:
-        cfgs = []
-    
-    opciones = {"global": "👑 Super-Admin (Todas)"}
-    for c in cfgs:
-        prop = c.get("propietario")
-        nombre = c.get("negocio_nombre")
-        if prop and prop != "global":
-            opciones[prop] = f"🏢 {nombre or prop.upper()}"
-            
-    sel_idx = 0
-    keys_list = list(opciones.keys())
-    current_sel = st.session_state.get("superadmin_tenant_seleccionado", "global")
-    if current_sel in keys_list:
-        sel_idx = keys_list.index(current_sel)
-        
+    opciones_tenant["global"] = "👑 Super-Admin (Todas)"
+for tenant_info in usuario_data_map.get("tenants") or []:
+    if not isinstance(tenant_info, dict):
+        continue
+    tenant_id = str(tenant_info.get("tenant_id") or "").strip()
+    if not tenant_id:
+        continue
+    tenant_nombre = str(tenant_info.get("nombre") or tenant_id).strip()
+    opciones_tenant[tenant_id] = f"🏢 {tenant_nombre}"
+
+tenant_actual = obtener_tenant_actual()
+if len(opciones_tenant) > 1:
+    tenant_ids = list(opciones_tenant)
+    tenant_index = tenant_ids.index(tenant_actual) if tenant_actual in tenant_ids else 0
     empresa_seleccionada = st.sidebar.selectbox(
         "🏢 Empresa Activa",
-        options=keys_list,
-        format_func=lambda x: opciones[x],
-        index=sel_idx,
-        key="superadmin_tenant_selectbox"
+        options=tenant_ids,
+        format_func=lambda tenant: opciones_tenant[tenant],
+        index=tenant_index,
+        key="tenant_selectbox_autorizado",
     )
-    
-    if empresa_seleccionada != current_sel:
-        st.session_state["superadmin_tenant_seleccionado"] = empresa_seleccionada
-        st.session_state.pop("session_cache_tablas", None)
-        limpiar_cache_datos()
-        st.rerun()
+    if empresa_seleccionada != tenant_actual:
+        try:
+            cambiar_tenant_autorizado(empresa_seleccionada)
+            st.rerun()
+        except Exception as exc:
+            LOGGER.warning("Cambio de empresa rechazado: %s", type(exc).__name__)
+            limpiar_estado_sesion(cerrar_auth=True)
+            st.error("No se pudo autorizar la empresa seleccionada. Inicie sesión nuevamente.")
+            st.stop()
 else:
     _badge_color = "#13783b"
     _badge_label = _texto_html_seguro(f"🏢 {(_tenant_actual or 'N/A').upper()}")

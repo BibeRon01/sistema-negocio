@@ -949,14 +949,16 @@ def render_informes():
                 status = "🟡 Sin cambios"
                 badge_class = ""
                 color_eval = "#a0a0a0"
+            name_html = html_escape(name)
+            status_html = html_escape(status)
                 
             html_rows += f"""
 <tr>
-    <td style='padding:12px; border-bottom:1px solid rgba(255,255,255,0.08); font-weight:600;'>{name}</td>
+    <td style='padding:12px; border-bottom:1px solid rgba(255,255,255,0.08); font-weight:600;'>{name_html}</td>
     <td style='padding:12px; border-bottom:1px solid rgba(255,255,255,0.08);'>{act_str}</td>
     <td style='padding:12px; border-bottom:1px solid rgba(255,255,255,0.08); color:#a0a0a0;'>{ant_str}</td>
     <td style='padding:12px; border-bottom:1px solid rgba(255,255,255,0.08); font-weight:600; color:{color_eval};'>{diff_str} ({pct_str})</td>
-    <td style='padding:12px; border-bottom:1px solid rgba(255,255,255,0.08);'><span class='{badge_class}'>{status}</span></td>
+    <td style='padding:12px; border-bottom:1px solid rgba(255,255,255,0.08);'><span class='{badge_class}'>{status_html}</span></td>
 </tr>
 """
             
@@ -1711,7 +1713,7 @@ def render_libro_mayor():
             .execute()
         movimientos_raw = resp.data or []
     except Exception as e:
-        st.error(f"Error al cargar movimientos contables: {e}")
+        mostrar_error_seguro("No se pudieron cargar los movimientos contables.", e)
         movimientos_raw = []
 
     if not movimientos_raw:

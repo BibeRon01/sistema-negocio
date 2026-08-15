@@ -7,6 +7,7 @@ import streamlit as st
 
 from auth import es_admin
 from db import obtener_tenant_actual, supabase
+from utils import mostrar_error_seguro
 
 
 def _leer(tabla: str, limite: int = 1000) -> pd.DataFrame:
@@ -34,7 +35,7 @@ def render_auditoria_pro():
     try:
         eventos = _leer("auditoria_eventos")
     except Exception as exc:
-        st.error(f"No se pudieron cargar los eventos: {exc}")
+        mostrar_error_seguro("No se pudieron cargar los eventos de auditoría.", exc)
         eventos = pd.DataFrame()
 
     try:

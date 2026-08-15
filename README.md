@@ -4,20 +4,26 @@ Esta carpeta es la reconstrucción del sistema existente. Conserva su interfaz y
 sus módulos principales, pero mueve las operaciones críticas a una API
 transaccional dentro de PostgreSQL/Supabase.
 
-> Estado: candidato para **staging**. No debe conectarse primero a producción.
-> La aprobación final requiere ejecutar las migraciones, las pruebas RLS con dos
-> empresas y un simulacro de respaldo/restauración en un proyecto staging.
+> Estado: código preparado para publicación controlada en **staging**. No debe
+> conectarse primero a producción. La aprobación final requiere aplicar el SQL,
+> ejecutar las pruebas RLS con dos empresas y completar un simulacro de
+> respaldo/restauración en un proyecto staging.
 
 ## Cambios principales
 
 - acceso únicamente con Supabase Auth;
-- MFA obligatorio para administradores y cualquier cuenta con permisos de alto
-  riesgo;
+- validación obligatoria de cada sesión mediante Supabase Auth y
+  `api_my_session`, cerrándola ante cualquier error;
+- MFA nativo de Supabase con nivel `aal2` obligatorio para administradores,
+  superadministradores y cuentas con permisos de alto riesgo;
 - cliente Supabase aislado por sesión de Streamlit;
 - separación por empresa y permisos de lectura por módulo mediante RLS;
 - service-role únicamente en Edge Functions y scripts locales;
 - ventas, cuentas abiertas, anulaciones, abonos, caja, compras y nómina mediante
   funciones transaccionales;
+- factura de compra completa atómica e idempotente: cabecera, productos, lotes,
+  stock, cuentas por pagar, contabilidad y auditoría se confirman o revierten
+  juntos;
 - inventario FIFO y asientos contables creados por el servidor;
 - facturas completadas y registros de auditoría no se eliminan;
 - módulo DGII/e-CF exclusivamente educativo;
@@ -39,15 +45,25 @@ Para publicar la aplicación en Streamlit Community Cloud, siga
 `SUBIR_A_STREAMLIT.md` y suba siempre el proyecto completo, no solamente
 `app.py`.
 
-## Migraciones
+Para desarrollo y auditoría instale también `requirements-dev.txt` y ejecute
+`pytest -q`.
 
-La única fuente autorizada es `supabase/migrations/`. Deben ejecutarse en orden:
+## SQL de Supabase
 
-1. `202607250001_secure_foundation.sql`
-2. `202607250002_transactional_api.sql`
-3. `202607250003_maintenance_and_accounting_api.sql`
+Use únicamente `SQL_APLICAR_EN_SUPABASE.md`. Contiene estos bloques, que deben
+ejecutarse completos y por separado en el orden indicado:
 
-Consulte `GUIA_PUBLICACION.md` antes de aplicarlas.
+0. preflight de solo lectura;
+1. base segura, Supabase Auth, tenants, RLS y tablas;
+2. API transaccional de ventas, caja, créditos e inventario;
+3. mantenimiento, contabilidad, nómina y factura de compra atómica;
+4. verificación posterior de solo lectura.
+
+`SQL_PARA_PEGAR.md` es histórico y está obsoleto: no lo ejecute. Los archivos de
+`supabase/migrations/` y `supabase/checks/` se conservan como fuentes trazables
+del archivo consolidado, no como una segunda guía de ejecución.
+
+Consulte `GUIA_PUBLICACION.md` antes de aplicar cualquier bloque.
 Los parámetros 2026 y el alcance educativo DGII se documentan en
 `REFERENCIAS_OFICIALES.md`.
 

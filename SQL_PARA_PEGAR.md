@@ -1,3 +1,8 @@
+> **OBSOLETO — NO EJECUTAR.** Este archivo corresponde al esquema heredado y
+> se conserva únicamente como referencia histórica. Para una instalación o
+> actualización segura use exclusivamente `SQL_APLICAR_EN_SUPABASE.md`, revise
+> el resultado del preflight y ejecute sus bloques en el orden numerado.
+
 -- ============================================================================
 -- AIS / A&M v3.0 — SCRIPT SQL COMPLETO, SEGURO Y NO DESTRUCTIVO (100% PRODUCCIÓN)
 -- Corregido según 2da Auditoría: Cero CASCADE destructivo, search_path seguro,
