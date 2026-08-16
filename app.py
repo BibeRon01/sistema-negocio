@@ -115,6 +115,7 @@ try:
     from sucursales_view import *
     from facturacion_electronica_view import *
     from cxp_view import *
+    from migracion_biberon_view import *
 except Exception:
     from modules.pos_view import *
     from modules.inventario_view import *
@@ -130,6 +131,7 @@ except Exception:
     from modules.sucursales_view import *
     from modules.facturacion_electronica_view import *
     from modules.cxp_view import *
+    from modules.migracion_biberon_view import *
 
 # 1. Login simple y autenticación
 if not login_simple():
@@ -261,6 +263,9 @@ menu_base = [
     "🔮 Predicciones IA",
 ]
 
+if es_admin() and _tenant_actual == "biberon01":
+    menu_base.append("Migración Bibe Ron")
+
 if es_superadmin_plataforma():
     menu_base.append("🏢 Gestión de Empresas")
 
@@ -320,7 +325,7 @@ CATEGORIAS = {
     "📦 Inventario y Pérdidas": ["Productos", "Inventario Actual", "Historial de Inventario", "Conteo Inventario", "Ajustes Inventario", "Pérdidas"],
     "💼 Ventas y Compras": ["Ventas", "Clientes", "Créditos", "Compras", "Proveedores", "Cuentas por Pagar (CxP)"],
     "🏛️ Finanzas y Educación DGII": ["Estado de Resultados", "Libro Mayor", "Cierre de Período", "Informes", "Capital Base", "Activos Fijos", "Distribución Beneficios", "Academia DGII"],
-    "⚙️ Administración y Nómina": ["Configuración", "Usuarios", "Sucursales", "Empleados", "Nómina", "Pagos Empleados", "Catálogo de Gastos", "Gastos", "Gastos Dueño", "Auditoría PRO", "🔮 Predicciones IA", "Mejoras del sistema", "🏢 Gestión de Empresas", "🔒 Mi Perfil"]
+    "⚙️ Administración y Nómina": ["Configuración", "Usuarios", "Sucursales", "Empleados", "Nómina", "Pagos Empleados", "Catálogo de Gastos", "Gastos", "Gastos Dueño", "Auditoría PRO", "🔮 Predicciones IA", "Mejoras del sistema", "Migración Bibe Ron", "🏢 Gestión de Empresas", "🔒 Mi Perfil"]
 }
 
 categorias_usuario = {}
@@ -509,3 +514,5 @@ elif menu == "Facturación Electrónica e-CF":
     render_facturacion_electronica()
 elif menu == "Cuentas por Pagar (CxP)":
     render_cxp()
+elif menu == "Migración Bibe Ron":
+    render_migracion_biberon()

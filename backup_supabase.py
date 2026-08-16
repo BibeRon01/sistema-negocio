@@ -20,7 +20,8 @@ TABLES = [
     "empresas", "tenant_memberships", "usuarios", "configuracion_sistema",
     "sucursales", "productos", "inventario_lotes", "inventario_consumos",
     "inventario_actual", "movimientos", "ajustes_inventario", "conteo_inventario",
-    "clientes", "proveedores", "compras", "gastos", "ventas", "detalle_venta",
+    "clientes", "proveedores", "compras", "facturas_compra",
+    "detalle_factura_compra", "gastos", "ventas", "detalle_venta",
     "ventas_pagos", "caja", "cierre_caja", "movimientos_caja",
     "cuentas_por_cobrar", "abonos_credito", "pagos_proveedores",
     "abonos_proveedores", "empleados", "pagos_empleados", "adelantos_empleados",
@@ -87,8 +88,8 @@ def main() -> None:
                 "file": file_name,
                 "sha256": hashlib.sha256(ciphertext).hexdigest(),
             }
-        except Exception as exc:
-            manifest["errors"][table] = str(exc)
+        except Exception:
+            manifest["errors"][table] = "No se pudo exportar esta tabla."
 
     if manifest["errors"]:
         raise SystemExit(

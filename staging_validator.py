@@ -38,8 +38,8 @@ def main() -> None:
         try:
             response = client.table(table).select("*", count="exact").limit(1).execute()
             print(f"{table}: {response.count or 0}")
-        except Exception as exc:
-            print(f"{table}: ERROR {exc}")
+        except Exception:
+            print(f"{table}: ERROR DE LECTURA (detalle omitido)")
 
 
 if __name__ == "__main__":

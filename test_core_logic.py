@@ -538,6 +538,44 @@ def test_cliente_de_ventas_no_reintenta_otra_rpc():
     assert "except" not in function
 
 
+def test_importador_historico_esta_bloqueado_a_biberon_y_mfa():
+    sql = (
+        ROOT / "supabase/migrations/202608150001_importacion_historica_biberon01.sql"
+    ).read_text(encoding="utf-8")
+    view = (ROOT / "migracion_biberon_view.py").read_text(encoding="utf-8")
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert "auth.jwt() ->> 'aal'" in sql
+    assert "MFA_AAL2_REQUIRED" in sql
+    assert "tm.tenant_id='biberon01'" in sql
+    assert "BIBERON_TENANT_MISMATCH" in sql
+    assert "pg_advisory_xact_lock" in sql
+    assert "IMPORT_IDEMPOTENCY_MISMATCH" in sql
+    assert "MAX_ARCHIVO_BYTES" in view
+    assert "_expectativas_paquete" in view
+    assert "_resultado_correcto" in view
+    assert '_tenant_actual == "biberon01"' in app
+
+
+def test_importador_historico_no_mueve_caja_ni_stock_por_ventas():
+    sql = (
+        ROOT / "supabase/migrations/202608150001_importacion_historica_biberon01.sql"
+    ).read_text(encoding="utf-8")
+    sales_branch = sql[
+        sql.index("elsif v_entity='ventas'"):
+        sql.index("elsif v_entity='ventas_pagos'")
+    ]
+    losses_branch = sql[
+        sql.index("elsif v_entity='perdidas'"):
+        sql.index("elsif v_entity='ventas_producto_historico'")
+    ]
+    assert "movimientos_caja" not in sales_branch
+    assert "detalle_venta" not in sales_branch
+    assert "update public.productos" not in sales_branch
+    assert "update public.productos" not in losses_branch
+    assert "factura_historica_cff" in sql
+    assert "CFF-[0-9]+" in sql
+
+
 def test_cache_de_datos_usa_el_tenant_seleccionado():
     for name in ("db.py", "helpers.py"):
         code = (ROOT / name).read_text(encoding="utf-8")

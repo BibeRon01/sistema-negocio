@@ -29,6 +29,13 @@ _API_ERROR_MESSAGES = {
     "DUPLICATE_PURCHASE_PRODUCT": "Cada producto debe aparecer una sola vez en la factura.",
     "IDEMPOTENCY_PAYLOAD_MISMATCH": "La factura cambió después de un intento previo; recargue el formulario.",
     "PERIODO_CERRADO": "No se permiten movimientos en un período contable cerrado.",
+    "BIBERON_IMPORT_FORBIDDEN": "La cuenta no puede importar datos de BIBE RON 01.",
+    "BIBERON_TENANT_MISMATCH": "El paquete no pertenece a la empresa activa.",
+    "BIBERON_TARGET_NOT_EMPTY": "La empresa ya contiene movimientos que deben revisarse antes de importar.",
+    "IMPORT_IDEMPOTENCY_MISMATCH": "Una fila ya importada cambió; use el paquete original.",
+    "DUPLICATE_HISTORICAL_INVOICE": "El número de una factura histórica ya existe.",
+    "HISTORICAL_SALE_NOT_FOUND": "No se encontró la venta histórica relacionada.",
+    "HISTORICAL_EMPLOYEE_NOT_FOUND": "No se encontró el empleado histórico relacionado.",
 }
 
 
@@ -71,6 +78,21 @@ def _rpc(name: str, **params) -> dict:
     if data.get("success") is False:
         raise ApiError(_mensaje_api_seguro(data.get("error"), "La operación fue rechazada."))
     return data
+
+
+def prevalidar_migracion_biberon() -> dict:
+    return _rpc("api_prevalidar_migracion_biberon")
+
+
+def importar_historial_biberon(payload: dict) -> dict:
+    return _rpc("api_importar_historial_biberon", p=payload)
+
+
+def validar_importacion_biberon(package_id: str) -> dict:
+    return _rpc(
+        "api_validar_importacion_biberon",
+        p_package_id=str(package_id),
+    )
 
 
 def registrar_venta(payload: dict) -> dict:
