@@ -14,6 +14,7 @@ import requests
 import streamlit as st
 
 from db import SUPABASE_KEY, SUPABASE_URL, obtener_tenant_actual, supabase
+from utils import normalizar_usuario_acceso
 
 
 LOGGER = logging.getLogger("ais")
@@ -36,6 +37,9 @@ _API_ERROR_MESSAGES = {
     "DUPLICATE_HISTORICAL_INVOICE": "El número de una factura histórica ya existe.",
     "HISTORICAL_SALE_NOT_FOUND": "No se encontró la venta histórica relacionada.",
     "HISTORICAL_EMPLOYEE_NOT_FOUND": "No se encontró el empleado histórico relacionado.",
+    "INVALID_USERNAME": "Use un usuario de 3 a 32 caracteres: letras minúsculas, números, punto, guion o guion bajo.",
+    "USERNAME_ALREADY_EXISTS": "Ese usuario ya existe dentro de la empresa.",
+    "TECHNICAL_IDENTITY_CONFLICT": "No se pudo reservar la identidad de acceso. Elija otro usuario.",
 }
 
 
@@ -197,7 +201,7 @@ def registrar_nomina(
 
 def invitar_usuario_seguro(
     *,
-    email: str,
+    usuario: str,
     password: str,
     nombre: str,
     rol: str,
@@ -207,8 +211,10 @@ def invitar_usuario_seguro(
     access_token = str(st.session_state.get("access_token") or "")
     if not access_token:
         raise ApiError("La sesión administrativa expiró.")
-    if "@" not in str(email):
-        raise ApiError("El acceso del usuario debe ser un correo electrónico completo.")
+    try:
+        username = normalizar_usuario_acceso(usuario)
+    except ValueError as exc:
+        raise ApiError(_API_ERROR_MESSAGES["INVALID_USERNAME"]) from exc
     if len(str(password)) < 12:
         raise ApiError("La contraseña inicial debe tener al menos 12 caracteres.")
 
@@ -222,7 +228,7 @@ def invitar_usuario_seguro(
                 "Content-Type": "application/json",
             },
             json={
-                "email": str(email).strip().lower(),
+                "username": username,
                 "password": str(password),
                 "nombre": str(nombre).strip(),
                 "rol": str(rol).strip().lower(),
@@ -248,6 +254,7 @@ def gestionar_usuario_seguro(
     *,
     profile_id: Any,
     tenant_id: str,
+    usuario: str,
     nombre: str,
     rol: str,
     activo: bool,
@@ -257,6 +264,10 @@ def gestionar_usuario_seguro(
     access_token = str(st.session_state.get("access_token") or "")
     if not access_token:
         raise ApiError("La sesión administrativa expiró.")
+    try:
+        username = normalizar_usuario_acceso(usuario)
+    except ValueError as exc:
+        raise ApiError(_API_ERROR_MESSAGES["INVALID_USERNAME"]) from exc
     if nueva_password and len(nueva_password) < 12:
         raise ApiError("La nueva contraseña debe tener al menos 12 caracteres.")
 
@@ -272,6 +283,7 @@ def gestionar_usuario_seguro(
             json={
                 "profile_id": str(profile_id),
                 "tenant_id": str(tenant_id),
+                "username": username,
                 "nombre": str(nombre).strip(),
                 "rol": str(rol).strip().lower(),
                 "activo": bool(activo),

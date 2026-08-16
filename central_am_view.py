@@ -119,7 +119,11 @@ def render_gestion_empresas():
                     "Empresa",
                     empresas[empresas["activo"].fillna(False)]["tenant_id"].astype(str).tolist(),
                 )
-                email = st.text_input("Correo de acceso", placeholder="admin@empresa.com")
+                username = st.text_input(
+                    "Usuario de acceso",
+                    placeholder="propietario",
+                    help="El propietario entrará con empresa, usuario y contraseña; no necesita correo.",
+                )
                 nombre = st.text_input("Nombre completo")
                 password = st.text_input(
                     "Contraseña inicial",
@@ -144,7 +148,7 @@ def render_gestion_empresas():
                     }
                     try:
                         invitar_usuario_seguro(
-                            email=email,
+                            usuario=username,
                             password=password,
                             nombre=nombre,
                             rol=rol,
@@ -152,8 +156,8 @@ def render_gestion_empresas():
                             permisos=permisos,
                         )
                         st.success(
-                            "Usuario creado. Entregue la contraseña por un canal seguro "
-                            "y solicite cambiarla."
+                            "Usuario creado. Entregue empresa, usuario y contraseña por "
+                            "un canal seguro. Los administradores configurarán MFA al entrar."
                         )
                     except ApiError as exc:
                         st.error(str(exc))

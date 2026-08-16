@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import html as _html_mod
 import logging
 import re
@@ -9,6 +10,39 @@ import pandas as pd
 import streamlit as st
 
 LOGGER = logging.getLogger("ais")
+
+_TENANT_ACCESO_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{2,49}$")
+_USUARIO_ACCESO_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,31}$")
+_DOMINIO_ACCESO_INTERNO = "access.ais.invalid"
+
+
+def normalizar_tenant_acceso(valor: Any) -> str:
+    """Normaliza y valida el identificador público de una empresa."""
+    tenant = str(valor or "").strip().lower()
+    if not _TENANT_ACCESO_RE.fullmatch(tenant) or tenant == "global":
+        raise ValueError("INVALID_TENANT_LOGIN")
+    return tenant
+
+
+def normalizar_usuario_acceso(valor: Any) -> str:
+    """Normaliza un usuario empresarial sin convertirlo en credencial local."""
+    usuario = str(valor or "").strip().lower()
+    if not _USUARIO_ACCESO_RE.fullmatch(usuario):
+        raise ValueError("INVALID_USERNAME")
+    return usuario
+
+
+def correo_tecnico_acceso(tenant_id: Any, usuario: Any) -> str:
+    """Deriva el identificador técnico usado exclusivamente por Supabase Auth.
+
+    La aplicación nunca valida contraseñas. El hash solo evita exponer empresa y
+    usuario dentro del correo técnico; Supabase Auth sigue siendo la única
+    autoridad que comprueba la contraseña y crea la sesión.
+    """
+    tenant = normalizar_tenant_acceso(tenant_id)
+    username = normalizar_usuario_acceso(usuario)
+    digest = hashlib.sha256(f"{tenant}\n{username}".encode("utf-8")).hexdigest()
+    return f"u{digest[:48]}@{_DOMINIO_ACCESO_INTERNO}"
 
 # =========================================================
 # S-03 · SANITIZACIÓN XSS — usar en todo HTML dinámico

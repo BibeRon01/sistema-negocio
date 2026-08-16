@@ -31,7 +31,8 @@ uno por uno y en este orden:
 1. Base segura, Supabase Auth, tenants, RLS y tablas canónicas.
 2. API transaccional de ventas, caja, créditos e inventario.
 3. Mantenimiento, contabilidad, nómina y factura de compra atómica.
-4. Verificación posterior de solo lectura.
+4. Usuario empresarial único por empresa.
+5. Verificación posterior de solo lectura.
 
 Los bloques 1, 2 y 3 usan transacciones. Si aparece un error, no continúe con el
 siguiente: conserve el mensaje en un canal privado y corrija primero la causa.
@@ -57,23 +58,31 @@ aprobación en GitHub. Configure, por separado en cada ambiente protegido:
 Supabase entrega a sus Edge Functions las variables internas de URL, anon key y
 service-role. La service-role no debe agregarse a Streamlit.
 
-## 5. Crear la primera propietaria
+## 5. Crear el superadministrador A&M y las cuentas empresariales
 
-Desde una computadora administrativa, nunca desde Streamlit:
+Desde una computadora administrativa, nunca desde Streamlit, cree solamente la
+cuenta de plataforma A&M con correo real:
 
 ```bash
 export SUPABASE_URL="https://PROYECTO-STAGING.supabase.co"
 export SUPABASE_SERVICE_KEY="PEGAR_SOLO_EN_LA_TERMINAL_LOCAL"  # pragma: allowlist secret
 python scripts/provision_owner.py \
-  --email "propietaria@empresa.com" \
-  --name "Nombre de la propietaria" \
-  --tenant "codigo_empresa"
+  --email "administrador@am.example" \
+  --name "Administrador A&M" \
+  --tenant "biberon01" \
+  --platform-superadmin
 ```
 
 El programa pedirá una contraseña de al menos 12 caracteres. En la primera
-entrada a AIS, las cuentas administrativas deberán registrar y verificar el MFA
-nativo de Supabase hasta alcanzar `aal2`. Use `--platform-superadmin` únicamente
-para la cuenta que administrará varias empresas.
+entrada deberá registrar y verificar el MFA nativo de Supabase hasta alcanzar
+`aal2`. Use `--platform-superadmin` únicamente para la cuenta A&M que administra
+la plataforma.
+
+Después, desde **Gestión de Empresas**, cree cada empresa y su primer usuario
+administrador. Las cuentas empresariales entran con `empresa + usuario +
+contraseña`; no necesitan correo personal. Cada administrador empresarial debe
+configurar MFA. Los cajeros y demás empleados se crean desde **Usuarios** dentro
+de su empresa.
 
 ## 6. Configurar Streamlit
 
@@ -89,7 +98,8 @@ Seleccione `app.py` como archivo principal.
 ## 7. Pruebas obligatorias en staging
 
 1. Cree Empresa A y Empresa B.
-2. Cree un usuario diferente en cada empresa.
+2. Cree un usuario diferente en cada empresa y confirme que ambos pueden usar
+   el mismo nombre de usuario sin compartir identidad ni datos.
 3. Configure MFA de administradores y superadministradores y confirme `aal2`.
 4. Configure productos, clientes, un empleado y su tasa ARL.
 5. Abra caja, venda, cobre a crédito, abone, anule y cierre caja.

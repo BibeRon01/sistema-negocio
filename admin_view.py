@@ -326,7 +326,12 @@ def render_usuarios():
         with tab_create:
             c1, c2 = st.columns(2)
             with c1:
-                n_usuario = st.text_input("Correo de acceso", placeholder="empleado@empresa.com", key="new_usr_usuario")
+                n_usuario = st.text_input(
+                    "Usuario de acceso",
+                    placeholder="cajera01",
+                    help="Entrará con el ID de la empresa, este usuario y su contraseña.",
+                    key="new_usr_usuario",
+                )
                 n_nombre = st.text_input("Nombre Completo", key="new_usr_nombre")
                 n_clave = st.text_input("Contraseña / Clave", type="password", key="new_usr_clave")
                 n_rol = st.selectbox("Rol", ["admin", "gerente", "supervisor", "cajero", "cajera"], key="new_usr_rol")
@@ -342,11 +347,14 @@ def render_usuarios():
             })
                 
             if st.button("🚀 Crear Usuario", key="btn_crear_usuario_new", use_container_width=True):
-                user_clean = n_usuario.strip().lower()
+                try:
+                    user_clean = normalizar_usuario_acceso(n_usuario)
+                except ValueError:
+                    user_clean = ""
                 name_clean = n_nombre.strip()
                 pass_clean = n_clave.strip()
-                if "@" not in user_clean or not pass_clean or not name_clean:
-                    st.error("Complete nombre, correo electrónico y contraseña.")
+                if not user_clean or not pass_clean or not name_clean:
+                    st.error("Complete nombre, usuario válido y contraseña.")
                 else:
                     _tenant = obtener_tenant_actual()
                     # Validar límite de usuarios según el plan
@@ -363,7 +371,14 @@ def render_usuarios():
                     if usuarios_actuales >= limite_usrs:
                         st.error(f"⚠️ Has alcanzado el límite de usuarios para tu Plan {plan_info_usr['nombre']} (Máximo {limite_usrs} usuarios). Por favor, actualiza tu plan o contacta al administrador A&M.")
                     else:
-                        user_exist = supabase.table("usuarios").select("id").eq("usuario", user_clean).execute().data
+                        user_exist = (
+                            supabase.table("usuarios")
+                            .select("id")
+                            .eq("empresa_id", _tenant)
+                            .eq("usuario", user_clean)
+                            .execute()
+                            .data
+                        )
                         if user_exist:
                             st.error(f"⚠️ El nombre de usuario '{user_clean}' ya está registrado. Por favor, elige uno diferente.")
                         else:
@@ -376,7 +391,7 @@ def render_usuarios():
                             }
                             try:
                                 invitar_usuario_seguro(
-                                    email=user_clean,
+                                    usuario=user_clean,
                                     password=pass_clean,
                                     nombre=name_clean,
                                     rol=n_rol,
@@ -412,7 +427,12 @@ def render_usuarios():
                 
                 c1e, c2e = st.columns(2)
                 with c1e:
-                    edit_username = st.text_input("Usuario de acceso", value=usr_sel["usuario"], key="edit_usr_user", disabled=True)
+                    edit_username = st.text_input(
+                        "Usuario de acceso",
+                        value=usr_sel["usuario"],
+                        help="Al cambiarlo, el acceso anterior deja de funcionar.",
+                        key="edit_usr_user",
+                    )
                     edit_name = st.text_input("Nombre Completo", value=usr_sel["nombre"], key="edit_usr_name")
                     edit_pass = st.text_input("Contraseña / Clave", type="password", value="", placeholder="Dejar en blanco para no cambiar", key="edit_usr_clave")
                     roles_list = ["admin", "gerente", "supervisor", "cajero", "cajera"]
@@ -434,6 +454,7 @@ def render_usuarios():
                             gestionar_usuario_seguro(
                                 profile_id=usr_sel["id"],
                                 tenant_id=obtener_tenant_actual(),
+                                usuario=edit_username,
                                 nombre=edit_name.strip(),
                                 rol=edit_rol,
                                 activo=edit_activo,
@@ -454,6 +475,7 @@ def render_usuarios():
                                 gestionar_usuario_seguro(
                                     profile_id=usr_sel["id"],
                                     tenant_id=obtener_tenant_actual(),
+                                    usuario=str(usr_sel.get("usuario") or ""),
                                     nombre=str(usr_sel.get("nombre") or usr_sel.get("usuario")),
                                     rol=str(usr_sel.get("rol") or "consulta"),
                                     activo=False,
@@ -497,7 +519,7 @@ def render_configuracion():
                 recargo_tarjeta_pct = 0.0  # Siempre 0 — C-01
             if st.button("Guardar configuración", key="btn_guardar_cfg"):
                 actualizar("configuracion_sistema", cfg["id"], {"negocio_nombre": negocio_nombre, "nombre_sistema": nombre_sistema, "propietario": propietario, "slogan": slogan, "telefono": telefono, "rnc": rnc, "direccion": direccion, "recargo_tarjeta_pct": 0.0, "cierre_dia_operativo_hora": cierre_dia_operativo_hora, "precios_incluyen_itbis": precios_itbis})
-                _obtener_configuracion_interna.clear()
+                st.cache_data.clear()
                 st.success("✅ Configuración guardada correctamente.")
                 st.rerun()
             st.subheader("Logo")
@@ -554,6 +576,12 @@ def render_configuracion():
                 st.write(f"**Editar Permisos para {selected_user['nombre']}:**")
                 
                 col_e1, col_e2 = st.columns(2)
+                e_usuario = col_e1.text_input(
+                    "Usuario de acceso",
+                    value=str(selected_user.get("usuario") or ""),
+                    help="Al cambiarlo, el acceso anterior deja de funcionar.",
+                    key="edit_emp_usuario",
+                )
                 e_nombre = col_e1.text_input("Nombre Real", value=str(selected_user.get("nombre") or ""), key="edit_emp_nombre")
                 e_clave = col_e2.text_input("Cambiar Clave", type="password", value="", placeholder="Dejar en blanco para no cambiar", key="edit_emp_clave")
                 e_rol = col_e1.selectbox("Rol", ["cajera", "gerente", "admin"], index=["cajera", "gerente", "admin"].index(selected_user.get("rol", "cajera")), key="edit_emp_rol")
@@ -568,6 +596,7 @@ def render_configuracion():
                         gestionar_usuario_seguro(
                             profile_id=selected_user["id"],
                             tenant_id=obtener_tenant_actual(),
+                            usuario=e_usuario,
                             nombre=e_nombre,
                             rol=e_rol,
                             activo=e_activo,
@@ -585,6 +614,7 @@ def render_configuracion():
                         gestionar_usuario_seguro(
                             profile_id=selected_user["id"],
                             tenant_id=obtener_tenant_actual(),
+                            usuario=str(selected_user.get("usuario") or ""),
                             nombre=str(selected_user.get("nombre") or selected_user.get("usuario") or "Usuario"),
                             rol=str(selected_user.get("rol") or "consulta"),
                             activo=False,
@@ -602,19 +632,28 @@ def render_configuracion():
             st.subheader("➕ Registrar Nuevo Empleado")
             with st.expander("✨ Haz clic para crear una nueva cuenta de empleado", expanded=False):
                 col_n1, col_n2 = st.columns(2)
-                n_usuario = col_n1.text_input("Correo de acceso", placeholder="empleado@empresa.com", key="new_emp_user")
+                n_usuario = col_n1.text_input(
+                    "Usuario de acceso",
+                    placeholder="cajera01",
+                    help="No requiere correo personal.",
+                    key="new_emp_user",
+                )
                 n_nombre = col_n2.text_input("Nombre Completo (ej. María Delgado)", key="new_emp_name")
                 n_clave = col_n1.text_input("Clave Inicial", type="password", key="new_emp_pass")
                 n_rol = col_n2.selectbox("Rol Asignado", ["cajera", "gerente", "admin"], key="new_emp_role")
                 
                 st.write("")
                 if st.button("🚀 Crear Cuenta de Empleado", key="btn_create_new_employee", use_container_width=True):
-                    if "@" not in n_usuario or not n_nombre or not n_clave:
-                        st.error("Complete nombre, correo electrónico y contraseña.")
+                    try:
+                        usuario_nuevo = normalizar_usuario_acceso(n_usuario)
+                    except ValueError:
+                        usuario_nuevo = ""
+                    if not usuario_nuevo or not n_nombre or not n_clave:
+                        st.error("Complete nombre, usuario válido y contraseña.")
                     else:
                         current_tenant = obtener_tenant_actual()
                         new_user_payload = {
-                            "usuario": n_usuario.strip().lower(),
+                            "usuario": usuario_nuevo,
                             "nombre": n_nombre.strip(),
                             "rol": n_rol,
                             "activo": True,
@@ -633,14 +672,14 @@ def render_configuracion():
                                 if key.startswith("puede_") or key.startswith("ver_")
                             }
                             invitar_usuario_seguro(
-                                email=n_usuario.strip().lower(),
+                                usuario=usuario_nuevo,
                                 password=n_clave.strip(),
                                 nombre=n_nombre.strip(),
                                 rol=n_rol,
                                 tenant_id=current_tenant,
                                 permisos=permisos_nuevo,
                             )
-                            st.success(f"¡Cuenta de empleado '{n_usuario}' creada exitosamente!")
+                            st.success(f"¡Cuenta de empleado '{usuario_nuevo}' creada exitosamente!")
                             limpiar_cache_datos()
                             st.rerun()
                         except ApiError as exc:

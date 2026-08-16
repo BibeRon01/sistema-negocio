@@ -4,7 +4,12 @@ import ast
 import pytest
 
 from nomina_view import calcular_nomina_completa
-from utils import html_escape
+from utils import (
+    correo_tecnico_acceso,
+    html_escape,
+    normalizar_tenant_acceso,
+    normalizar_usuario_acceso,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -285,6 +290,7 @@ def test_sql_consolidado_contiene_las_fuentes_en_orden_sin_divergencias():
         "supabase/migrations/202607250001_secure_foundation.sql",
         "supabase/migrations/202607250002_transactional_api.sql",
         "supabase/migrations/202607250003_maintenance_and_accounting_api.sql",
+        "supabase/migrations/202608150002_company_username_auth.sql",
         "supabase/checks/002_postdeploy_readonly.sql",
     ]
     assert blocks == [
@@ -521,13 +527,65 @@ def test_publicacion_rechaza_llaves_privadas_y_sanea_la_marca():
     assert 'menu = "POS"' not in app_code
 
 
-def test_login_publicable_exige_correo_y_revalida_la_sesion():
+def test_login_publicable_separa_empresa_y_superadmin_y_revalida_la_sesion():
     helpers = (ROOT / "helpers.py").read_text(encoding="utf-8")
     secure_login = helpers[helpers.index("def login_simple()"):]
-    assert 'st.text_input("Correo electrónico"' in secure_login
-    assert "@empresa.com" not in secure_login
+    assert '["Empresa", "Administrador A&M"]' in secure_login
+    assert 'placeholder="biberon01"' in secure_login
+    assert 'placeholder="cajera01"' in secure_login
+    assert "correo_tecnico_acceso(tenant_login, username)" in secure_login
+    assert 'profile.get("es_superadmin") is not True' in secure_login
+    assert "sign_in_with_password" in secure_login
     assert "_last_session_validation" in secure_login
-    assert "_cargar_perfil_verificado()" in secure_login
+    assert "_cargar_perfil_verificado(tenant_login)" in secure_login
+    assert "active_session" not in secure_login
+
+
+def test_identidad_tecnica_empresarial_es_determinista_y_no_expone_datos():
+    first = correo_tecnico_acceso("biberon01", "cajera01")
+    second = correo_tecnico_acceso("BIBERON01", "CAJERA01")
+    other = correo_tecnico_acceso("biberon01", "cajera02")
+    assert first == second
+    assert first != other
+    assert first.endswith("@access.ais.invalid")
+    assert "biberon" not in first
+    assert "cajera" not in first
+    assert normalizar_tenant_acceso(" BIBERON01 ") == "biberon01"
+    assert normalizar_usuario_acceso(" CAJERA01 ") == "cajera01"
+    with pytest.raises(ValueError):
+        normalizar_tenant_acceso("global")
+    with pytest.raises(ValueError):
+        normalizar_usuario_acceso("usuario@correo.com")
+
+
+def test_alta_empresarial_no_acepta_correo_personal_ni_credencial_local():
+    client = (ROOT / "api_client.py").read_text(encoding="utf-8")
+    invite = (ROOT / "supabase/functions/invite-user/index.ts").read_text(
+        encoding="utf-8"
+    )
+    manage = (ROOT / "supabase/functions/manage-user/index.ts").read_text(
+        encoding="utf-8"
+    )
+    migration = (
+        ROOT / "supabase/migrations/202608150002_company_username_auth.sql"
+    ).read_text(encoding="utf-8")
+
+    invite_client = client[
+        client.index("def invitar_usuario_seguro"):
+        client.index("def gestionar_usuario_seguro")
+    ]
+    assert '"username": username' in invite_client
+    assert '"email":' not in invite_client
+    assert "input.email" not in invite
+    assert "technicalEmail(tenantId, username)" in invite
+    assert "admin.auth.admin.createUser" in invite
+    assert "email_confirm: true" in invite
+    assert "USERNAME_ALREADY_EXISTS" in invite
+    assert "email: loginEmail" in manage
+    assert "email_confirm: true" in manage
+    assert "USERNAME_ALREADY_EXISTS" in manage
+    assert "uq_usuarios_empresa_usuario_ci" in migration
+    assert "revoke select on public.usuarios from anon" in migration.lower()
 
 
 def test_cliente_de_ventas_no_reintenta_otra_rpc():
