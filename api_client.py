@@ -33,6 +33,16 @@ _API_ERROR_MESSAGES = {
     "RESERVED_TENANT_ID": "Ese identificador de empresa está reservado.",
     "COMPANY_ALREADY_EXISTS": "Ya existe una empresa con ese identificador.",
     "COMPANY_NOT_FOUND": "No se encontró la empresa solicitada.",
+    "PASSWORD_POLICY_INVALID": PASSWORD_RULE_MESSAGE,
+    "AUTH_PASSWORD_POLICY_REJECTED": (
+        "Supabase Auth rechazó la contraseña. Ajuste Password Security para "
+        "permitir mínimo 4 caracteres y exigir un símbolo."
+    ),
+    "INVALID_USER_DATA": "Revise el usuario, nombre, rol y contraseña indicados.",
+    "USER_MANAGEMENT_PERMISSION_DENIED": "No tiene permiso para administrar usuarios de esa empresa.",
+    "TENANT_NOT_ACTIVE": "La empresa seleccionada no está activa.",
+    "AUTH_USER_NOT_CREATED": "Supabase Auth no pudo crear la cuenta del usuario.",
+    "PROFILE_NOT_CREATED": "La cuenta no se guardó porque el perfil empresarial fue rechazado.",
     "PURCHASE_PERMISSION_DENIED": "No tiene permiso para registrar compras en esta empresa.",
     "PRODUCT_NOT_FOUND_OR_FORBIDDEN": "Uno de los productos no existe o no pertenece a la empresa activa.",
     "INVALID_PURCHASE_ITEM": "Revise las cantidades y costos de los productos.",
