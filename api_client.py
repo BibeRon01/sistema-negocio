@@ -21,7 +21,14 @@ LOGGER = logging.getLogger("ais")
 
 _API_ERROR_MESSAGES = {
     "AUTH_REQUIRED": "La sesión expiró. Inicie sesión nuevamente.",
+    "INVALID_SESSION": "La sesión no pudo validarse. Inicie sesión nuevamente.",
+    "SERVER_NOT_CONFIGURED": "El servicio administrativo todavía no está configurado correctamente.",
     "MFA_AAL2_REQUIRED": "Esta operación requiere confirmar el segundo factor.",
+    "PLATFORM_SUPERADMIN_REQUIRED": "Esta operación está reservada a la superadministradora A&M.",
+    "INVALID_COMPANY_DATA": "Revise el identificador y los datos de la empresa.",
+    "RESERVED_TENANT_ID": "Ese identificador de empresa está reservado.",
+    "COMPANY_ALREADY_EXISTS": "Ya existe una empresa con ese identificador.",
+    "COMPANY_NOT_FOUND": "No se encontró la empresa solicitada.",
     "PURCHASE_PERMISSION_DENIED": "No tiene permiso para registrar compras en esta empresa.",
     "PRODUCT_NOT_FOUND_OR_FORBIDDEN": "Uno de los productos no existe o no pertenece a la empresa activa.",
     "INVALID_PURCHASE_ITEM": "Revise las cantidades y costos de los productos.",

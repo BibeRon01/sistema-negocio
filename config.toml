@@ -1,10 +1,13 @@
 project_id = "replace-with-your-project-ref"
 
 [functions.invite-user]
-verify_jwt = true
+# La función valida el bearer con Supabase Auth (getUser) y exige AAL2.
+# Se desactiva la validación heredada del gateway para aceptar las claves JWT
+# actuales de Supabase sin omitir la autorización interna.
+verify_jwt = false
 
 [functions.manage-user]
-verify_jwt = true
+verify_jwt = false
 
 [functions.manage-company]
-verify_jwt = true
+verify_jwt = false
