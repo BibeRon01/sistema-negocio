@@ -128,7 +128,10 @@ def render_gestion_empresas():
                 password = st.text_input(
                     "Contraseña inicial",
                     type="password",
-                    help="Mínimo 12 caracteres. El administrador deberá configurar MFA al entrar.",
+                    help=(
+                        "Mínimo 4 caracteres y al menos un símbolo como ., @, !, _ o -. "
+                        "El administrador deberá configurar MFA al entrar."
+                    ),
                 )
                 rol = st.selectbox(
                     "Rol",

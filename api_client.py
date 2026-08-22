@@ -14,7 +14,11 @@ import requests
 import streamlit as st
 
 from db import SUPABASE_KEY, SUPABASE_URL, obtener_tenant_actual, supabase
-from utils import normalizar_usuario_acceso
+from utils import (
+    PASSWORD_RULE_MESSAGE,
+    normalizar_usuario_acceso,
+    password_usuario_valida,
+)
 
 
 LOGGER = logging.getLogger("ais")
@@ -222,8 +226,8 @@ def invitar_usuario_seguro(
         username = normalizar_usuario_acceso(usuario)
     except ValueError as exc:
         raise ApiError(_API_ERROR_MESSAGES["INVALID_USERNAME"]) from exc
-    if len(str(password)) < 12:
-        raise ApiError("La contraseña inicial debe tener al menos 12 caracteres.")
+    if not password_usuario_valida(password):
+        raise ApiError(PASSWORD_RULE_MESSAGE)
 
     url = f"{SUPABASE_URL.rstrip('/')}/functions/v1/invite-user"
     try:
@@ -275,8 +279,8 @@ def gestionar_usuario_seguro(
         username = normalizar_usuario_acceso(usuario)
     except ValueError as exc:
         raise ApiError(_API_ERROR_MESSAGES["INVALID_USERNAME"]) from exc
-    if nueva_password and len(nueva_password) < 12:
-        raise ApiError("La nueva contraseña debe tener al menos 12 caracteres.")
+    if nueva_password and not password_usuario_valida(nueva_password):
+        raise ApiError(PASSWORD_RULE_MESSAGE)
 
     url = f"{SUPABASE_URL.rstrip('/')}/functions/v1/manage-user"
     try:

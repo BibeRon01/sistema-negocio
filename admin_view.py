@@ -745,7 +745,12 @@ def render_mi_perfil():
                 new_nombre = st.text_input("Nombre Completo", value=str(user.get("nombre") or ""))
                 new_usuario = st.text_input("Usuario de acceso", value=str(user.get("usuario") or ""), disabled=True)
             with c2:
-                new_clave = st.text_input("Nueva contraseña", value="", type="password", placeholder="Mínimo 12 caracteres; en blanco para conservar")
+                new_clave = st.text_input(
+                    "Nueva contraseña",
+                    value="",
+                    type="password",
+                    placeholder="Mínimo 4 caracteres y un símbolo; en blanco para conservar",
+                )
                 st.text_input("Rol asignado", value=rol_actual.upper(), disabled=True)
 
             if st.form_submit_button("💾 Guardar cambios", type="primary", use_container_width=True):
@@ -754,8 +759,8 @@ def render_mi_perfil():
 
                 if not name_clean:
                     st.error("El nombre no puede estar vacío.")
-                elif clave_clean and len(clave_clean) < 12:
-                    st.error("La nueva contraseña debe tener al menos 12 caracteres.")
+                elif clave_clean and not password_usuario_valida(clave_clean):
+                    st.error(PASSWORD_RULE_MESSAGE)
                 else:
                     try:
                         supabase.rpc("api_update_my_profile", {"p_nombre": name_clean}).execute()

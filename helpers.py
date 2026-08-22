@@ -45,7 +45,8 @@ from utils import (
     carrito_limpio, buscar_nombre_producto_por_item, nombre_item, numero_factura_visible,
     predecir_categoria_y_tipo_gasto, generar_codigo_secuencial, generar_codigo_producto,
     agregar_columna_codigo_secuencial, mostrar_error_seguro, correo_tecnico_acceso,
-    normalizar_usuario_acceso, separar_identificador_usuario_empresa
+    normalizar_usuario_acceso, separar_identificador_usuario_empresa,
+    PASSWORD_RULE_MESSAGE, password_usuario_valida
 )
 def valor_simple(valor: Any):
     if isinstance(valor, pd.Series):
@@ -5051,7 +5052,7 @@ def _render_recuperacion_password() -> bool:
         "Nueva contraseña",
         type="password",
         key="secure_recovery_password",
-        help="Use al menos 12 caracteres.",
+        help=PASSWORD_RULE_MESSAGE,
     )
     confirmar = st.text_input(
         "Confirmar contraseña",
@@ -5061,8 +5062,8 @@ def _render_recuperacion_password() -> bool:
     left, right = st.columns(2)
     if left.button("Guardar contraseña", type="primary", use_container_width=True):
         nueva_clean = str(nueva or "")
-        if len(nueva_clean) < 12:
-            st.warning("La contraseña debe tener al menos 12 caracteres.")
+        if not password_usuario_valida(nueva_clean):
+            st.warning(PASSWORD_RULE_MESSAGE)
             return True
         if nueva_clean != str(confirmar or ""):
             st.warning("Las contraseñas no coinciden.")
