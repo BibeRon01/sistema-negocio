@@ -14,6 +14,22 @@ LOGGER = logging.getLogger("ais")
 _TENANT_ACCESO_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{2,49}$")
 _USUARIO_ACCESO_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,31}$")
 _DOMINIO_ACCESO_INTERNO = "access.ais.invalid"
+PASSWORD_MIN_LENGTH = 4
+PASSWORD_RULE_MESSAGE = (
+    "Use al menos 4 caracteres e incluya un símbolo como ., @, !, _ o -."
+)
+
+
+def password_usuario_valida(valor: Any) -> bool:
+    """Aplica la regla única usada por la interfaz y las APIs administrativas."""
+    password = str(valor or "")
+    return (
+        len(password) >= PASSWORD_MIN_LENGTH
+        and any(
+            unicodedata.category(character).startswith(("P", "S"))
+            for character in password
+        )
+    )
 
 
 def normalizar_tenant_acceso(valor: Any) -> str:
