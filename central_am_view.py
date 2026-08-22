@@ -12,7 +12,7 @@ from api_client import (
 )
 from auth import es_superadmin_plataforma
 from db import limpiar_cache_datos, supabase
-from utils import mostrar_error_seguro
+from utils import identificador_usuario_empresa, mostrar_error_seguro
 
 
 def _cargar_empresas() -> pd.DataFrame:
@@ -156,8 +156,9 @@ def render_gestion_empresas():
                             permisos=permisos,
                         )
                         st.success(
-                            "Usuario creado. Entregue empresa, usuario y contraseña por "
-                            "un canal seguro. Los administradores configurarán MFA al entrar."
+                            "Usuario creado. Entregue el acceso "
+                            f"{identificador_usuario_empresa(tenant, username)} y la contraseña "
+                            "por un canal seguro. Los administradores configurarán MFA al entrar."
                         )
                     except ApiError as exc:
                         st.error(str(exc))

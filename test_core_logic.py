@@ -7,8 +7,10 @@ from nomina_view import calcular_nomina_completa
 from utils import (
     correo_tecnico_acceso,
     html_escape,
+    identificador_usuario_empresa,
     normalizar_tenant_acceso,
     normalizar_usuario_acceso,
+    separar_identificador_usuario_empresa,
 )
 
 
@@ -527,18 +529,60 @@ def test_publicacion_rechaza_llaves_privadas_y_sanea_la_marca():
     assert 'menu = "POS"' not in app_code
 
 
-def test_login_publicable_separa_empresa_y_superadmin_y_revalida_la_sesion():
+def test_login_publicable_unifica_identificador_y_revalida_la_sesion():
     helpers = (ROOT / "helpers.py").read_text(encoding="utf-8")
-    secure_login = helpers[helpers.index("def login_simple()"):]
-    assert '["Empresa", "Administrador A&M"]' in secure_login
-    assert 'placeholder="biberon01"' in secure_login
-    assert 'placeholder="cajera01"' in secure_login
+    secure_login = helpers[helpers.index("def login_simple()"):] 
+    assert '"Usuario o correo electrónico"' in secure_login
+    assert 'placeholder="empresa/usuario o correo@ejemplo.com"' in secure_login
+    assert 'key="secure_login_identifier"' in secure_login
+    assert 'key="secure_login_tenant"' not in secure_login
+    assert 'st.text_input(\n        "Empresa"' not in secure_login
+    assert '"Administrador A&M"' not in secure_login
+    assert "separar_identificador_usuario_empresa(identifier)" in secure_login
     assert "correo_tecnico_acceso(tenant_login, username)" in secure_login
+    assert 'access_kind == "username"' in secure_login
     assert 'profile.get("es_superadmin") is not True' in secure_login
     assert "sign_in_with_password" in secure_login
     assert "_last_session_validation" in secure_login
     assert "_cargar_perfil_verificado(tenant_login)" in secure_login
     assert "active_session" not in secure_login
+
+
+def test_recuperacion_password_exige_token_hash_verificado_por_supabase():
+    helpers = (ROOT / "helpers.py").read_text(encoding="utf-8")
+    recovery = helpers[
+        helpers.index("def _render_recuperacion_password"):
+        helpers.index("def _cargar_perfil_verificado")
+    ]
+    assert '"token_hash": token_hash' in recovery
+    assert '"type": "recovery"' in recovery
+    assert "supabase.auth.verify_otp" in recovery
+    assert 'client.auth.update_user({"password": nueva_clean})' in recovery
+    assert "password_recovery_verified" in recovery
+    assert "access_token" not in recovery.split("st.query_params", 1)[0]
+
+
+def test_aprovisionamiento_promueve_identidad_existente_sin_cambiar_password_o_mfa():
+    provision = (ROOT / "scripts/provision_owner.py").read_text(encoding="utf-8")
+    assert '"--existing-user-id"' in provision
+    assert "get_user_by_id(args.existing_user_id)" in provision
+    assert 'app_metadata["role"] = "superadmin"' in provision
+    existing_branch = provision[
+        provision.index("if args.existing_user_id:", provision.index("client =")):
+        provision.index("else:", provision.index("if args.existing_user_id:", provision.index("client =")))
+    ]
+    assert '"password"' not in existing_branch
+    assert "unenroll" not in provision
+
+
+def test_ventas_y_compras_permiten_filtrar_por_usuario_sin_cambiar_tenant():
+    pos = (ROOT / "pos_view.py").read_text(encoding="utf-8")
+    compras = (ROOT / "inventario_view.py").read_text(encoding="utf-8")
+    assert '"Filtrar por usuario"' in pos
+    assert 'key="ventas_filtro_usuario"' in pos
+    assert '"Filtrar compras por usuario"' in compras
+    assert 'key="compras_filtro_usuario"' in compras
+    assert 'mc2.metric("Total comprado"' in compras
 
 
 def test_identidad_tecnica_empresarial_es_determinista_y_no_expone_datos():
@@ -552,10 +596,17 @@ def test_identidad_tecnica_empresarial_es_determinista_y_no_expone_datos():
     assert "cajera" not in first
     assert normalizar_tenant_acceso(" BIBERON01 ") == "biberon01"
     assert normalizar_usuario_acceso(" CAJERA01 ") == "cajera01"
+    assert identificador_usuario_empresa("BIBERON01", "CAJERA01") == "biberon01/cajera01"
+    assert separar_identificador_usuario_empresa(" BIBERON01/CAJERA01 ") == (
+        "biberon01",
+        "cajera01",
+    )
     with pytest.raises(ValueError):
         normalizar_tenant_acceso("global")
     with pytest.raises(ValueError):
         normalizar_usuario_acceso("usuario@correo.com")
+    with pytest.raises(ValueError):
+        separar_identificador_usuario_empresa("cajera01")
 
 
 def test_alta_empresarial_no_acepta_correo_personal_ni_credencial_local():

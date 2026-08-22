@@ -2,11 +2,11 @@
 
 ## Modelo final
 
-- La pantalla muestra `Empresa`, `Usuario o correo electrónico` y `Contraseña`.
-- El superadministrador de plataforma A&M deja `Empresa` vacío y entra con
-  correo, contraseña y MFA.
-- El propietario de cada empresa entra con empresa, usuario, contraseña y MFA.
-- Cajeros y demás empleados entran con empresa, usuario y contraseña.
+- La pantalla muestra únicamente `Usuario o correo electrónico` y `Contraseña`.
+- El superadministrador de plataforma A&M entra con correo, contraseña y MFA.
+- El propietario de cada empresa recibe un acceso `empresa/usuario`, además de
+  su contraseña y MFA.
+- Cajeros y demás empleados entran con su acceso `empresa/usuario` y contraseña.
 - Cada persona conserva una identidad individual en Supabase Auth.
 - La aplicación no almacena ni compara contraseñas.
 
@@ -28,18 +28,15 @@ Promueva esa identidad existente con el modo `--existing-user-id` descrito en
 
 Después:
 
-1. A&M entra dejando **Empresa** vacío y usando su correo, contraseña y MFA.
+1. A&M entra usando su correo, contraseña y MFA.
 2. Desde **Gestión de Empresas**, A&M crea para BIBE RON una cuenta separada,
    por ejemplo `propietario`, con rol `admin`.
 3. El propietario de BIBE RON entra con:
-   - empresa: `biberon01`;
-   - usuario: `propietario`;
+   - usuario: `biberon01/propietario`;
    - la contraseña empresarial asignada;
    - MFA.
 
-La compatibilidad temporal con correo + empresa existe solo para rescatar una
-cuenta empresarial histórica. No debe usarse para convertir la cuenta central
-A&M ni como modelo para usuarios nuevos.
+La cuenta central A&M nunca debe convertirse en un usuario empresarial.
 
 ## Crear la cajera
 
@@ -51,7 +48,7 @@ Dentro de BIBE RON, abra **Usuarios → Crear usuario** y use, por ejemplo:
 - permisos: vender, abrir caja y ver sus propias ventas;
 - cierre de caja: actívelo solo si la política del negocio lo permite.
 
-La cajera entrará con `biberon01 + cajera01 + contraseña`. No podrá entrar en
+La cajera entrará con `biberon01/cajera01 + contraseña`. No podrá entrar en
 otra empresa porque Supabase Auth, `api_my_session` y RLS validan la membresía.
 
 ## Recuperación de acceso

@@ -45,7 +45,7 @@ from utils import (
     carrito_limpio, buscar_nombre_producto_por_item, nombre_item, numero_factura_visible,
     predecir_categoria_y_tipo_gasto, generar_codigo_secuencial, generar_codigo_producto,
     agregar_columna_codigo_secuencial, mostrar_error_seguro, correo_tecnico_acceso,
-    normalizar_tenant_acceso, normalizar_usuario_acceso
+    normalizar_usuario_acceso, separar_identificador_usuario_empresa
 )
 def valor_simple(valor: Any):
     if isinstance(valor, pd.Series):
@@ -5376,20 +5376,10 @@ def login_simple() -> bool:
             st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
             return False
 
-    c_empresa, c_identificador = st.columns(2)
-    tenant_input = c_empresa.text_input(
-        "Empresa",
-        placeholder="empresa01",
-        key="secure_login_tenant",
-        help="La administración central A&M puede dejar este campo vacío.",
-    )
-    identifier_input = c_identificador.text_input(
+    identifier_input = st.text_input(
         "Usuario o correo electrónico",
-        placeholder="cajera01 o correo@ejemplo.com",
+        placeholder="empresa/usuario o correo@ejemplo.com",
         key="secure_login_identifier",
-    )
-    st.caption(
-        "A&M entra con su correo. Las empresas y sus empleados entran con empresa y usuario."
     )
     password = st.text_input("Contraseña", type="password", key="secure_login_password")
 
@@ -5400,23 +5390,18 @@ def login_simple() -> bool:
         access_kind = ""
         try:
             identifier = str(identifier_input or "").strip().lower()
-            tenant_raw = str(tenant_input or "").strip()
             if "@" in identifier:
-                # El correo visible está reservado a A&M. Durante una migración,
-                # una cuenta empresarial histórica puede usarlo si también indica
-                # su empresa; Auth y api_my_session siguen siendo obligatorios.
+                # El correo visible está reservado a la administración central.
                 if identifier.count("@") != 1 or identifier.startswith("@") or identifier.endswith("@"):
                     raise ValueError("INVALID_EMAIL_LOGIN")
-                tenant_login = normalizar_tenant_acceso(tenant_raw) if tenant_raw else None
                 email_auth = identifier
                 access_kind = "email"
             else:
-                tenant_login = normalizar_tenant_acceso(tenant_raw)
-                username = normalizar_usuario_acceso(identifier)
+                tenant_login, username = separar_identificador_usuario_empresa(identifier)
                 email_auth = correo_tecnico_acceso(tenant_login, username)
                 access_kind = "username"
         except ValueError:
-            st.error("Revise la empresa y el usuario o correo indicados.")
+            st.error("Ingrese su correo o el usuario completo entregado por su administrador.")
             return False
         if not email_auth or not pass_clean:
             st.error("Ingrese todos los datos de acceso.")
@@ -5441,10 +5426,7 @@ def login_simple() -> bool:
                     if str(profile.get("tenant_id") or "") != tenant_login:
                         raise RuntimeError("TENANT_AUTH_MISMATCH")
                 elif profile.get("es_superadmin") is not True:
-                    # Compatibilidad temporal únicamente para cuentas históricas
-                    # de empresa que aún conservan correo visible.
-                    if not tenant_login or str(profile.get("tenant_id") or "") != tenant_login:
-                        raise RuntimeError("PLATFORM_SUPERADMIN_REQUIRED")
+                    raise RuntimeError("PLATFORM_SUPERADMIN_REQUIRED")
                 st.session_state["tenant_seleccionado"] = str(
                     profile.get("tenant_id") or tenant_login or "global"
                 )

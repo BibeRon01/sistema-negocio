@@ -97,7 +97,7 @@ la cuenta. La service-role se usa únicamente en la terminal local y no se sube
 a GitHub ni se agrega a Streamlit.
 
 Después, desde **Gestión de Empresas**, cree cada empresa y su primer usuario
-administrador. Las cuentas empresariales entran con `empresa + usuario +
+administrador. Las cuentas empresariales entran con `empresa/usuario +
 contraseña`; no necesitan correo personal. Cada administrador empresarial debe
 configurar MFA. Los cajeros y demás empleados se crean desde **Usuarios** dentro
 de su empresa.

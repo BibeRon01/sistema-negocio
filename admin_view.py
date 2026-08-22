@@ -399,7 +399,8 @@ def render_usuarios():
                                     permisos=permisos_crear,
                                 )
                                 invalidar_cache_tabla("usuarios")
-                                st.success(f"🎉 ¡Usuario '{user_clean}' creado con éxito!")
+                                acceso_entregado = identificador_usuario_empresa(_tenant, user_clean)
+                                st.success(f"🎉 Usuario creado. Su acceso es: {acceso_entregado}")
                                 st.rerun()
                             except ApiError as exc:
                                 st.error(str(exc))
@@ -679,7 +680,10 @@ def render_configuracion():
                                 tenant_id=current_tenant,
                                 permisos=permisos_nuevo,
                             )
-                            st.success(f"¡Cuenta de empleado '{usuario_nuevo}' creada exitosamente!")
+                            acceso_entregado = identificador_usuario_empresa(
+                                current_tenant, usuario_nuevo
+                            )
+                            st.success(f"¡Cuenta creada! Su acceso es: {acceso_entregado}")
                             limpiar_cache_datos()
                             st.rerun()
                         except ApiError as exc:
