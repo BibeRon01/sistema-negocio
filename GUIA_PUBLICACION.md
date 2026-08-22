@@ -78,11 +78,45 @@ entrada deberá registrar y verificar el MFA nativo de Supabase hasta alcanzar
 `aal2`. Use `--platform-superadmin` únicamente para la cuenta A&M que administra
 la plataforma.
 
+Si el correo A&M ya existe en **Authentication → Users**, no cree otra cuenta.
+Copie su UUID y promueva esa misma identidad con:
+
+```bash
+export SUPABASE_URL="https://PROYECTO.supabase.co"
+export SUPABASE_SERVICE_KEY="PEGAR_SOLO_EN_LA_TERMINAL_LOCAL"  # pragma: allowlist secret
+python scripts/provision_owner.py \
+  --email "CORREO_A&M_EXISTENTE" \
+  --name "Administrador A&M" \
+  --tenant "EMPRESA_INICIAL" \
+  --platform-superadmin \
+  --existing-user-id "UUID_DE_AUTH_USERS"
+```
+
+Este modo conserva la contraseña, el UUID, el historial y los factores MFA de
+la cuenta. La service-role se usa únicamente en la terminal local y no se sube
+a GitHub ni se agrega a Streamlit.
+
 Después, desde **Gestión de Empresas**, cree cada empresa y su primer usuario
 administrador. Las cuentas empresariales entran con `empresa + usuario +
 contraseña`; no necesitan correo personal. Cada administrador empresarial debe
 configurar MFA. Los cajeros y demás empleados se crean desde **Usuarios** dentro
 de su empresa.
+
+### Recuperación de contraseña del correo A&M
+
+En **Supabase → Authentication → URL Configuration**, configure **Site URL** con
+la dirección pública de la aplicación Streamlit. Luego, en la plantilla de
+correo **Reset Password**, use un enlace con `token_hash`:
+
+```html
+<a href="{{ .SiteURL }}?token_hash={{ .TokenHash }}&type=recovery">
+  Crear una contraseña nueva
+</a>
+```
+
+El enlace abrirá una pantalla de Streamlit que valida el token directamente con
+Supabase y permite guardar una contraseña nueva de al menos 12 caracteres. No
+coloque access tokens ni contraseñas en la URL.
 
 ## 6. Configurar Streamlit
 

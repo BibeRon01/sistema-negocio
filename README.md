@@ -12,8 +12,10 @@ transaccional dentro de PostgreSQL/Supabase.
 ## Cambios principales
 
 - acceso únicamente con Supabase Auth;
-- acceso empresarial mediante `empresa + usuario + contraseña`, usando una
-  identidad técnica privada de Supabase Auth sin exigir correo personal;
+- una sola pantalla con `Empresa + Usuario o correo electrónico + Contraseña`:
+  A&M usa su correo y las cuentas empresariales usan empresa + usuario;
+- acceso empresarial mediante una identidad técnica privada de Supabase Auth
+  sin exigir correo personal;
 - correo visible reservado al superadministrador de plataforma A&M;
 - validación obligatoria de cada sesión mediante Supabase Auth y
   `api_my_session`, cerrándola ante cualquier error;

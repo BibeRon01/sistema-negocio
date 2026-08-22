@@ -16,6 +16,8 @@ _SESSION_KEYS = (
     "tenant_seleccionado",
     "mfa_pendiente",
     "login_pending_mfa",
+    "password_recovery_active",
+    "password_recovery_verified",
     "superadmin_tenant_seleccionado",
     "last_activity",
     "ultimo_check_usuario",

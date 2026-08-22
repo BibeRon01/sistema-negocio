@@ -2,7 +2,9 @@
 
 ## Modelo final
 
-- El superadministrador de plataforma A&M entra con correo, contraseña y MFA.
+- La pantalla muestra `Empresa`, `Usuario o correo electrónico` y `Contraseña`.
+- El superadministrador de plataforma A&M deja `Empresa` vacío y entra con
+  correo, contraseña y MFA.
 - El propietario de cada empresa entra con empresa, usuario, contraseña y MFA.
 - Cajeros y demás empleados entran con empresa, usuario y contraseña.
 - Cada persona conserva una identidad individual en Supabase Auth.
@@ -17,27 +19,27 @@
 3. Publique los archivos Python y de documentación incluidos en este cambio.
 4. Espere el reinicio de Streamlit y pruebe primero con la empresa BIBE RON.
 
-## Convertir la cuenta existente de BIBE RON
+## Separar A&M de BIBE RON
 
-La compatibilidad temporal impide bloquear la cuenta que actualmente usa
-correo:
+La cuenta con correo de quien administra toda la plataforma debe conservarse
+como identidad central A&M; no debe convertirse en el usuario de BIBE RON.
+Promueva esa identidad existente con el modo `--existing-user-id` descrito en
+`GUIA_PUBLICACION.md`. La operación conserva contraseña, UUID y MFA.
 
-1. Seleccione **Empresa** en el inicio de sesión.
-2. Escriba `biberon01` como empresa.
-3. En **Usuario**, escriba temporalmente el correo actual de esa cuenta.
-4. Ingrese la contraseña y confirme MFA.
-5. Abra **Administración y Nómina → Usuarios**.
-6. Seleccione la cuenta propietaria y cambie **Usuario de acceso** a
-   `propietario`.
-7. Guarde, cierre sesión y vuelva a entrar con:
+Después:
+
+1. A&M entra dejando **Empresa** vacío y usando su correo, contraseña y MFA.
+2. Desde **Gestión de Empresas**, A&M crea para BIBE RON una cuenta separada,
+   por ejemplo `propietario`, con rol `admin`.
+3. El propietario de BIBE RON entra con:
    - empresa: `biberon01`;
    - usuario: `propietario`;
-   - su misma contraseña;
+   - la contraseña empresarial asignada;
    - MFA.
 
-Al guardar el usuario, `manage-user` sustituye el correo de autenticación por
-una identidad técnica privada. El correo anterior deja de iniciar sesión, pero
-el UUID, el historial y los factores MFA de la cuenta se conservan.
+La compatibilidad temporal con correo + empresa existe solo para rescatar una
+cuenta empresarial histórica. No debe usarse para convertir la cuenta central
+A&M ni como modelo para usuarios nuevos.
 
 ## Crear la cajera
 
@@ -54,7 +56,8 @@ otra empresa porque Supabase Auth, `api_my_session` y RLS validan la membresía.
 
 ## Recuperación de acceso
 
-- A&M recupera su cuenta por correo.
+- A&M recupera su cuenta por correo; el enlace con `token_hash` se valida en la
+  propia aplicación y permite fijar una contraseña nueva.
 - El administrador de una empresa restablece la contraseña de sus empleados
   desde **Usuarios**.
 - A&M restablece la contraseña del propietario si este pierde el acceso.

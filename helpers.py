@@ -5000,6 +5000,92 @@ def _guardar_tokens_auth(session) -> None:
     renovar_cliente_sesion()
 
 
+def _query_param_unico(nombre: str) -> str:
+    """Obtiene un parámetro de URL sin aceptar colecciones ambiguas."""
+    try:
+        value = st.query_params.get(nombre, "")
+    except Exception:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return str(value[0] if len(value) == 1 else "").strip()
+    return str(value or "").strip()
+
+
+def _render_recuperacion_password() -> bool:
+    """Verifica un enlace recovery de Supabase y permite fijar una clave nueva.
+
+    El enlace debe transportar ``token_hash``; nunca se colocan access tokens ni
+    contraseñas en la URL. La sesión temporal también la emite Supabase Auth.
+    """
+    token_hash = _query_param_unico("token_hash")
+    recovery_type = _query_param_unico("type").lower()
+    recovery_active = bool(st.session_state.get("password_recovery_active"))
+
+    if token_hash and recovery_type == "recovery" and not recovery_active:
+        try:
+            response = supabase.auth.verify_otp({
+                "token_hash": token_hash,
+                "type": "recovery",
+            })
+            _guardar_tokens_auth(response)
+            st.session_state["password_recovery_active"] = True
+            st.session_state["password_recovery_verified"] = True
+            st.query_params.clear()
+            recovery_active = True
+        except Exception as exc:
+            LOGGER.warning("Enlace de recuperación rechazado: %s", type(exc).__name__)
+            limpiar_estado_sesion(cerrar_auth=True)
+            try:
+                st.query_params.clear()
+            except Exception:
+                pass
+            st.error("El enlace de recuperación no es válido o ya venció. Solicite uno nuevo.")
+            return False
+
+    if not recovery_active:
+        return False
+
+    st.markdown("### Crear una contraseña nueva")
+    st.caption("El enlace fue verificado por Supabase. La contraseña no se guarda en la aplicación.")
+    nueva = st.text_input(
+        "Nueva contraseña",
+        type="password",
+        key="secure_recovery_password",
+        help="Use al menos 12 caracteres.",
+    )
+    confirmar = st.text_input(
+        "Confirmar contraseña",
+        type="password",
+        key="secure_recovery_password_confirm",
+    )
+    left, right = st.columns(2)
+    if left.button("Guardar contraseña", type="primary", use_container_width=True):
+        nueva_clean = str(nueva or "")
+        if len(nueva_clean) < 12:
+            st.warning("La contraseña debe tener al menos 12 caracteres.")
+            return True
+        if nueva_clean != str(confirmar or ""):
+            st.warning("Las contraseñas no coinciden.")
+            return True
+        try:
+            client = obtener_cliente_sesion()
+            if client is None or not st.session_state.get("password_recovery_verified"):
+                raise RuntimeError("RECOVERY_SESSION_REQUIRED")
+            client.auth.update_user({"password": nueva_clean})
+            limpiar_estado_sesion(cerrar_auth=True)
+            st.success("Contraseña actualizada. Ya puede iniciar sesión.")
+        except Exception as exc:
+            LOGGER.warning("No se pudo actualizar la contraseña: %s", type(exc).__name__)
+            limpiar_estado_sesion(cerrar_auth=True)
+            st.error("No se pudo actualizar la contraseña. Solicite un enlace nuevo.")
+        return True
+
+    if right.button("Cancelar", use_container_width=True):
+        limpiar_estado_sesion(cerrar_auth=True)
+        st.rerun()
+    return True
+
+
 def _cargar_perfil_verificado(tenant_id: str | None = None) -> dict:
     client = obtener_cliente_sesion()
     access_token = str(st.session_state.get("access_token") or "")
@@ -5211,6 +5297,9 @@ def _render_mfa_nativo() -> bool:
 
 def login_simple() -> bool:
     """Única entrada permitida: Supabase Auth, perfil SQL y MFA nativo."""
+    if _render_recuperacion_password():
+        return False
+
     session_values = {
         "profile": st.session_state.get("usuario_data"),
         "access": st.session_state.get("access_token"),
@@ -5287,67 +5376,54 @@ def login_simple() -> bool:
             st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
             return False
 
-    modo_acceso = st.radio(
-        "Tipo de acceso",
-        ["Empresa", "Administrador A&M"],
-        horizontal=True,
-        key="secure_login_mode",
+    c_empresa, c_identificador = st.columns(2)
+    tenant_input = c_empresa.text_input(
+        "Empresa",
+        placeholder="empresa01",
+        key="secure_login_tenant",
+        help="La administración central A&M puede dejar este campo vacío.",
     )
-    tenant_input = ""
-    username_input = ""
-    email_input = ""
-    if modo_acceso == "Empresa":
-        c_empresa, c_usuario = st.columns(2)
-        tenant_input = c_empresa.text_input(
-            "Empresa",
-            placeholder="biberon01",
-            key="secure_login_tenant",
-        )
-        username_input = c_usuario.text_input(
-            "Usuario",
-            placeholder="cajera01",
-            key="secure_login_username",
-        )
-        st.caption(
-            "Las cuentas anteriores pueden ingresar temporalmente su correo en el campo "
-            "Usuario y luego convertir el acceso desde Administración → Usuarios."
-        )
-    else:
-        email_input = st.text_input(
-            "Correo del superadministrador A&M",
-            placeholder="administrador@empresa.com",
-            key="secure_login_email",
-        )
+    identifier_input = c_identificador.text_input(
+        "Usuario o correo electrónico",
+        placeholder="cajera01 o correo@ejemplo.com",
+        key="secure_login_identifier",
+    )
+    st.caption(
+        "A&M entra con su correo. Las empresas y sus empleados entran con empresa y usuario."
+    )
     password = st.text_input("Contraseña", type="password", key="secure_login_password")
 
     if st.button("Entrar", type="primary", use_container_width=True, key="secure_login_submit"):
         pass_clean = str(password or "").strip()
         tenant_login = None
         email_auth = ""
+        access_kind = ""
         try:
-            if modo_acceso == "Empresa":
-                tenant_login = normalizar_tenant_acceso(tenant_input)
-                identifier = str(username_input or "").strip().lower()
-                if "@" in identifier:
-                    # Compatibilidad de migración: la contraseña continúa siendo
-                    # comprobada exclusivamente por Supabase Auth y el tenant por
-                    # api_my_session. No es una autenticación alternativa.
-                    email_auth = identifier
-                else:
-                    username = normalizar_usuario_acceso(identifier)
-                    email_auth = correo_tecnico_acceso(tenant_login, username)
+            identifier = str(identifier_input or "").strip().lower()
+            tenant_raw = str(tenant_input or "").strip()
+            if "@" in identifier:
+                # El correo visible está reservado a A&M. Durante una migración,
+                # una cuenta empresarial histórica puede usarlo si también indica
+                # su empresa; Auth y api_my_session siguen siendo obligatorios.
+                if identifier.count("@") != 1 or identifier.startswith("@") or identifier.endswith("@"):
+                    raise ValueError("INVALID_EMAIL_LOGIN")
+                tenant_login = normalizar_tenant_acceso(tenant_raw) if tenant_raw else None
+                email_auth = identifier
+                access_kind = "email"
             else:
-                email_auth = str(email_input or "").strip().lower()
-                if "@" not in email_auth:
-                    raise ValueError("INVALID_PLATFORM_EMAIL")
+                tenant_login = normalizar_tenant_acceso(tenant_raw)
+                username = normalizar_usuario_acceso(identifier)
+                email_auth = correo_tecnico_acceso(tenant_login, username)
+                access_kind = "username"
         except ValueError:
-            st.error("Revise la empresa y el usuario indicados.")
+            st.error("Revise la empresa y el usuario o correo indicados.")
             return False
         if not email_auth or not pass_clean:
             st.error("Ingrese todos los datos de acceso.")
             return False
 
         auth_success = False
+        authenticated_by_supabase = False
 
         try:
             auth_response = supabase.auth.sign_in_with_password({
@@ -5356,15 +5432,19 @@ def login_simple() -> bool:
             })
             session_obj = _auth_obj_value(auth_response, "session", None)
             if session_obj:
+                authenticated_by_supabase = True
                 _guardar_tokens_auth(session_obj)
                 profile = _cargar_perfil_verificado(tenant_login)
-                if modo_acceso == "Empresa":
+                if access_kind == "username":
                     if profile.get("es_superadmin") is True:
-                        raise RuntimeError("PLATFORM_ACCOUNT_IN_COMPANY_LOGIN")
+                        raise RuntimeError("PLATFORM_ACCOUNT_REQUIRES_EMAIL")
                     if str(profile.get("tenant_id") or "") != tenant_login:
                         raise RuntimeError("TENANT_AUTH_MISMATCH")
                 elif profile.get("es_superadmin") is not True:
-                    raise RuntimeError("PLATFORM_SUPERADMIN_REQUIRED")
+                    # Compatibilidad temporal únicamente para cuentas históricas
+                    # de empresa que aún conservan correo visible.
+                    if not tenant_login or str(profile.get("tenant_id") or "") != tenant_login:
+                        raise RuntimeError("PLATFORM_SUPERADMIN_REQUIRED")
                 st.session_state["tenant_seleccionado"] = str(
                     profile.get("tenant_id") or tenant_login or "global"
                 )
@@ -5384,26 +5464,33 @@ def login_simple() -> bool:
 
         if not auth_success:
             limpiar_estado_sesion(cerrar_auth=True)
-            st.error("Credenciales inválidas o cuenta sin acceso activo.")
+            if authenticated_by_supabase:
+                st.error(
+                    "Supabase validó la cuenta, pero todavía no tiene el acceso A&M o "
+                    "la membresía de empresa requeridos."
+                )
+            else:
+                st.error("Usuario o correo y contraseña incorrectos.")
 
     with st.expander("¿Olvidó su contraseña?", expanded=False):
-        if modo_acceso == "Empresa":
-            st.info(
-                "Solicite el restablecimiento al administrador de su empresa. "
-                "Si es el propietario, comuníquese con el administrador A&M."
-            )
-        else:
-            reset_email = st.text_input("Correo A&M registrado", key="secure_reset_email")
-            if st.button("Enviar enlace de recuperación", key="secure_reset_submit"):
-                value = str(reset_email or "").strip().lower()
-                if "@" not in value:
-                    st.warning("Ingrese un correo válido.")
-                else:
-                    try:
-                        supabase.auth.reset_password_for_email(value)
-                    except Exception:
-                        pass
-                    st.info("Si la cuenta existe, Supabase enviará las instrucciones de recuperación.")
+        reset_email = st.text_input(
+            "Correo A&M registrado",
+            value=str(identifier_input or "") if "@" in str(identifier_input or "") else "",
+            key="secure_reset_email",
+        )
+        if st.button("Enviar enlace de recuperación", key="secure_reset_submit"):
+            value = str(reset_email or "").strip().lower()
+            if value.count("@") != 1 or value.startswith("@") or value.endswith("@"):
+                st.warning("Ingrese un correo válido.")
+            else:
+                try:
+                    supabase.auth.reset_password_for_email(value)
+                except Exception as exc:
+                    LOGGER.warning("Solicitud de recuperación rechazada: %s", type(exc).__name__)
+                st.info("Si la cuenta existe, Supabase enviará un enlace de recuperación.")
+        st.caption(
+            "Los usuarios empresariales sin correo solicitan una contraseña nueva a su administrador."
+        )
 
     st.caption(
         "Las contraseñas se validan únicamente en Supabase Auth. La aplicación no "

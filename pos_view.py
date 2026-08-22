@@ -1833,6 +1833,19 @@ def render_ventas():
             key="ventas_filtro_metodo",
         )
 
+        usuario_filtro = "Todos los usuarios"
+        if puede_ver_todas_ventas() and "usuario" in df.columns:
+            usuarios_ventas = sorted({
+                str(value).strip()
+                for value in df["usuario"].dropna().tolist()
+                if str(value).strip()
+            })
+            usuario_filtro = st.selectbox(
+                "Filtrar por usuario",
+                ["Todos los usuarios", *usuarios_ventas],
+                key="ventas_filtro_usuario",
+            )
+
         if txt:
             # 1. Búsqueda normal por campos de la venta
             mask_normal = df.astype(str).apply(lambda col: col.str.contains(txt, case=False, na=False)).any(axis=1)
@@ -1859,6 +1872,12 @@ def render_ventas():
         col_metodo = "metodo_pago" if "metodo_pago" in df.columns else "metodo" if "metodo" in df.columns else None
         if metodo_filtro != "Todos" and col_metodo:
             df = df[df[col_metodo].astype(str).str.lower() == metodo_filtro.lower()]
+
+        if usuario_filtro != "Todos los usuarios" and "usuario" in df.columns:
+            usuario_normalizado = normalizar_texto(usuario_filtro)
+            df = df[
+                df["usuario"].astype(str).apply(normalizar_texto) == usuario_normalizado
+            ]
 
         if not puede_ver_todas_ventas():
             usuario_actual = normalizar_texto(nombre_usuario_actual())

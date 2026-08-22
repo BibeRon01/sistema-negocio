@@ -1728,19 +1728,50 @@ def render_compras():
             d1, d2 = rango_fechas_ui("compras")
             df_hist_c = filtrar_por_fechas(df_hist_c, d1, d2)
 
+            usuario_compra_filtro = "Todos los usuarios"
+            if "usuario" in df_hist_c.columns:
+                usuarios_compra = sorted({
+                    str(value).strip()
+                    for value in df_hist_c["usuario"].dropna().tolist()
+                    if str(value).strip()
+                })
+                usuario_compra_filtro = st.selectbox(
+                    "Filtrar compras por usuario",
+                    ["Todos los usuarios", *usuarios_compra],
+                    key="compras_filtro_usuario",
+                )
+                if usuario_compra_filtro != "Todos los usuarios":
+                    usuario_normalizado = normalizar_texto(usuario_compra_filtro)
+                    df_hist_c = df_hist_c[
+                        df_hist_c["usuario"].astype(str).apply(normalizar_texto)
+                        == usuario_normalizado
+                    ]
+
             # --- Buscador ---
-            busq_c = st.text_input("🔍 Buscar proveedor, factura o producto", key="buscar_compras_hist")
+            busq_c = st.text_input(
+                "🔍 Buscar proveedor, factura, producto o usuario",
+                key="buscar_compras_hist",
+            )
             if busq_c:
                 df_hist_c = buscar_df(df_hist_c, busq_c)
 
             if df_hist_c.empty:
                 st.info("No hay compras en ese período / búsqueda.")
             else:
+                total_col = "total" if "total" in df_hist_c.columns else "monto" if "monto" in df_hist_c.columns else None
+                total_compras = (
+                    float(pd.to_numeric(df_hist_c[total_col], errors="coerce").fillna(0).sum())
+                    if total_col else 0.0
+                )
+                mc1, mc2 = st.columns(2)
+                mc1.metric("Registros de compra", int(len(df_hist_c.index)))
+                mc2.metric("Total comprado", f"RD$ {total_compras:,.2f}")
+
                 # Añadir Código secuencial para visualización
                 df_hist_c = agregar_columna_codigo_secuencial(df_hist_c, "compras")
 
                 # Columnas visibles en la tabla resumen
-                cols_vis = [c for c in ["Código", "fecha", "numero", "proveedor", "producto", "cantidad", "costo_unitario", "total", "metodo", "descripcion"]
+                cols_vis = [c for c in ["Código", "fecha", "numero", "proveedor", "producto", "cantidad", "costo_unitario", "total", "metodo", "usuario", "descripcion"]
                             if c in df_hist_c.columns]
                 st.dataframe(df_hist_c[cols_vis], use_container_width=True)
                 descargar_archivos(df_hist_c, "compras")
