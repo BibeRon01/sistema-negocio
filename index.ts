@@ -61,7 +61,11 @@ Deno.serve(async (request) => {
   if (!url || publishableKeys.length === 0 || !secretKey) {
     return json(503, { success: false, error: "SERVER_NOT_CONFIGURED" });
   }
-  if (!requestApiKey || !publishableKeys.includes(requestApiKey)) {
+  // La llave pública puede rotarse y Streamlit puede conservar temporalmente
+  // una llave pública anterior todavía válida. Este endpoint no autentica ni
+  // concede acceso: solo entrega un identificador técnico opaco. La contraseña
+  // y la sesión se validan después en Supabase Auth y api_my_session.
+  if (!requestApiKey) {
     return json(401, { success: false, error: "INVALID_PROJECT_KEY" });
   }
 

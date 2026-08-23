@@ -5298,6 +5298,7 @@ def _render_mfa_nativo() -> bool:
 
 
 _LOGIN_HINT_RE = re.compile(r"^u[0-9a-f]{48}@access\.ais\.invalid$")
+SESSION_INACTIVITY_SECONDS = 60 * 60
 
 
 def _resolver_email_login_usuario(usuario: str) -> str:
@@ -5357,8 +5358,8 @@ def login_simple() -> bool:
     if has_complete_session:
         ahora = datetime.now().timestamp()
         ultima = float(st.session_state.get("last_activity") or ahora)
-        if ahora - ultima > 30 * 60:
-            st.warning("La sesión terminó por 30 minutos de inactividad.")
+        if ahora - ultima > SESSION_INACTIVITY_SECONDS:
+            st.warning("La sesión terminó por 1 hora de inactividad.")
             limpiar_estado_sesion(cerrar_auth=True)
             return False
 

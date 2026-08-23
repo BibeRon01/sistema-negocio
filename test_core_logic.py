@@ -574,6 +574,8 @@ def test_login_publicable_unifica_identificador_y_revalida_la_sesion():
     assert "_last_session_validation" in secure_login
     assert "profile = _cargar_perfil_verificado()" in secure_login
     assert "active_session" not in secure_login
+    assert "SESSION_INACTIVITY_SECONDS" in secure_login
+    assert "1 hora de inactividad" in secure_login
 
 
 def test_recuperacion_password_exige_token_hash_verificado_por_supabase():
@@ -678,6 +680,8 @@ def test_usuario_es_global_y_el_resolvedor_no_autentica_por_sustitucion():
     assert "createUser" not in resolver
     assert "tenant_memberships" in resolver
     assert "login_hint: decoyHint" in resolver
+    assert "publishableKeys.includes(requestApiKey)" not in resolver
+    assert "if (!requestApiKey)" in resolver
     assert "uq_usuarios_usuario_global_ci" in sql
 
 

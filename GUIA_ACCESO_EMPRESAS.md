@@ -11,6 +11,8 @@
 - El sistema obtiene la empresa únicamente del perfil y la membresía autorizada;
   el usuario no puede elegir otro `tenant_id`.
 - La aplicación no almacena ni compara contraseñas.
+- Una sesión con actividad se revalida en cada ejecución; se cierra después de
+  una hora completa sin interacción.
 
 ## Orden de publicación
 
