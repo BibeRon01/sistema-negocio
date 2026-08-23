@@ -59,7 +59,7 @@ _API_ERROR_MESSAGES = {
     "HISTORICAL_SALE_NOT_FOUND": "No se encontró la venta histórica relacionada.",
     "HISTORICAL_EMPLOYEE_NOT_FOUND": "No se encontró el empleado histórico relacionado.",
     "INVALID_USERNAME": "Use un usuario de 3 a 32 caracteres: letras minúsculas, números, punto, guion o guion bajo.",
-    "USERNAME_ALREADY_EXISTS": "Ese usuario ya existe dentro de la empresa.",
+    "USERNAME_ALREADY_EXISTS": "Ese usuario no está disponible en la plataforma.",
     "TECHNICAL_IDENTITY_CONFLICT": "No se pudo reservar la identidad de acceso. Elija otro usuario.",
 }
 
@@ -74,6 +74,27 @@ def _mensaje_api_seguro(error: Any, fallback: str = "No se pudo completar la ope
         if code in raw:
             return message
     return fallback
+
+
+def _mensaje_api_con_sugerencias(body: Any, fallback: str) -> str:
+    data = body if isinstance(body, dict) else {}
+    message = _mensaje_api_seguro(data.get("error"), fallback)
+    if "USERNAME_ALREADY_EXISTS" not in str(data.get("error") or ""):
+        return message
+
+    suggestions: list[str] = []
+    raw_suggestions = data.get("suggestions")
+    if isinstance(raw_suggestions, list):
+        for value in raw_suggestions[:3]:
+            try:
+                candidate = normalizar_usuario_acceso(value)
+            except ValueError:
+                continue
+            if candidate not in suggestions:
+                suggestions.append(candidate)
+    if suggestions:
+        return f"{message} Opciones disponibles: {', '.join(suggestions)}."
+    return message
 
 
 def _rpc(name: str, **params) -> dict:
@@ -266,8 +287,10 @@ def invitar_usuario_seguro(
         body = response.json()
     except ValueError:
         body = {}
+    if not isinstance(body, dict):
+        body = {}
     if response.status_code >= 400 or body.get("success") is False:
-        raise ApiError(_mensaje_api_seguro(body.get("error"), "El servicio rechazó la invitación."))
+        raise ApiError(_mensaje_api_con_sugerencias(body, "El servicio rechazó la invitación."))
     return body
 
 
@@ -321,8 +344,10 @@ def gestionar_usuario_seguro(
         body = response.json()
     except ValueError:
         body = {}
+    if not isinstance(body, dict):
+        body = {}
     if response.status_code >= 400 or body.get("success") is False:
-        raise ApiError(_mensaje_api_seguro(body.get("error"), "El servicio rechazó el cambio de usuario."))
+        raise ApiError(_mensaje_api_con_sugerencias(body, "El servicio rechazó el cambio de usuario."))
     return body
 
 

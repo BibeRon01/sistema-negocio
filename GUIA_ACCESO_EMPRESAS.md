@@ -4,18 +4,19 @@
 
 - La pantalla muestra únicamente `Usuario o correo electrónico` y `Contraseña`.
 - El superadministrador de plataforma A&M entra con correo, contraseña y MFA.
-- El propietario de cada empresa recibe un acceso `empresa/usuario`, además de
-  su contraseña y MFA.
-- Cajeros y demás empleados entran con su acceso `empresa/usuario` y contraseña.
+- El propietario de cada empresa recibe un usuario global único, su contraseña
+  y MFA; no escribe ni selecciona la empresa al entrar.
+- Cajeros y demás empleados entran solo con su usuario único y contraseña.
 - Cada persona conserva una identidad individual en Supabase Auth.
+- El sistema obtiene la empresa únicamente del perfil y la membresía autorizada;
+  el usuario no puede elegir otro `tenant_id`.
 - La aplicación no almacena ni compara contraseñas.
 
 ## Orden de publicación
 
-1. Ejecute `supabase/migrations/202608150002_company_username_auth.sql` en
-   Supabase SQL Editor. Debe terminar correctamente y no informar usuarios
-   duplicados.
-2. Despliegue las Edge Functions actualizadas `invite-user` y `manage-user`.
+1. Ejecute los bloques 4 y 5 de `SQL_APLICAR_EN_SUPABASE.md` en Supabase SQL
+   Editor. Ambos deben terminar correctamente y no informar usuarios duplicados.
+2. Despliegue las Edge Functions `invite-user`, `manage-user` y `resolve-login`.
 3. Publique los archivos Python y de documentación incluidos en este cambio.
 4. Espere el reinicio de Streamlit y pruebe primero con la empresa BIBE RON.
 
@@ -32,7 +33,7 @@ Después:
 2. Desde **Gestión de Empresas**, A&M crea para BIBE RON una cuenta separada,
    por ejemplo `propietario`, con rol `admin`.
 3. El propietario de BIBE RON entra con:
-   - usuario: `biberon01/propietario`;
+   - usuario: `propietario`;
    - la contraseña empresarial asignada;
    - MFA.
 
@@ -44,12 +45,15 @@ Dentro de BIBE RON, abra **Usuarios → Crear usuario** y use, por ejemplo:
 
 - usuario: `cajera01`;
 - rol: `cajera`;
-- contraseña inicial: mínimo 12 caracteres, entregada por un canal seguro;
+- contraseña inicial: mínimo 4 caracteres y un símbolo como `.`, `@`, `!`, `_`
+  o `-`, entregada por un canal seguro;
 - permisos: vender, abrir caja y ver sus propias ventas;
 - cierre de caja: actívelo solo si la política del negocio lo permite.
 
-La cajera entrará con `biberon01/cajera01 + contraseña`. No podrá entrar en
-otra empresa porque Supabase Auth, `api_my_session` y RLS validan la membresía.
+La cajera entrará con `cajera01 + contraseña`. No podrá entrar en otra empresa
+porque Supabase Auth, `api_my_session` y RLS validan la membresía. Si `cajera01`
+ya pertenece a cualquier empresa, la creación se rechaza y muestra alternativas
+como `cajera02`, `cajera03` o `cajera04`.
 
 ## Recuperación de acceso
 

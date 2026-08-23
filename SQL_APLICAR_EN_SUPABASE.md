@@ -2,7 +2,7 @@
 
 Este documento es la única guía de ejecución SQL para esta versión. Úselo primero en un proyecto **staging**, con un respaldo verificado. Ejecute cada bloque completo y por separado, en el orden numerado. No continúe si el bloque 0 informa tablas faltantes, tipos incompatibles, perfiles sin vínculo con Auth, filas sin `empresa_id` o cajas abiertas duplicadas.
 
-Los bloques 1, 2 y 3 son transaccionales: cada uno finaliza con `COMMIT`; cualquier error antes de ese punto revierte por completo ese bloque. El bloque 4 es de solo lectura y debe revisarse antes de habilitar usuarios.
+Los bloques 1, 2, 3, 4 y 5 son transaccionales: cada uno finaliza con `COMMIT`; cualquier error antes de ese punto revierte por completo ese bloque. El bloque 6 es de solo lectura y debe revisarse antes de habilitar usuarios.
 
 ## 0. Preflight de solo lectura
 
@@ -3442,7 +3442,66 @@ having count(*) > 1;
 commit;
 ```
 
-## 5. Verificación posterior de solo lectura
+## 5. Usuario único en toda la plataforma
+
+Ejecute primero la consulta siguiente. Debe devolver cero filas. Si devuelve
+algún usuario, cambie uno de los alias repetidos desde la administración antes
+de continuar; los nombres completos de las personas sí pueden repetirse.
+
+```sql
+-- Debe devolver cero filas antes de exigir el alias global único.
+select lower(btrim(usuario)) as usuario_repetido, count(*) as cantidad
+from public.usuarios
+where usuario is not null
+  and btrim(usuario) <> ''
+group by lower(btrim(usuario))
+having count(*) > 1
+order by usuario_repetido;
+```
+
+Cuando el resultado anterior esté vacío, ejecute este bloque completo:
+
+```sql
+-- AIS: alias empresarial único en toda la plataforma.
+-- La empresa se resuelve internamente después de este alias; la contraseña
+-- permanece exclusivamente bajo Supabase Auth.
+
+begin;
+
+lock table public.usuarios in share row exclusive mode;
+
+do $$
+begin
+    if exists (
+        select 1
+        from public.usuarios
+        where usuario is not null
+          and btrim(usuario) <> ''
+        group by lower(btrim(usuario))
+        having count(*) > 1
+    ) then
+        raise exception 'DUPLICATE_GLOBAL_USERNAME_REQUIRES_REVIEW';
+    end if;
+end;
+$$;
+
+create unique index if not exists uq_usuarios_usuario_global_ci
+    on public.usuarios (lower(btrim(usuario)))
+    where usuario is not null
+      and btrim(usuario) <> '';
+
+comment on index public.uq_usuarios_usuario_global_ci is
+    'Impide repetir el alias de acceso entre empresas; el nombre completo sí puede repetirse.';
+comment on column public.usuarios.usuario is
+    'Alias global de acceso empresarial; la empresa se obtiene de la membresía validada.';
+
+revoke select on public.usuarios from anon;
+revoke insert, update, delete on public.usuarios from anon, authenticated;
+
+commit;
+```
+
+## 6. Verificación posterior de solo lectura
 
 ```sql
 -- Chequeo posterior de solo lectura. No sustituye las pruebas RLS con usuarios.

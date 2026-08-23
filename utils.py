@@ -48,20 +48,6 @@ def normalizar_usuario_acceso(valor: Any) -> str:
     return usuario
 
 
-def identificador_usuario_empresa(tenant_id: Any, usuario: Any) -> str:
-    """Construye el único identificador visible que se entrega al empleado."""
-    return f"{normalizar_tenant_acceso(tenant_id)}/{normalizar_usuario_acceso(usuario)}"
-
-
-def separar_identificador_usuario_empresa(valor: Any) -> tuple[str, str]:
-    """Separa ``empresa/usuario`` sin consultar ni enumerar empresas públicas."""
-    identificador = str(valor or "").strip().lower()
-    if identificador.count("/") != 1:
-        raise ValueError("INVALID_COMPANY_USERNAME")
-    tenant_id, usuario = identificador.split("/", 1)
-    return normalizar_tenant_acceso(tenant_id), normalizar_usuario_acceso(usuario)
-
-
 def correo_tecnico_acceso(tenant_id: Any, usuario: Any) -> str:
     """Deriva el identificador técnico usado exclusivamente por Supabase Auth.
 

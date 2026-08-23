@@ -1,0 +1,55 @@
+name: Desplegar API Supabase
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: "Ambiente protegido de GitHub"
+        required: true
+        type: choice
+        default: staging
+        options:
+          - staging
+          - production
+      confirm_production:
+        description: "Para producción escriba exactamente AUTORIZO_PRODUCCION"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Barrera explícita para producción
+        shell: bash
+        run: |
+          if [[ "${{ inputs.target_environment }}" == "production" && \
+                "${{ inputs.confirm_production }}" != "AUTORIZO_PRODUCCION" ]]; then
+            echo "Producción no autorizada."
+            exit 1
+          fi
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Aplicar migraciones
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          supabase link --project-ref "$PROJECT_REF"
+          supabase db push
+      - name: Desplegar funciones protegidas
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          supabase functions deploy invite-user --project-ref "$PROJECT_REF"
+          supabase functions deploy manage-user --project-ref "$PROJECT_REF"
+          supabase functions deploy manage-company --project-ref "$PROJECT_REF"
+          supabase functions deploy resolve-login --project-ref "$PROJECT_REF"

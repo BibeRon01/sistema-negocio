@@ -12,7 +12,7 @@ from api_client import (
 )
 from auth import es_superadmin_plataforma
 from db import limpiar_cache_datos, supabase
-from utils import identificador_usuario_empresa, mostrar_error_seguro
+from utils import mostrar_error_seguro
 
 
 def _cargar_empresas() -> pd.DataFrame:
@@ -122,7 +122,10 @@ def render_gestion_empresas():
                 username = st.text_input(
                     "Usuario de acceso",
                     placeholder="propietario",
-                    help="El propietario entrará con empresa, usuario y contraseña; no necesita correo.",
+                    help=(
+                        "Debe ser único en toda la plataforma. El propietario entrará "
+                        "solo con este usuario y su contraseña; no necesita correo."
+                    ),
                 )
                 nombre = st.text_input("Nombre completo")
                 password = st.text_input(
@@ -160,7 +163,7 @@ def render_gestion_empresas():
                         )
                         st.success(
                             "Usuario creado. Entregue el acceso "
-                            f"{identificador_usuario_empresa(tenant, username)} y la contraseña "
+                            f"{str(username).strip().lower()} y la contraseña "
                             "por un canal seguro. Los administradores configurarán MFA al entrar."
                         )
                     except ApiError as exc:

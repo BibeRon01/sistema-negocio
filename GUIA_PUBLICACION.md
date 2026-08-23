@@ -32,19 +32,21 @@ uno por uno y en este orden:
 2. API transaccional de ventas, caja, créditos e inventario.
 3. Mantenimiento, contabilidad, nómina y factura de compra atómica.
 4. Usuario empresarial único por empresa.
-5. Verificación posterior de solo lectura.
+5. Usuario único en toda la plataforma.
+6. Verificación posterior de solo lectura.
 
-Los bloques 1, 2 y 3 usan transacciones. Si aparece un error, no continúe con el
+Los bloques 1 al 5 usan transacciones. Si aparece un error, no continúe con el
 siguiente: conserve el mensaje en un canal privado y corrija primero la causa.
-El bloque 4 no reemplaza las pruebas RLS con usuarios reales.
+El bloque 6 no reemplaza las pruebas RLS con usuarios reales.
 
-## 4. Publicar las tres Edge Functions
+## 4. Publicar las cuatro Edge Functions
 
 Las funciones son:
 
 - `invite-user`
 - `manage-user`
 - `manage-company`
+- `resolve-login`
 
 El flujo manual `Desplegar API Supabase` incluido en GitHub las publica. Su
 selección predeterminada es `staging`. La opción `production` se detiene si no
@@ -73,7 +75,8 @@ python scripts/provision_owner.py \
   --platform-superadmin
 ```
 
-El programa pedirá una contraseña de al menos 12 caracteres. En la primera
+El programa pedirá una contraseña de al menos 4 caracteres y un símbolo como
+`.`, `@`, `!`, `_` o `-`. En la primera
 entrada deberá registrar y verificar el MFA nativo de Supabase hasta alcanzar
 `aal2`. Use `--platform-superadmin` únicamente para la cuenta A&M que administra
 la plataforma.
@@ -97,10 +100,11 @@ la cuenta. La service-role se usa únicamente en la terminal local y no se sube
 a GitHub ni se agrega a Streamlit.
 
 Después, desde **Gestión de Empresas**, cree cada empresa y su primer usuario
-administrador. Las cuentas empresariales entran con `empresa/usuario +
-contraseña`; no necesitan correo personal. Cada administrador empresarial debe
-configurar MFA. Los cajeros y demás empleados se crean desde **Usuarios** dentro
-de su empresa.
+administrador. Las cuentas empresariales entran únicamente con `usuario +
+contraseña`; no necesitan correo personal ni seleccionan empresa. El alias debe
+ser único en toda la plataforma. Cada administrador empresarial debe configurar
+MFA. Los cajeros y demás empleados se crean desde **Usuarios** dentro de su
+empresa.
 
 ### Recuperación de contraseña del correo A&M
 
@@ -115,7 +119,8 @@ correo **Reset Password**, use un enlace con `token_hash`:
 ```
 
 El enlace abrirá una pantalla de Streamlit que valida el token directamente con
-Supabase y permite guardar una contraseña nueva de al menos 12 caracteres. No
+Supabase y permite guardar una contraseña nueva de al menos 4 caracteres y un
+símbolo. No
 coloque access tokens ni contraseñas en la URL.
 
 ## 6. Configurar Streamlit
@@ -132,8 +137,9 @@ Seleccione `app.py` como archivo principal.
 ## 7. Pruebas obligatorias en staging
 
 1. Cree Empresa A y Empresa B.
-2. Cree un usuario diferente en cada empresa y confirme que ambos pueden usar
-   el mismo nombre de usuario sin compartir identidad ni datos.
+2. Intente crear el mismo usuario en ambas empresas y confirme que la segunda
+   creación se rechaza con sugerencias; cree una alternativa y confirme que
+   ninguna cuenta puede ver datos de la otra empresa.
 3. Configure MFA de administradores y superadministradores y confirme `aal2`.
 4. Configure productos, clientes, un empleado y su tasa ARL.
 5. Abra caja, venda, cobre a crédito, abone, anule y cierre caja.

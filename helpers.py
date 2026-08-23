@@ -7,6 +7,7 @@ import re
 import json
 import uuid
 import base64
+import requests
 import plotly.express as px
 import streamlit.components.v1 as components
 from datetime import datetime, date, timedelta
@@ -21,7 +22,7 @@ from db import (
     guardar_venta_rpc, custom_table, WrappedQueryBuilder, TABLAS_MULTI_TENANT,
     AM_LOGO_B64, get_am_logo_b64, total_contable_sin_recargo, aplicar_total_contable_df,
     es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask, obtener_secreto,
-    obtener_cliente_sesion
+    obtener_cliente_sesion, SUPABASE_URL, SUPABASE_KEY
 )
 
 from auth import (
@@ -44,8 +45,8 @@ from utils import (
     selector_fechas_universal, normalizar_item_carrito, recalcular_item_carrito,
     carrito_limpio, buscar_nombre_producto_por_item, nombre_item, numero_factura_visible,
     predecir_categoria_y_tipo_gasto, generar_codigo_secuencial, generar_codigo_producto,
-    agregar_columna_codigo_secuencial, mostrar_error_seguro, correo_tecnico_acceso,
-    normalizar_usuario_acceso, separar_identificador_usuario_empresa,
+    agregar_columna_codigo_secuencial, mostrar_error_seguro,
+    normalizar_usuario_acceso,
     PASSWORD_RULE_MESSAGE, password_usuario_valida
 )
 def valor_simple(valor: Any):
@@ -5296,6 +5297,46 @@ def _render_mfa_nativo() -> bool:
     return False
 
 
+_LOGIN_HINT_RE = re.compile(r"^u[0-9a-f]{48}@access\.ais\.invalid$")
+
+
+def _resolver_email_login_usuario(usuario: str) -> str:
+    """Resuelve un alias global sin revelar empresa, rol ni existencia.
+
+    El resultado es únicamente una identidad técnica opaca. Supabase Auth
+    continúa siendo la única autoridad que valida la contraseña y
+    ``api_my_session`` valida después la empresa y la membresía.
+    """
+    username = normalizar_usuario_acceso(usuario)
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("LOGIN_RESOLVER_NOT_CONFIGURED")
+
+    try:
+        response = requests.post(
+            f"{SUPABASE_URL.rstrip('/')}/functions/v1/resolve-login",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Content-Type": "application/json",
+            },
+            json={"username": username},
+            timeout=10,
+        )
+        body = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise RuntimeError("LOGIN_RESOLVER_UNAVAILABLE") from exc
+
+    if not isinstance(body, dict):
+        raise RuntimeError("LOGIN_RESOLVER_REJECTED")
+    login_hint = str(body.get("login_hint") or "").strip().lower()
+    if (
+        response.status_code != 200
+        or body.get("success") is not True
+        or not _LOGIN_HINT_RE.fullmatch(login_hint)
+    ):
+        raise RuntimeError("LOGIN_RESOLVER_REJECTED")
+    return login_hint
+
+
 def login_simple() -> bool:
     """Única entrada permitida: Supabase Auth, perfil SQL y MFA nativo."""
     if _render_recuperacion_password():
@@ -5379,14 +5420,13 @@ def login_simple() -> bool:
 
     identifier_input = st.text_input(
         "Usuario o correo electrónico",
-        placeholder="empresa/usuario o correo@ejemplo.com",
+        placeholder="usuario o correo@ejemplo.com",
         key="secure_login_identifier",
     )
     password = st.text_input("Contraseña", type="password", key="secure_login_password")
 
     if st.button("Entrar", type="primary", use_container_width=True, key="secure_login_submit"):
         pass_clean = str(password or "").strip()
-        tenant_login = None
         email_auth = ""
         access_kind = ""
         try:
@@ -5398,11 +5438,15 @@ def login_simple() -> bool:
                 email_auth = identifier
                 access_kind = "email"
             else:
-                tenant_login, username = separar_identificador_usuario_empresa(identifier)
-                email_auth = correo_tecnico_acceso(tenant_login, username)
+                username = normalizar_usuario_acceso(identifier)
+                email_auth = _resolver_email_login_usuario(username)
                 access_kind = "username"
         except ValueError:
-            st.error("Ingrese su correo o el usuario completo entregado por su administrador.")
+            st.error("Ingrese un usuario válido o su correo electrónico.")
+            return False
+        except RuntimeError as exc:
+            LOGGER.warning("El resolvedor de acceso rechazó la solicitud: %s", type(exc).__name__)
+            st.error("No se pudo validar el acceso en este momento. Inténtelo nuevamente.")
             return False
         if not email_auth or not pass_clean:
             st.error("Ingrese todos los datos de acceso.")
@@ -5420,16 +5464,14 @@ def login_simple() -> bool:
             if session_obj:
                 authenticated_by_supabase = True
                 _guardar_tokens_auth(session_obj)
-                profile = _cargar_perfil_verificado(tenant_login)
+                profile = _cargar_perfil_verificado()
                 if access_kind == "username":
                     if profile.get("es_superadmin") is True:
                         raise RuntimeError("PLATFORM_ACCOUNT_REQUIRES_EMAIL")
-                    if str(profile.get("tenant_id") or "") != tenant_login:
-                        raise RuntimeError("TENANT_AUTH_MISMATCH")
                 elif profile.get("es_superadmin") is not True:
                     raise RuntimeError("PLATFORM_SUPERADMIN_REQUIRED")
                 st.session_state["tenant_seleccionado"] = str(
-                    profile.get("tenant_id") or tenant_login or "global"
+                    profile.get("tenant_id") or "global"
                 )
                 # Enforzar MFA AAL2 para roles administrativos o permisos privilegiados (AIS-C03)
                 if _perfil_es_privilegiado(profile) and str(profile.get("aal") or "").lower() != "aal2":

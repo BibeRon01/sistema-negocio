@@ -11,3 +11,8 @@ verify_jwt = false
 
 [functions.manage-company]
 verify_jwt = false
+
+[functions.resolve-login]
+# Servicio previo a Auth: solo devuelve una identidad técnica opaca. La
+# contraseña sigue validándose exclusivamente en Supabase Auth.
+verify_jwt = false

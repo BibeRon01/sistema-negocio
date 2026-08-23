@@ -7,10 +7,9 @@ from nomina_view import calcular_nomina_completa
 from utils import (
     correo_tecnico_acceso,
     html_escape,
-    identificador_usuario_empresa,
     normalizar_tenant_acceso,
     normalizar_usuario_acceso,
-    separar_identificador_usuario_empresa,
+    password_usuario_valida,
 )
 
 
@@ -32,6 +31,15 @@ def test_nomina_mensual_2026():
     assert result["afp_empleado"] == 1_435
     assert result["isr"] == 1_854
     assert result["neto_pagar"] == 45_191
+
+
+def test_password_empresarial_exige_minimo_cuatro_y_simbolo():
+    assert password_usuario_valida("a1.@")
+    assert password_usuario_valida("123@")
+    assert password_usuario_valida("a12?")
+    assert not password_usuario_valida("a.@")
+    assert not password_usuario_valida("a123")
+    assert not password_usuario_valida("a12 ")
 
 
 def test_nomina_quincenal_prorratea_todas_las_deducciones():
@@ -291,9 +299,11 @@ def test_sql_consolidado_contiene_las_fuentes_en_orden_sin_divergencias():
         "supabase/checks/001_preflight_readonly.sql",
         "supabase/migrations/202607250001_secure_foundation.sql",
         "supabase/migrations/202607250002_transactional_api.sql",
-        "supabase/migrations/202607250003_maintenance_and_accounting_api.sql",
-        "supabase/migrations/202608150002_company_username_auth.sql",
-        "supabase/checks/002_postdeploy_readonly.sql",
+            "supabase/migrations/202607250003_maintenance_and_accounting_api.sql",
+            "supabase/migrations/202608150002_company_username_auth.sql",
+            "supabase/checks/003_global_username_preflight.sql",
+            "supabase/migrations/202608220001_global_unique_usernames.sql",
+            "supabase/checks/002_postdeploy_readonly.sql",
     ]
     assert blocks == [
         (ROOT / source).read_text(encoding="utf-8").strip()
@@ -365,9 +375,25 @@ def test_migraciones_no_contienen_operaciones_destructivas_de_esquema():
 def test_edge_functions_exigen_mfa_y_service_role_solo_en_servidor():
     for path in (ROOT / "supabase/functions").glob("*/index.ts"):
         code = path.read_text(encoding="utf-8")
-        assert "MFA_AAL2_REQUIRED" in code
-        assert 'Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")' in code
-        assert "getUser(token)" in code
+        assert '"SUPABASE_PUBLISHABLE_KEYS"' in code
+        assert '"SUPABASE_SECRET_KEYS"' in code
+        assert '"SUPABASE_ANON_KEY"' in code
+        assert '"SUPABASE_SERVICE_ROLE_KEY"' in code
+        assert "createClient(url, secretKey" in code
+        if path.parent.name == "resolve-login":
+            assert "MFA_AAL2_REQUIRED" not in code
+            assert "getUser(token)" not in code
+            assert '"Cache-Control": "no-store"' in code
+            assert "profiles.length !== 1" in code
+            assert "login_hint" in code
+        else:
+            assert "MFA_AAL2_REQUIRED" in code
+            assert "getUser(token)" in code
+        if path.parent.name in {"invite-user", "manage-user"}:
+            assert "PASSWORD_MIN_LENGTH = 4" in code
+            assert "passwordIsValid" in code
+            assert "PASSWORD_POLICY_INVALID" in code
+            assert "AUTH_PASSWORD_POLICY_REJECTED" in code
     application_code = "\n".join(
         (ROOT / name).read_text(encoding="utf-8")
         for name in ["app.py", "db.py", "auth.py", "helpers.py", "api_client.py"]
@@ -533,18 +559,20 @@ def test_login_publicable_unifica_identificador_y_revalida_la_sesion():
     helpers = (ROOT / "helpers.py").read_text(encoding="utf-8")
     secure_login = helpers[helpers.index("def login_simple()"):] 
     assert '"Usuario o correo electrónico"' in secure_login
-    assert 'placeholder="empresa/usuario o correo@ejemplo.com"' in secure_login
+    assert 'placeholder="usuario o correo@ejemplo.com"' in secure_login
     assert 'key="secure_login_identifier"' in secure_login
     assert 'key="secure_login_tenant"' not in secure_login
     assert 'st.text_input(\n        "Empresa"' not in secure_login
     assert '"Administrador A&M"' not in secure_login
-    assert "separar_identificador_usuario_empresa(identifier)" in secure_login
-    assert "correo_tecnico_acceso(tenant_login, username)" in secure_login
+    assert "normalizar_usuario_acceso(identifier)" in secure_login
+    assert "_resolver_email_login_usuario(username)" in secure_login
+    assert "separar_identificador_usuario_empresa" not in secure_login
+    assert "correo_tecnico_acceso" not in secure_login
     assert 'access_kind == "username"' in secure_login
     assert 'profile.get("es_superadmin") is not True' in secure_login
     assert "sign_in_with_password" in secure_login
     assert "_last_session_validation" in secure_login
-    assert "_cargar_perfil_verificado(tenant_login)" in secure_login
+    assert "profile = _cargar_perfil_verificado()" in secure_login
     assert "active_session" not in secure_login
 
 
@@ -596,17 +624,10 @@ def test_identidad_tecnica_empresarial_es_determinista_y_no_expone_datos():
     assert "cajera" not in first
     assert normalizar_tenant_acceso(" BIBERON01 ") == "biberon01"
     assert normalizar_usuario_acceso(" CAJERA01 ") == "cajera01"
-    assert identificador_usuario_empresa("BIBERON01", "CAJERA01") == "biberon01/cajera01"
-    assert separar_identificador_usuario_empresa(" BIBERON01/CAJERA01 ") == (
-        "biberon01",
-        "cajera01",
-    )
     with pytest.raises(ValueError):
         normalizar_tenant_acceso("global")
     with pytest.raises(ValueError):
         normalizar_usuario_acceso("usuario@correo.com")
-    with pytest.raises(ValueError):
-        separar_identificador_usuario_empresa("cajera01")
 
 
 def test_alta_empresarial_no_acepta_correo_personal_ni_credencial_local():
@@ -618,7 +639,7 @@ def test_alta_empresarial_no_acepta_correo_personal_ni_credencial_local():
         encoding="utf-8"
     )
     migration = (
-        ROOT / "supabase/migrations/202608150002_company_username_auth.sql"
+        ROOT / "supabase/migrations/202608220001_global_unique_usernames.sql"
     ).read_text(encoding="utf-8")
 
     invite_client = client[
@@ -635,8 +656,42 @@ def test_alta_empresarial_no_acepta_correo_personal_ni_credencial_local():
     assert "email: loginEmail" in manage
     assert "email_confirm: true" in manage
     assert "USERNAME_ALREADY_EXISTS" in manage
-    assert "uq_usuarios_empresa_usuario_ci" in migration
+    assert "uq_usuarios_usuario_global_ci" in migration
     assert "revoke select on public.usuarios from anon" in migration.lower()
+
+
+def test_usuario_es_global_y_el_resolvedor_no_autentica_por_sustitucion():
+    invite = (ROOT / "supabase/functions/invite-user/index.ts").read_text(encoding="utf-8")
+    manage = (ROOT / "supabase/functions/manage-user/index.ts").read_text(encoding="utf-8")
+    resolver = (ROOT / "supabase/functions/resolve-login/index.ts").read_text(encoding="utf-8")
+    sql = (ROOT / "SQL_APLICAR_EN_SUPABASE.md").read_text(encoding="utf-8")
+
+    invite_conflict = invite[invite.index("existingProfile"):invite.index("const email =")]
+    manage_conflict = manage[manage.index("usernameOwner"):manage.index("if (target.user_id")]
+    assert '.eq("empresa_id", tenantId)' not in invite_conflict
+    assert '.eq("empresa_id", tenantId)' not in manage_conflict
+    assert "availableUsernameSuggestions" in invite
+    assert "availableUsernameSuggestions" in manage
+    assert "USERNAME_ALREADY_EXISTS" in invite
+    assert "USERNAME_ALREADY_EXISTS" in manage
+    assert "signInWithPassword" not in resolver
+    assert "createUser" not in resolver
+    assert "tenant_memberships" in resolver
+    assert "login_hint: decoyHint" in resolver
+    assert "uq_usuarios_usuario_global_ci" in sql
+
+
+def test_documentacion_y_vistas_entregan_solo_usuario_sin_empresa_visible():
+    files = [
+        ROOT / "README.md",
+        ROOT / "GUIA_ACCESO_EMPRESAS.md",
+        ROOT / "GUIA_PUBLICACION.md",
+        ROOT / "central_am_view.py",
+        ROOT / "admin_view.py",
+    ]
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
+    assert "empresa/usuario" not in combined
+    assert "identificador_usuario_empresa(" not in combined
 
 
 def test_cliente_de_ventas_no_reintenta_otra_rpc():

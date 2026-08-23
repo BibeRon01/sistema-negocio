@@ -13,8 +13,8 @@ transaccional dentro de PostgreSQL/Supabase.
 
 - acceso únicamente con Supabase Auth;
 - una sola pantalla con `Usuario o correo electrónico + Contraseña`: A&M usa
-  su correo y cada empleado recibe un acceso único con formato
-  `empresa/usuario`;
+  su correo y cada empleado recibe un nombre de usuario único en toda la
+  plataforma; el sistema obtiene internamente su empresa;
 - acceso empresarial mediante una identidad técnica privada de Supabase Auth
   sin exigir correo personal;
 - correo visible reservado al superadministrador de plataforma A&M;
@@ -24,6 +24,8 @@ transaccional dentro de PostgreSQL/Supabase.
   superadministradores y cuentas con permisos de alto riesgo;
 - cliente Supabase aislado por sesión de Streamlit;
 - separación por empresa y permisos de lectura por módulo mediante RLS;
+- los nombres completos pueden repetirse, pero los alias de acceso no; si un
+  alias está ocupado, la administración recibe opciones numéricas disponibles;
 - service-role únicamente en Edge Functions y scripts locales;
 - ventas, cuentas abiertas, anulaciones, abonos, caja, compras y nómina mediante
   funciones transaccionales;

@@ -329,14 +329,17 @@ def render_usuarios():
                 n_usuario = st.text_input(
                     "Usuario de acceso",
                     placeholder="cajera01",
-                    help="Entrará con el ID de la empresa, este usuario y su contraseña.",
+                    help=(
+                        "Debe ser único en toda la plataforma. Entrará solo con este "
+                        "usuario y su contraseña."
+                    ),
                     key="new_usr_usuario",
                 )
                 n_nombre = st.text_input("Nombre Completo", key="new_usr_nombre")
                 n_clave = st.text_input("Contraseña / Clave", type="password", key="new_usr_clave")
                 n_rol = st.selectbox("Rol", ["admin", "gerente", "supervisor", "cajero", "cajera"], key="new_usr_rol")
             with c2:
-                n_activo = st.checkbox("Usuario Activo", value=True, key="new_usr_activo")
+                st.caption("La cuenta se crea activa y puede desactivarse después desde Editar.")
                 
             st.markdown("### 🔑 Permisos del Empleado")
             permisos_crear = render_checkboxes_permisos("new_usr", defaults_dict={
@@ -371,39 +374,20 @@ def render_usuarios():
                     if usuarios_actuales >= limite_usrs:
                         st.error(f"⚠️ Has alcanzado el límite de usuarios para tu Plan {plan_info_usr['nombre']} (Máximo {limite_usrs} usuarios). Por favor, actualiza tu plan o contacta al administrador A&M.")
                     else:
-                        user_exist = (
-                            supabase.table("usuarios")
-                            .select("id")
-                            .eq("empresa_id", _tenant)
-                            .eq("usuario", user_clean)
-                            .execute()
-                            .data
-                        )
-                        if user_exist:
-                            st.error(f"⚠️ El nombre de usuario '{user_clean}' ya está registrado. Por favor, elige uno diferente.")
-                        else:
-                            new_user_payload = {
-                                "usuario": user_clean,
-                                "nombre": name_clean,
-                                "rol": n_rol,
-                                "activo": n_activo,
-                                **permisos_crear
-                            }
-                            try:
-                                invitar_usuario_seguro(
-                                    usuario=user_clean,
-                                    password=pass_clean,
-                                    nombre=name_clean,
-                                    rol=n_rol,
-                                    tenant_id=_tenant,
-                                    permisos=permisos_crear,
-                                )
-                                invalidar_cache_tabla("usuarios")
-                                acceso_entregado = identificador_usuario_empresa(_tenant, user_clean)
-                                st.success(f"🎉 Usuario creado. Su acceso es: {acceso_entregado}")
-                                st.rerun()
-                            except ApiError as exc:
-                                st.error(str(exc))
+                        try:
+                            invitar_usuario_seguro(
+                                usuario=user_clean,
+                                password=pass_clean,
+                                nombre=name_clean,
+                                rol=n_rol,
+                                tenant_id=_tenant,
+                                permisos=permisos_crear,
+                            )
+                            invalidar_cache_tabla("usuarios")
+                            st.success(f"🎉 Usuario creado. Su acceso es: {user_clean}")
+                            st.rerun()
+                        except ApiError as exc:
+                            st.error(str(exc))
                                 
         with tab_edit:
             if df.empty:
@@ -636,7 +620,7 @@ def render_configuracion():
                 n_usuario = col_n1.text_input(
                     "Usuario de acceso",
                     placeholder="cajera01",
-                    help="No requiere correo personal.",
+                    help="Debe ser único en toda la plataforma. No requiere correo personal.",
                     key="new_emp_user",
                 )
                 n_nombre = col_n2.text_input("Nombre Completo (ej. María Delgado)", key="new_emp_name")
@@ -680,10 +664,7 @@ def render_configuracion():
                                 tenant_id=current_tenant,
                                 permisos=permisos_nuevo,
                             )
-                            acceso_entregado = identificador_usuario_empresa(
-                                current_tenant, usuario_nuevo
-                            )
-                            st.success(f"¡Cuenta creada! Su acceso es: {acceso_entregado}")
+                            st.success(f"¡Cuenta creada! Su acceso es: {usuario_nuevo}")
                             limpiar_cache_datos()
                             st.rerun()
                         except ApiError as exc:
