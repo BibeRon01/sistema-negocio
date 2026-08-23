@@ -576,6 +576,29 @@ def test_login_publicable_unifica_identificador_y_revalida_la_sesion():
     assert "active_session" not in secure_login
     assert "SESSION_INACTIVITY_SECONDS" in secure_login
     assert "1 hora de inactividad" in secure_login
+    assert "PRIVILEGED_SESSION_INACTIVITY_SECONDS = 24 * 60 * 60" in helpers
+    assert "MFA_REAUTHENTICATION_SECONDS = 24 * 60 * 60" in helpers
+    assert "mfa_verified_at" in secure_login
+
+
+def test_mfa_diario_conserva_aal2_sin_confiar_en_dispositivo_o_ubicacion():
+    helpers = (ROOT / "helpers.py").read_text(encoding="utf-8")
+    auth = (ROOT / "auth.py").read_text(encoding="utf-8")
+    guide = (ROOT / "GUIA_ACCESO_EMPRESAS.md").read_text(encoding="utf-8")
+    mfa_flow = helpers[
+        helpers.index("def _render_mfa_nativo"):
+        helpers.index("_LOGIN_HINT_RE")
+    ]
+    secure_login = helpers[helpers.index("def login_simple()") :]
+
+    assert mfa_flow.index("challenge_and_verify") < mfa_flow.index('["mfa_verified_at"]')
+    assert "ahora - mfa_verified_at > MFA_REAUTHENTICATION_SECONDS" in secure_login
+    assert "_cargar_perfil_verificado(tenant)" in secure_login
+    assert '"mfa_verified_at"' in auth
+    assert "24 horas" in guide
+    assert "no confía en IP, ubicación" in guide
+    assert "trusted_device" not in helpers
+    assert "active_session" not in helpers
 
 
 def test_recuperacion_password_exige_token_hash_verificado_por_supabase():
@@ -655,6 +678,7 @@ def test_alta_empresarial_no_acepta_correo_personal_ni_credencial_local():
     assert "admin.auth.admin.createUser" in invite
     assert "email_confirm: true" in invite
     assert "USERNAME_ALREADY_EXISTS" in invite
+    assert "USERNAME_ALREADY_IN_TENANT" in invite
     assert "email: loginEmail" in manage
     assert "email_confirm: true" in manage
     assert "USERNAME_ALREADY_EXISTS" in manage
@@ -676,6 +700,7 @@ def test_usuario_es_global_y_el_resolvedor_no_autentica_por_sustitucion():
     assert "availableUsernameSuggestions" in manage
     assert "USERNAME_ALREADY_EXISTS" in invite
     assert "USERNAME_ALREADY_EXISTS" in manage
+    assert "USERNAME_ALREADY_IN_TENANT" in invite
     assert "signInWithPassword" not in resolver
     assert "createUser" not in resolver
     assert "tenant_memberships" in resolver
@@ -696,6 +721,22 @@ def test_documentacion_y_vistas_entregan_solo_usuario_sin_empresa_visible():
     combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
     assert "empresa/usuario" not in combined
     assert "identificador_usuario_empresa(" not in combined
+
+
+def test_alta_de_usuario_empresarial_evitar_reintentos_lentos_y_refresca_conflictos():
+    admin_view = (ROOT / "admin_view.py").read_text(encoding="utf-8")
+    client = (ROOT / "api_client.py").read_text(encoding="utf-8")
+    invite = (ROOT / "supabase/functions/invite-user/index.ts").read_text(encoding="utf-8")
+
+    create_block = admin_view[
+        admin_view.index('with st.form("form_crear_usuario_empresa"'):
+        admin_view.index("with tab_edit:")
+    ]
+    assert "st.form_submit_button" in create_block
+    assert 'invalidar_cache_tabla("usuarios")' in create_block
+    assert "USERNAME_ALREADY_IN_TENANT" in client
+    assert '.select("id,empresa_id")' in invite
+    assert 'error: "USERNAME_ALREADY_IN_TENANT"' in invite
 
 
 def test_cliente_de_ventas_no_reintenta_otra_rpc():

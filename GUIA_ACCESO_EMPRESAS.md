@@ -11,8 +11,15 @@
 - El sistema obtiene la empresa únicamente del perfil y la membresía autorizada;
   el usuario no puede elegir otro `tenant_id`.
 - La aplicación no almacena ni compara contraseñas.
-- Una sesión con actividad se revalida en cada ejecución; se cierra después de
-  una hora completa sin interacción.
+- Una sesión de empleado con actividad se revalida en cada ejecución y se
+  cierra después de una hora completa sin interacción; cada acción reinicia
+  ese contador.
+- Una sesión administrativa que Supabase ya confirmó como `aal2` puede
+  permanecer abierta hasta 24 horas en el mismo navegador. Al cumplir ese
+  plazo se exige nuevamente el autenticador, aunque haya actividad.
+- Un navegador, dispositivo o ventana privada nuevos no tienen esa sesión y
+  deben completar contraseña y MFA. La aplicación no confía en IP, ubicación,
+  huellas del dispositivo ni cookies que sustituyan `aal2`.
 
 ## Orden de publicación
 
@@ -56,6 +63,13 @@ La cajera entrará con `cajera01 + contraseña`. No podrá entrar en otra empres
 porque Supabase Auth, `api_my_session` y RLS validan la membresía. Si `cajera01`
 ya pertenece a cualquier empresa, la creación se rechaza y muestra alternativas
 como `cajera02`, `cajera03` o `cajera04`.
+
+Si el mensaje indica que el usuario **ya está creado en la misma empresa**, no
+pruebe nombres sucesivos: abra **Usuarios → Lista de Usuarios**. Es posible que
+un intento anterior terminara correctamente aunque la pantalla tardara en
+mostrar la confirmación. Si desconoce la clave, asígnele una nueva desde
+**Editar / Eliminar Usuario**. Las alternativas se usan solamente cuando el
+nombre pertenece realmente a otra empresa de la plataforma.
 
 ## Recuperación de acceso
 

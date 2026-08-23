@@ -5275,8 +5275,10 @@ def _render_mfa_nativo() -> bool:
             if str(profile.get("aal") or "").lower() != "aal2":
                 raise RuntimeError("Supabase no confirmó el nivel MFA requerido.")
             st.session_state["usuario_data"] = profile
-            st.session_state["last_activity"] = datetime.now().timestamp()
-            st.session_state["_last_session_validation"] = datetime.now().timestamp()
+            verified_at = datetime.now().timestamp()
+            st.session_state["mfa_verified_at"] = verified_at
+            st.session_state["last_activity"] = verified_at
+            st.session_state["_last_session_validation"] = verified_at
             st.session_state.pop("login_pending_mfa", None)
             st.rerun()
         except Exception as exc:
@@ -5299,6 +5301,15 @@ def _render_mfa_nativo() -> bool:
 
 _LOGIN_HINT_RE = re.compile(r"^u[0-9a-f]{48}@access\.ais\.invalid$")
 SESSION_INACTIVITY_SECONDS = 60 * 60
+PRIVILEGED_SESSION_INACTIVITY_SECONDS = 24 * 60 * 60
+MFA_REAUTHENTICATION_SECONDS = 24 * 60 * 60
+
+
+def _session_inactivity_seconds(profile: dict | None) -> int:
+    """Una hora para empleados y hasta un día para una sesión AAL2 privilegiada."""
+    if isinstance(profile, dict) and _perfil_es_privilegiado(profile):
+        return PRIVILEGED_SESSION_INACTIVITY_SECONDS
+    return SESSION_INACTIVITY_SECONDS
 
 
 def _resolver_email_login_usuario(usuario: str) -> str:
@@ -5358,8 +5369,10 @@ def login_simple() -> bool:
     if has_complete_session:
         ahora = datetime.now().timestamp()
         ultima = float(st.session_state.get("last_activity") or ahora)
-        if ahora - ultima > SESSION_INACTIVITY_SECONDS:
-            st.warning("La sesión terminó por 1 hora de inactividad.")
+        # Corte máximo previo a cualquier llamada remota. El límite exacto por
+        # rol se aplica después con el perfil recién validado por Supabase.
+        if ahora - ultima > PRIVILEGED_SESSION_INACTIVITY_SECONDS:
+            st.warning("La sesión terminó después de 24 horas sin actividad.")
             limpiar_estado_sesion(cerrar_auth=True)
             return False
 
@@ -5368,6 +5381,15 @@ def login_simple() -> bool:
         try:
             tenant = str(st.session_state.get("tenant_seleccionado") or "").strip() or None
             profile = _cargar_perfil_verificado(tenant)
+
+            inactivity_limit = _session_inactivity_seconds(profile)
+            if ahora - ultima > inactivity_limit:
+                if inactivity_limit == PRIVILEGED_SESSION_INACTIVITY_SECONDS:
+                    st.warning("La sesión administrativa terminó después de 24 horas sin actividad.")
+                else:
+                    st.warning("La sesión terminó por 1 hora de inactividad.")
+                limpiar_estado_sesion(cerrar_auth=True)
+                return False
 
             if _perfil_es_privilegiado(profile) and str(profile.get("aal") or "").lower() != "aal2":
                 st.session_state.pop("usuario_data", None)
@@ -5384,6 +5406,23 @@ def login_simple() -> bool:
                     limpiar_estado_sesion(cerrar_auth=True)
                     st.error("La sesión administrativa no pudo validarse. Inicie sesión nuevamente.")
                     return False
+
+            if _perfil_es_privilegiado(profile):
+                mfa_verified_at = float(st.session_state.get("mfa_verified_at") or 0.0)
+                if mfa_verified_at <= 0:
+                    # Compatibilidad con una sesión AAL2 que ya estaba abierta
+                    # cuando se publicó esta mejora. No se fabrica AAL2: el perfil
+                    # acaba de ser revalidado por Supabase y api_my_session.
+                    st.session_state["mfa_verified_at"] = ahora
+                elif ahora - mfa_verified_at > MFA_REAUTHENTICATION_SECONDS:
+                    st.warning(
+                        "La verificación administrativa cumplió 24 horas. "
+                        "Inicie sesión y confirme nuevamente el autenticador."
+                    )
+                    limpiar_estado_sesion(cerrar_auth=True)
+                    return False
+            else:
+                st.session_state.pop("mfa_verified_at", None)
 
             st.session_state["usuario_data"] = profile
             st.session_state.pop("login_pending_mfa", None)
@@ -5480,8 +5519,14 @@ def login_simple() -> bool:
                     st.rerun()
 
                 st.session_state["usuario_data"] = profile
-                st.session_state["last_activity"] = datetime.now().timestamp()
-                st.session_state["_last_session_validation"] = datetime.now().timestamp()
+                signed_in_at = datetime.now().timestamp()
+                if _perfil_es_privilegiado(profile):
+                    # Esta rama solo acepta un JWT que Supabase ya marcó AAL2.
+                    st.session_state["mfa_verified_at"] = signed_in_at
+                else:
+                    st.session_state.pop("mfa_verified_at", None)
+                st.session_state["last_activity"] = signed_in_at
+                st.session_state["_last_session_validation"] = signed_in_at
                 auth_success = True
                 st.rerun()
         except Exception as exc:
