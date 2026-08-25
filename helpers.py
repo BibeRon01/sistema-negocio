@@ -22,7 +22,7 @@ from db import (
     guardar_venta_rpc, custom_table, WrappedQueryBuilder, TABLAS_MULTI_TENANT,
     AM_LOGO_B64, get_am_logo_b64, total_contable_sin_recargo, aplicar_total_contable_df,
     es_superadmin_plataforma, to_decimal, registrar_auditoria_pro, _pii_mask, obtener_secreto,
-    obtener_cliente_sesion, SUPABASE_URL, SUPABASE_KEY
+    obtener_cliente_sesion, sincronizar_tokens_sesion, SUPABASE_URL, SUPABASE_KEY
 )
 
 from auth import (
@@ -5089,8 +5089,11 @@ def _render_recuperacion_password() -> bool:
 
 
 def _cargar_perfil_verificado(tenant_id: str | None = None) -> dict:
+    # Supabase puede rotar el JWT de una sesión AAL2. Antes de validar Auth,
+    # sincronizamos esa pareja para que las RPC y Edge Functions usen el mismo
+    # token vigente y no vuelvan a pedir MFA dentro de la sesión de 24 horas.
+    access_token = sincronizar_tokens_sesion()
     client = obtener_cliente_sesion()
-    access_token = str(st.session_state.get("access_token") or "")
     refresh_token = str(st.session_state.get("refresh_token") or "")
     if client is None or not access_token or not refresh_token:
         raise RuntimeError("AUTH_SESSION_REQUIRED")

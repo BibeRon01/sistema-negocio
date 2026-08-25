@@ -80,6 +80,18 @@ def _token_fingerprint(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _guardar_tokens_sesion_actual(session: Any) -> str:
+    """Sincroniza la pareja rotada por Supabase con la sesión de Streamlit."""
+    access_token = str(getattr(session, "access_token", "") or "")
+    refresh_token = str(getattr(session, "refresh_token", "") or "")
+    if not access_token or not refresh_token:
+        raise RuntimeError("AUTH_SESSION_TOKENS_REQUIRED")
+    st.session_state["access_token"] = access_token
+    st.session_state["refresh_token"] = refresh_token
+    st.session_state["_supabase_session_fingerprint"] = _token_fingerprint(access_token)
+    return access_token
+
+
 def _crear_cliente_sesion() -> Client | None:
     """Crea un cliente exclusivo para la sesión Streamlit actual.
 
@@ -96,8 +108,7 @@ def _crear_cliente_sesion() -> Client | None:
             if refresh_token:
                 auth_response = client.auth.set_session(access_token, refresh_token)
                 if getattr(auth_response, "session", None):
-                    st.session_state["access_token"] = auth_response.session.access_token
-                    st.session_state["refresh_token"] = auth_response.session.refresh_token
+                    _guardar_tokens_sesion_actual(auth_response.session)
             else:
                 client.postgrest.auth(access_token)
         except Exception:
@@ -115,8 +126,27 @@ def obtener_cliente_sesion(forzar_nuevo: bool = False) -> Client | None:
     if forzar_nuevo or cached is None or cached_fingerprint != fingerprint:
         cached = _crear_cliente_sesion()
         st.session_state["_supabase_session_client"] = cached
-        st.session_state["_supabase_session_fingerprint"] = fingerprint
+        st.session_state["_supabase_session_fingerprint"] = _token_fingerprint(
+            str(st.session_state.get("access_token") or "")
+        )
     return cached
+
+
+def sincronizar_tokens_sesion() -> str:
+    """Obtiene/renueva la sesión Supabase y devuelve el JWT vigente.
+
+    ``get_session`` rota el access/refresh token cuando el JWT se acerca a su
+    vencimiento. Copiar inmediatamente ambos valores evita que las Edge
+    Functions reciban el JWT anterior mientras ``api_my_session`` ya utiliza
+    la sesión renovada. La autorización sigue verificándose remotamente.
+    """
+    client = obtener_cliente_sesion()
+    if client is None:
+        raise RuntimeError("AUTH_SESSION_REQUIRED")
+    session = client.auth.get_session()
+    if session is None:
+        raise RuntimeError("AUTH_SESSION_REQUIRED")
+    return _guardar_tokens_sesion_actual(session)
 
 
 def renovar_cliente_sesion() -> Client | None:

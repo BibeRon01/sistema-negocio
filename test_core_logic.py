@@ -1,5 +1,6 @@
 from pathlib import Path
 import ast
+from types import SimpleNamespace
 
 import pytest
 
@@ -600,6 +601,50 @@ def test_mfa_diario_conserva_aal2_sin_confiar_en_dispositivo_o_ubicacion():
     assert "no confía en IP, ubicación" in guide
     assert "trusted_device" not in helpers
     assert "active_session" not in helpers
+
+
+def test_token_aal2_rotado_se_sincroniza_antes_de_rpc_y_edge_functions():
+    db = (ROOT / "db.py").read_text(encoding="utf-8")
+    helpers = (ROOT / "helpers.py").read_text(encoding="utf-8")
+    client = (ROOT / "api_client.py").read_text(encoding="utf-8")
+
+    sync = db[
+        db.index("def sincronizar_tokens_sesion"):
+        db.index("def renovar_cliente_sesion")
+    ]
+    verified_profile = helpers[
+        helpers.index("def _cargar_perfil_verificado"):
+        helpers.index("def cambiar_tenant_autorizado")
+    ]
+    assert "client.auth.get_session()" in sync
+    assert '_guardar_tokens_sesion_actual(session)' in sync
+    assert 'st.session_state["access_token"] = access_token' in db
+    assert 'st.session_state["refresh_token"] = refresh_token' in db
+    assert verified_profile.index("sincronizar_tokens_sesion()") < verified_profile.index(
+        "client.auth.get_user(access_token)"
+    )
+    assert "def _access_token_vigente" in client
+    assert client.count("access_token = _access_token_vigente()") == 4
+
+
+def test_sincronizacion_copia_ambos_tokens_rotados(monkeypatch):
+    import db
+
+    rotated = SimpleNamespace(
+        access_token="jwt-aal2-rotado",
+        refresh_token="refresh-rotado",
+    )
+    fake_client = SimpleNamespace(
+        auth=SimpleNamespace(get_session=lambda: rotated),
+    )
+    session_state = {}
+    monkeypatch.setattr(db, "obtener_cliente_sesion", lambda: fake_client)
+    monkeypatch.setattr(db.st, "session_state", session_state)
+
+    assert db.sincronizar_tokens_sesion() == "jwt-aal2-rotado"
+    assert session_state["access_token"] == "jwt-aal2-rotado"
+    assert session_state["refresh_token"] == "refresh-rotado"
+    assert session_state["_supabase_session_fingerprint"] != "anon"
 
 
 def test_recuperacion_password_exige_token_hash_verificado_por_supabase():

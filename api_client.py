@@ -13,7 +13,13 @@ from typing import Any
 import requests
 import streamlit as st
 
-from db import SUPABASE_KEY, SUPABASE_URL, obtener_tenant_actual, supabase
+from db import (
+    SUPABASE_KEY,
+    SUPABASE_URL,
+    obtener_tenant_actual,
+    sincronizar_tokens_sesion,
+    supabase,
+)
 from utils import (
     PASSWORD_RULE_MESSAGE,
     normalizar_usuario_acceso,
@@ -79,6 +85,18 @@ _API_ERROR_MESSAGES = {
 
 class ApiError(RuntimeError):
     pass
+
+
+def _access_token_vigente() -> str:
+    """Entrega a las Edge Functions el JWT que Supabase acaba de renovar."""
+    try:
+        access_token = sincronizar_tokens_sesion()
+    except Exception as exc:
+        LOGGER.warning("No se pudo renovar la sesión administrativa: %s", type(exc).__name__)
+        raise ApiError("La sesión administrativa expiró. Inicie sesión nuevamente.") from exc
+    if not access_token:
+        raise ApiError("La sesión administrativa expiró. Inicie sesión nuevamente.")
+    return access_token
 
 
 def _mensaje_api_seguro(error: Any, fallback: str = "No se pudo completar la operación.") -> str:
@@ -263,9 +281,7 @@ def invitar_usuario_seguro(
     tenant_id: str,
     permisos: dict | None = None,
 ) -> dict:
-    access_token = str(st.session_state.get("access_token") or "")
-    if not access_token:
-        raise ApiError("La sesión administrativa expiró.")
+    access_token = _access_token_vigente()
     try:
         username = normalizar_usuario_acceso(usuario)
     except ValueError as exc:
@@ -318,9 +334,7 @@ def gestionar_usuario_seguro(
     permisos: dict,
     nueva_password: str = "",
 ) -> dict:
-    access_token = str(st.session_state.get("access_token") or "")
-    if not access_token:
-        raise ApiError("La sesión administrativa expiró.")
+    access_token = _access_token_vigente()
     try:
         username = normalizar_usuario_acceso(usuario)
     except ValueError as exc:
@@ -367,9 +381,7 @@ def gestionar_usuario_seguro(
 
 def eliminar_usuario_seguro(*, profile_id: Any, tenant_id: str) -> dict:
     """Elimina Auth, perfil y membresía solo tras la validación remota de historial."""
-    access_token = str(st.session_state.get("access_token") or "")
-    if not access_token:
-        raise ApiError("La sesión administrativa expiró.")
+    access_token = _access_token_vigente()
 
     url = f"{SUPABASE_URL.rstrip('/')}/functions/v1/manage-user"
     try:
@@ -419,9 +431,7 @@ def gestionar_empresa_seguro(
     activo: bool = True,
     configuracion: dict | None = None,
 ) -> dict:
-    access_token = str(st.session_state.get("access_token") or "")
-    if not access_token:
-        raise ApiError("La sesión de superadministrador expiró.")
+    access_token = _access_token_vigente()
 
     url = f"{SUPABASE_URL.rstrip('/')}/functions/v1/manage-company"
     try:

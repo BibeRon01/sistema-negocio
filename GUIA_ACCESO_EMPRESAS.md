@@ -17,6 +17,9 @@
 - Una sesión administrativa que Supabase ya confirmó como `aal2` puede
   permanecer abierta hasta 24 horas en el mismo navegador. Al cumplir ese
   plazo se exige nuevamente el autenticador, aunque haya actividad.
+- Durante esas 24 horas la aplicación sincroniza los access/refresh tokens que
+  Supabase rota; crear, desactivar o eliminar usuarios no debe solicitar otro
+  código mientras la misma sesión `aal2` continúe válida.
 - Un navegador, dispositivo o ventana privada nuevos no tienen esa sesión y
   deben completar contraseña y MFA. La aplicación no confía en IP, ubicación,
   huellas del dispositivo ni cookies que sustituyan `aal2`.
