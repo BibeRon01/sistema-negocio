@@ -41,6 +41,15 @@ _API_ERROR_MESSAGES = {
     "INVALID_USER_DATA": "Revise el usuario, nombre, rol y contraseña indicados.",
     "USER_MANAGEMENT_PERMISSION_DENIED": "No tiene permiso para administrar usuarios de esa empresa.",
     "TENANT_NOT_ACTIVE": "La empresa seleccionada no está activa.",
+    "INVALID_USER_ACTION": "La acción solicitada para el usuario no es válida.",
+    "USER_MUST_BE_INACTIVE": "Primero desactive el usuario y luego intente eliminarlo definitivamente.",
+    "USER_HAS_OPERATIONAL_HISTORY": (
+        "Este usuario tiene operaciones o auditoría asociadas. Por seguridad contable "
+        "debe conservarse desactivado y no puede eliminarse."
+    ),
+    "CANNOT_DELETE_SELF": "No puede eliminar la cuenta con la que inició sesión.",
+    "DELETE_PRECHECK_FAILED": "No se pudo comprobar de forma segura si el usuario tiene historial.",
+    "AUTH_USER_NOT_DELETED": "Supabase Auth no pudo eliminar la identidad del usuario.",
     "AUTH_USER_NOT_CREATED": "Supabase Auth no pudo crear la cuenta del usuario.",
     "PROFILE_NOT_CREATED": "La cuenta no se guardó porque el perfil empresarial fue rechazado.",
     "PURCHASE_PERMISSION_DENIED": "No tiene permiso para registrar compras en esta empresa.",
@@ -59,6 +68,10 @@ _API_ERROR_MESSAGES = {
     "HISTORICAL_SALE_NOT_FOUND": "No se encontró la venta histórica relacionada.",
     "HISTORICAL_EMPLOYEE_NOT_FOUND": "No se encontró el empleado histórico relacionado.",
     "INVALID_USERNAME": "Use un usuario de 3 a 32 caracteres: letras minúsculas, números, punto, guion o guion bajo.",
+    "USERNAME_ALREADY_IN_TENANT": (
+        "Ese usuario ya está creado en esta empresa. Revise Lista de Usuarios; "
+        "si no conoce la clave, cámbiela desde Editar / Eliminar Usuario."
+    ),
     "USERNAME_ALREADY_EXISTS": "Ese usuario no está disponible en la plataforma.",
     "TECHNICAL_IDENTITY_CONFLICT": "No se pudo reservar la identidad de acceso. Elija otro usuario.",
 }
@@ -325,6 +338,7 @@ def gestionar_usuario_seguro(
                 "Content-Type": "application/json",
             },
             json={
+                "action": "update",
                 "profile_id": str(profile_id),
                 "tenant_id": str(tenant_id),
                 "username": username,
@@ -348,6 +362,52 @@ def gestionar_usuario_seguro(
         body = {}
     if response.status_code >= 400 or body.get("success") is False:
         raise ApiError(_mensaje_api_con_sugerencias(body, "El servicio rechazó el cambio de usuario."))
+    return body
+
+
+def eliminar_usuario_seguro(*, profile_id: Any, tenant_id: str) -> dict:
+    """Elimina Auth, perfil y membresía solo tras la validación remota de historial."""
+    access_token = str(st.session_state.get("access_token") or "")
+    if not access_token:
+        raise ApiError("La sesión administrativa expiró.")
+
+    url = f"{SUPABASE_URL.rstrip('/')}/functions/v1/manage-user"
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "apikey": SUPABASE_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "action": "delete",
+                "profile_id": str(profile_id),
+                "tenant_id": str(tenant_id).strip(),
+            },
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        LOGGER.error(
+            "Servicio de eliminación de usuarios no disponible (%s)",
+            type(exc).__name__,
+            exc_info=exc,
+        )
+        raise ApiError("No se pudo contactar el servicio de usuarios.") from exc
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    if response.status_code >= 400 or body.get("success") is False:
+        raise ApiError(
+            _mensaje_api_seguro(
+                body.get("error"),
+                "El servicio rechazó la eliminación del usuario.",
+            )
+        )
     return body
 
 

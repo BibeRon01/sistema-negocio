@@ -33,11 +33,12 @@ uno por uno y en este orden:
 3. Mantenimiento, contabilidad, nómina y factura de compra atómica.
 4. Usuario empresarial único por empresa.
 5. Usuario único en toda la plataforma.
-6. Verificación posterior de solo lectura.
+6. Validación para eliminar usuarios inactivos sin historial.
+7. Verificación posterior de solo lectura.
 
-Los bloques 1 al 5 usan transacciones. Si aparece un error, no continúe con el
+Los bloques 1 al 6 usan transacciones. Si aparece un error, no continúe con el
 siguiente: conserve el mensaje en un canal privado y corrija primero la causa.
-El bloque 6 no reemplaza las pruebas RLS con usuarios reales.
+El bloque 7 no reemplaza las pruebas RLS con usuarios reales.
 
 ## 4. Publicar las cuatro Edge Functions
 
@@ -153,6 +154,9 @@ Seleccione `app.py` como archivo principal.
 11. Cree un respaldo cifrado y restáurelo en otro staging vacío.
 12. Fuerce un producto inválido dentro de una factura de prueba y confirme que
     no quedó cabecera, línea, compra, lote, stock ni asiento parcial.
+13. Cree una cuenta sin operaciones, desactívela y elimínela definitivamente;
+    confirme que el alias queda disponible. Repita con una cuenta que sí tenga
+    historial y confirme que solo pueda permanecer desactivada.
 
 ## 8. Paso a producción
 

@@ -30,7 +30,12 @@ except ModuleNotFoundError:
     from utils import *
     from helpers import *
 
-from api_client import ApiError, gestionar_usuario_seguro, invitar_usuario_seguro
+from api_client import (
+    ApiError,
+    eliminar_usuario_seguro,
+    gestionar_usuario_seguro,
+    invitar_usuario_seguro,
+)
 
 def render_dashboard():
     st.title("📊 Dashboard PRO")
@@ -324,32 +329,40 @@ def render_usuarios():
                 st.info("No hay usuarios registrados para tu empresa.")
                 
         with tab_create:
-            c1, c2 = st.columns(2)
-            with c1:
-                n_usuario = st.text_input(
-                    "Usuario de acceso",
-                    placeholder="cajera01",
-                    help=(
-                        "Debe ser único en toda la plataforma. Entrará solo con este "
-                        "usuario y su contraseña."
-                    ),
-                    key="new_usr_usuario",
+            # El formulario evita una reejecución completa (y nuevas llamadas a
+            # Supabase) por cada permiso marcado. Todo se envía una sola vez.
+            with st.form("form_crear_usuario_empresa", clear_on_submit=False):
+                c1, c2 = st.columns(2)
+                with c1:
+                    n_usuario = st.text_input(
+                        "Usuario de acceso",
+                        placeholder="cajera01",
+                        help=(
+                            "Debe ser único en toda la plataforma. Entrará solo con este "
+                            "usuario y su contraseña."
+                        ),
+                        key="new_usr_usuario",
+                    )
+                    n_nombre = st.text_input("Nombre Completo", key="new_usr_nombre")
+                    n_clave = st.text_input("Contraseña / Clave", type="password", key="new_usr_clave")
+                    n_rol = st.selectbox("Rol", ["admin", "gerente", "supervisor", "cajero", "cajera"], key="new_usr_rol")
+                with c2:
+                    st.caption("La cuenta se crea activa y puede desactivarse después desde Editar.")
+
+                st.markdown("### 🔑 Permisos del Empleado")
+                permisos_crear = render_checkboxes_permisos("new_usr", defaults_dict={
+                    "puede_vender": True,
+                    "puede_abrir_caja": True,
+                    "puede_cerrar_caja": True,
+                    "puede_ver_ventas_propias": True
+                })
+                crear_usuario = st.form_submit_button(
+                    "🚀 Crear Usuario",
+                    type="primary",
+                    use_container_width=True,
                 )
-                n_nombre = st.text_input("Nombre Completo", key="new_usr_nombre")
-                n_clave = st.text_input("Contraseña / Clave", type="password", key="new_usr_clave")
-                n_rol = st.selectbox("Rol", ["admin", "gerente", "supervisor", "cajero", "cajera"], key="new_usr_rol")
-            with c2:
-                st.caption("La cuenta se crea activa y puede desactivarse después desde Editar.")
-                
-            st.markdown("### 🔑 Permisos del Empleado")
-            permisos_crear = render_checkboxes_permisos("new_usr", defaults_dict={
-                "puede_vender": True,
-                "puede_abrir_caja": True,
-                "puede_cerrar_caja": True,
-                "puede_ver_ventas_propias": True
-            })
-                
-            if st.button("🚀 Crear Usuario", key="btn_crear_usuario_new", use_container_width=True):
+
+            if crear_usuario:
                 try:
                     user_clean = normalizar_usuario_acceso(n_usuario)
                 except ValueError:
@@ -375,18 +388,22 @@ def render_usuarios():
                         st.error(f"⚠️ Has alcanzado el límite de usuarios para tu Plan {plan_info_usr['nombre']} (Máximo {limite_usrs} usuarios). Por favor, actualiza tu plan o contacta al administrador A&M.")
                     else:
                         try:
-                            invitar_usuario_seguro(
-                                usuario=user_clean,
-                                password=pass_clean,
-                                nombre=name_clean,
-                                rol=n_rol,
-                                tenant_id=_tenant,
-                                permisos=permisos_crear,
-                            )
+                            with st.spinner("Creando y verificando el usuario..."):
+                                invitar_usuario_seguro(
+                                    usuario=user_clean,
+                                    password=pass_clean,
+                                    nombre=name_clean,
+                                    rol=n_rol,
+                                    tenant_id=_tenant,
+                                    permisos=permisos_crear,
+                                )
                             invalidar_cache_tabla("usuarios")
                             st.success(f"🎉 Usuario creado. Su acceso es: {user_clean}")
                             st.rerun()
                         except ApiError as exc:
+                            # Si un intento anterior terminó en el servidor pero
+                            # la respuesta se perdió, la lista no debe quedar obsoleta.
+                            invalidar_cache_tabla("usuarios")
                             st.error(str(exc))
                                 
         with tab_edit:
@@ -406,6 +423,7 @@ def render_usuarios():
                 # Sincronizar y forzar reconstrucción de widgets si cambia el usuario seleccionado
                 if "prev_selected_user_id" not in st.session_state or st.session_state["prev_selected_user_id"] != usr_sel["id"]:
                     st.session_state["prev_selected_user_id"] = usr_sel["id"]
+                    st.session_state.pop("confirm_hard_delete_user", None)
                     for k in list(st.session_state.keys()):
                         if k.startswith("edit_usr_") or k.startswith("edit_usr"):
                             st.session_state.pop(k, None)
@@ -471,6 +489,45 @@ def render_usuarios():
                                 st.rerun()
                             except ApiError as exc:
                                 st.error(str(exc))
+
+                st.markdown("---")
+                if bool(usr_sel.get("activo", True)):
+                    st.caption(
+                        "Para eliminar definitivamente una cuenta creada por error, "
+                        "primero debe desactivarla."
+                    )
+                else:
+                    st.warning(
+                        "La eliminación definitiva solo continuará si Supabase confirma "
+                        "que esta cuenta nunca realizó operaciones. Si tiene historial, "
+                        "permanecerá desactivada."
+                    )
+                    confirmar_borrado = st.checkbox(
+                        f"Confirmo que deseo eliminar definitivamente a {usr_sel['usuario']}",
+                        key="confirm_hard_delete_user",
+                    )
+                    if st.button(
+                        "🗑️ Eliminar definitivamente y liberar usuario",
+                        key="btn_hard_delete_unused_user",
+                        type="primary",
+                        use_container_width=True,
+                        disabled=not confirmar_borrado,
+                    ):
+                        try:
+                            with st.spinner("Comprobando que la cuenta no tenga historial..."):
+                                eliminar_usuario_seguro(
+                                    profile_id=usr_sel["id"],
+                                    tenant_id=obtener_tenant_actual(),
+                                )
+                            invalidar_cache_tabla("usuarios")
+                            st.success(
+                                "Usuario eliminado definitivamente. El nombre de acceso "
+                                "ya está disponible nuevamente."
+                            )
+                            st.rerun()
+                        except ApiError as exc:
+                            invalidar_cache_tabla("usuarios")
+                            st.error(str(exc))
 
 # =========================================================
 # CONFIGURACION

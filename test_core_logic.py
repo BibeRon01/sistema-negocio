@@ -303,6 +303,7 @@ def test_sql_consolidado_contiene_las_fuentes_en_orden_sin_divergencias():
             "supabase/migrations/202608150002_company_username_auth.sql",
             "supabase/checks/003_global_username_preflight.sql",
             "supabase/migrations/202608220001_global_unique_usernames.sql",
+            "supabase/migrations/202608250001_safe_unused_user_deletion.sql",
             "supabase/checks/002_postdeploy_readonly.sql",
     ]
     assert blocks == [
@@ -737,6 +738,37 @@ def test_alta_de_usuario_empresarial_evitar_reintentos_lentos_y_refresca_conflic
     assert "USERNAME_ALREADY_IN_TENANT" in client
     assert '.select("id,empresa_id")' in invite
     assert 'error: "USERNAME_ALREADY_IN_TENANT"' in invite
+
+
+def test_eliminacion_permanente_solo_admite_usuarios_inactivos_sin_historial():
+    sql = (
+        ROOT / "supabase/migrations/202608250001_safe_unused_user_deletion.sql"
+    ).read_text(encoding="utf-8")
+    consolidated = (ROOT / "SQL_APLICAR_EN_SUPABASE.md").read_text(encoding="utf-8")
+    edge = (ROOT / "supabase/functions/manage-user/index.ts").read_text(encoding="utf-8")
+    client = (ROOT / "api_client.py").read_text(encoding="utf-8")
+    view = (ROOT / "admin_view.py").read_text(encoding="utf-8")
+
+    assert "api_prepare_delete_unused_user" in sql
+    assert "MFA_AAL2_REQUIRED" in sql
+    assert "USER_MUST_BE_INACTIVE" in sql
+    assert "USER_HAS_OPERATIONAL_HISTORY" in sql
+    assert "pg_attribute" in sql
+    assert "usuario_id::text = $1" in sql
+    assert "for update of u, tm" in sql.lower()
+    assert "grant execute" in sql.lower()
+    assert "to authenticated" in sql.lower()
+    assert "api_prepare_delete_unused_user" in consolidated
+
+    delete_branch = edge[edge.index('if (action === "delete")'):]
+    assert "target.activo === true || oldMembership.active === true" in delete_branch
+    assert delete_branch.index("api_prepare_delete_unused_user") < delete_branch.index("deleteUser(")
+    assert "false," in delete_branch[delete_branch.index("deleteUser("):]
+    assert "username_available: true" in delete_branch
+    assert '"action": "delete"' in client
+    assert "def eliminar_usuario_seguro" in client
+    assert "confirm_hard_delete_user" in view
+    assert "Eliminar definitivamente y liberar usuario" in view
 
 
 def test_cliente_de_ventas_no_reintenta_otra_rpc():

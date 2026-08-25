@@ -71,6 +71,20 @@ mostrar la confirmación. Si desconoce la clave, asígnele una nueva desde
 **Editar / Eliminar Usuario**. Las alternativas se usan solamente cuando el
 nombre pertenece realmente a otra empresa de la plataforma.
 
+## Eliminar cuentas creadas por error
+
+1. Abra **Usuarios → Editar / Eliminar Usuario**.
+2. Seleccione la cuenta equivocada y pulse **Desactivar Usuario**.
+3. Selecciónela nuevamente, confirme la advertencia y pulse
+   **Eliminar definitivamente y liberar usuario**.
+
+La eliminación definitiva exige MFA `aal2` y solo funciona cuando Supabase
+confirma que la cuenta no tiene ventas, cajas, compras, gastos, movimientos,
+nómina, auditoría ni ninguna otra tabla con su `usuario_id`. Si existe historial,
+la cuenta permanece desactivada para conservar la trazabilidad contable. Cuando
+la eliminación termina correctamente se borran la identidad de Supabase Auth,
+el perfil y la membresía; el alias global queda disponible para otra persona.
+
 ## Recuperación de acceso
 
 - A&M recupera su cuenta por correo; el enlace con `token_hash` se valida en la

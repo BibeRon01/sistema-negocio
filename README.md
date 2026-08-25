@@ -66,7 +66,9 @@ ejecutarse completos y por separado en el orden indicado:
 2. API transaccional de ventas, caja, créditos e inventario;
 3. mantenimiento, contabilidad, nómina y factura de compra atómica;
 4. unicidad de usuarios por empresa para el acceso empresarial;
-5. verificación posterior de solo lectura.
+5. alias de usuario único en toda la plataforma;
+6. validación para eliminar cuentas inactivas sin historial;
+7. verificación posterior de solo lectura.
 
 `SQL_PARA_PEGAR.md` es histórico y está obsoleto: no lo ejecute. Los archivos de
 `supabase/migrations/` y `supabase/checks/` se conservan como fuentes trazables
