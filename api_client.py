@@ -414,12 +414,15 @@ def eliminar_usuario_seguro(*, profile_id: Any, tenant_id: str) -> dict:
     if not isinstance(body, dict):
         body = {}
     if response.status_code >= 400 or body.get("success") is False:
-        raise ApiError(
-            _mensaje_api_seguro(
-                body.get("error"),
-                "El servicio rechazó la eliminación del usuario.",
-            )
+        error_code = str(body.get("error") or "DELETE_REJECTED")
+        support_code = (
+            error_code if error_code in _API_ERROR_MESSAGES else "DELETE_REJECTED"
         )
+        safe_message = _mensaje_api_seguro(
+            error_code,
+            "El servicio rechazó la eliminación del usuario.",
+        )
+        raise ApiError(f"{safe_message} Código: {support_code}.")
     return body
 
 

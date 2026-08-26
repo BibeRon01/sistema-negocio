@@ -625,6 +625,8 @@ def test_token_aal2_rotado_se_sincroniza_antes_de_rpc_y_edge_functions():
     )
     assert "def _access_token_vigente" in client
     assert client.count("access_token = _access_token_vigente()") == 4
+    assert 'VERSION_SISTEMA = "v3.0.1-secure"' in db
+    assert 'Código: {support_code}' in client
 
 
 def test_sincronizacion_copia_ambos_tokens_rotados(monkeypatch):
