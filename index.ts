@@ -170,13 +170,15 @@ Deno.serve(async (request) => {
     .maybeSingle();
   if (targetError || !target?.user_id) return json(404, { success: false, error: "USER_NOT_FOUND" });
   const { data: targetAuth, error: targetAuthError } = await admin.auth.admin.getUserById(target.user_id);
-  if (targetAuthError || !targetAuth?.user) {
+  const targetAuthUser = targetAuth?.user ?? null;
+  const targetAuthMissing = Boolean(targetAuthError || !targetAuthUser);
+  if (targetAuthMissing && action !== "delete") {
     return json(404, { success: false, error: "AUTH_USER_NOT_FOUND" });
   }
-  if (targetAuth?.user?.app_metadata?.role === "superadmin" && !isPlatformSuperadmin) {
+  if (targetAuthUser?.app_metadata?.role === "superadmin" && !isPlatformSuperadmin) {
     return json(403, { success: false, error: "PLATFORM_SUPERADMIN_PROTECTED" });
   }
-  if (targetAuth?.user?.app_metadata?.role === "superadmin") {
+  if (targetAuthUser?.app_metadata?.role === "superadmin") {
     return json(403, { success: false, error: "PLATFORM_SUPERADMIN_USES_EMAIL" });
   }
 
@@ -211,6 +213,7 @@ Deno.serve(async (request) => {
         "USER_NOT_FOUND",
         "CANNOT_DELETE_SELF",
         "PLATFORM_SUPERADMIN_PROTECTED",
+        "ORPHAN_PROFILE_NOT_DELETED",
       ].find((code) => message.includes(code));
       return json(400, {
         success: false,
@@ -222,6 +225,30 @@ Deno.serve(async (request) => {
         success: false,
         error: String(preparation?.error ?? "DELETE_PRECHECK_FAILED"),
       });
+    }
+
+    if (preparation.orphan_cleaned === true) {
+      await admin.from("auditoria_eventos").insert({
+        empresa_id: tenantId,
+        usuario_id: callerData.user.id,
+        accion: "perfil_huerfano_sin_actividad_eliminado",
+        modulo: "Usuarios",
+        tabla: "usuarios",
+        registro_id: profileId,
+        detalle: "Limpieza transaccional de perfil inactivo sin identidad Auth ni historial",
+        metadata: { username: target.usuario, former_role: target.rol },
+      });
+
+      return json(200, {
+        success: true,
+        deleted: true,
+        orphan_cleaned: true,
+        username: target.usuario,
+        username_available: true,
+      });
+    }
+    if (targetAuthMissing) {
+      return json(409, { success: false, error: "AUTH_USER_STATE_INCONSISTENT" });
     }
 
     // Auth es la identidad raíz. Sus FK con ON DELETE CASCADE eliminan perfil

@@ -33,7 +33,8 @@ uno por uno y en este orden:
 3. Mantenimiento, contabilidad, nómina y factura de compra atómica.
 4. Usuario empresarial único por empresa.
 5. Usuario único en toda la plataforma.
-6. Validación para eliminar usuarios inactivos sin historial.
+6. Validación para eliminar usuarios inactivos sin historial y limpiar de forma
+   transaccional perfiles huérfanos heredados.
 7. Verificación posterior de solo lectura.
 
 Los bloques 1 al 6 usan transacciones. Si aparece un error, no continúe con el

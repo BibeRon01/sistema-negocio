@@ -17,6 +17,7 @@ declare
     v_username text;
     v_profile_active boolean;
     v_membership_active boolean;
+    v_auth_user_exists boolean;
     v_table record;
     v_has_history boolean;
 begin
@@ -64,7 +65,12 @@ begin
             'error', 'USER_MUST_BE_INACTIVE'
         );
     end if;
-    if exists (
+    select exists (
+        select 1
+        from auth.users au
+        where au.id = v_target_user_id
+    ) into v_auth_user_exists;
+    if v_auth_user_exists and exists (
         select 1
         from auth.users au
         where au.id = v_target_user_id
@@ -130,10 +136,36 @@ begin
         end if;
     end loop;
 
+    -- Una eliminación anterior puede haber quitado auth.users sin que una
+    -- instalación heredada tuviera aún las FK con ON DELETE CASCADE. En ese
+    -- único caso, limpia perfil y membresía dentro de esta misma transacción.
+    if not v_auth_user_exists then
+        delete from public.tenant_memberships
+        where user_id = v_target_user_id
+          and tenant_id = p_tenant_id;
+
+        delete from public.usuarios
+        where id = p_profile_id
+          and user_id = v_target_user_id
+          and empresa_id = p_tenant_id;
+
+        if not found then
+            raise exception 'ORPHAN_PROFILE_NOT_DELETED';
+        end if;
+
+        return jsonb_build_object(
+            'success', true,
+            'user_id', v_target_user_id,
+            'username', v_username,
+            'orphan_cleaned', true
+        );
+    end if;
+
     return jsonb_build_object(
         'success', true,
         'user_id', v_target_user_id,
-        'username', v_username
+        'username', v_username,
+        'orphan_cleaned', false
     );
 end;
 $$;

@@ -26,8 +26,8 @@
 
 ## Orden de publicación
 
-1. Ejecute los bloques 4 y 5 de `SQL_APLICAR_EN_SUPABASE.md` en Supabase SQL
-   Editor. Ambos deben terminar correctamente y no informar usuarios duplicados.
+1. Ejecute los bloques 4, 5 y 6 de `SQL_APLICAR_EN_SUPABASE.md` en Supabase SQL
+   Editor. Deben terminar correctamente y no informar usuarios duplicados.
 2. Despliegue las Edge Functions `invite-user`, `manage-user` y `resolve-login`.
 3. Publique los archivos Python y de documentación incluidos en este cambio.
 4. Espere el reinicio de Streamlit y pruebe primero con la empresa BIBE RON.
@@ -87,6 +87,9 @@ nómina, auditoría ni ninguna otra tabla con su `usuario_id`. Si existe histori
 la cuenta permanece desactivada para conservar la trazabilidad contable. Cuando
 la eliminación termina correctamente se borran la identidad de Supabase Auth,
 el perfil y la membresía; el alias global queda disponible para otra persona.
+Si un intento antiguo ya borró Auth pero dejó el perfil visible, el bloque 6
+también elimina ese perfil huérfano y su membresía en una sola transacción,
+siempre después de confirmar que están inactivos y no tienen historial.
 
 ## Recuperación de acceso
 

@@ -67,7 +67,8 @@ ejecutarse completos y por separado en el orden indicado:
 3. mantenimiento, contabilidad, nómina y factura de compra atómica;
 4. unicidad de usuarios por empresa para el acceso empresarial;
 5. alias de usuario único en toda la plataforma;
-6. validación para eliminar cuentas inactivas sin historial;
+6. validación para eliminar cuentas inactivas sin historial y limpiar perfiles
+   huérfanos heredados sin liberar cuentas que tengan operaciones;
 7. verificación posterior de solo lectura.
 
 `SQL_PARA_PEGAR.md` es histórico y está obsoleto: no lo ejecute. Los archivos de

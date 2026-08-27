@@ -800,20 +800,31 @@ def test_eliminacion_permanente_solo_admite_usuarios_inactivos_sin_historial():
     assert "MFA_AAL2_REQUIRED" in sql
     assert "USER_MUST_BE_INACTIVE" in sql
     assert "USER_HAS_OPERATIONAL_HISTORY" in sql
+    assert "v_auth_user_exists" in sql
+    assert "orphan_cleaned" in sql
+    assert "delete from public.tenant_memberships" in sql.lower()
+    assert "delete from public.usuarios" in sql.lower()
+    assert "ORPHAN_PROFILE_NOT_DELETED" in sql
     assert "pg_attribute" in sql
     assert "usuario_id::text = $1" in sql
     assert "for update of u, tm" in sql.lower()
     assert "grant execute" in sql.lower()
     assert "to authenticated" in sql.lower()
     assert "api_prepare_delete_unused_user" in consolidated
+    assert "orphan_cleaned" in consolidated
 
     delete_branch = edge[edge.index('if (action === "delete")'):]
     assert "target.activo === true || oldMembership.active === true" in delete_branch
     assert delete_branch.index("api_prepare_delete_unused_user") < delete_branch.index("deleteUser(")
+    assert delete_branch.index("preparation.orphan_cleaned === true") < delete_branch.index("deleteUser(")
     assert "false," in delete_branch[delete_branch.index("deleteUser("):]
     assert "username_available: true" in delete_branch
+    assert 'targetAuthMissing && action !== "delete"' in edge
+    assert 'error: "AUTH_USER_STATE_INCONSISTENT"' in delete_branch
     assert '"action": "delete"' in client
     assert "def eliminar_usuario_seguro" in client
+    assert '"AUTH_USER_NOT_FOUND"' in client
+    assert '"ORPHAN_PROFILE_NOT_DELETED"' in client
     assert "confirm_hard_delete_user" in view
     assert "Eliminar definitivamente y liberar usuario" in view
 

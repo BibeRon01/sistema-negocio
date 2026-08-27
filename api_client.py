@@ -46,6 +46,16 @@ _API_ERROR_MESSAGES = {
     ),
     "INVALID_USER_DATA": "Revise el usuario, nombre, rol y contraseña indicados.",
     "USER_MANAGEMENT_PERMISSION_DENIED": "No tiene permiso para administrar usuarios de esa empresa.",
+    "AUTH_USER_NOT_FOUND": (
+        "La identidad de acceso ya no existe en Supabase Auth. Si el perfil está "
+        "inactivo y sin historial, vuelva a intentar para completar su limpieza segura."
+    ),
+    "AUTH_USER_STATE_INCONSISTENT": (
+        "Supabase devolvió un estado inconsistente para esta identidad. Recargue e inténtelo nuevamente."
+    ),
+    "MEMBERSHIP_NOT_FOUND": "El usuario no tiene una membresía válida en la empresa seleccionada.",
+    "PLATFORM_SUPERADMIN_PROTECTED": "La cuenta principal A&M no puede eliminarse desde Empresas.",
+    "PLATFORM_SUPERADMIN_USES_EMAIL": "La cuenta principal A&M se administra mediante su correo.",
     "TENANT_NOT_ACTIVE": "La empresa seleccionada no está activa.",
     "INVALID_USER_ACTION": "La acción solicitada para el usuario no es válida.",
     "USER_MUST_BE_INACTIVE": "Primero desactive el usuario y luego intente eliminarlo definitivamente.",
@@ -55,6 +65,7 @@ _API_ERROR_MESSAGES = {
     ),
     "CANNOT_DELETE_SELF": "No puede eliminar la cuenta con la que inició sesión.",
     "DELETE_PRECHECK_FAILED": "No se pudo comprobar de forma segura si el usuario tiene historial.",
+    "ORPHAN_PROFILE_NOT_DELETED": "No se pudo retirar el perfil huérfano de forma transaccional.",
     "AUTH_USER_NOT_DELETED": "Supabase Auth no pudo eliminar la identidad del usuario.",
     "AUTH_USER_NOT_CREATED": "Supabase Auth no pudo crear la cuenta del usuario.",
     "PROFILE_NOT_CREATED": "La cuenta no se guardó porque el perfil empresarial fue rechazado.",
@@ -415,9 +426,7 @@ def eliminar_usuario_seguro(*, profile_id: Any, tenant_id: str) -> dict:
         body = {}
     if response.status_code >= 400 or body.get("success") is False:
         error_code = str(body.get("error") or "DELETE_REJECTED")
-        support_code = (
-            error_code if error_code in _API_ERROR_MESSAGES else "DELETE_REJECTED"
-        )
+        support_code = error_code if error_code in _API_ERROR_MESSAGES else f"HTTP_{response.status_code}"
         safe_message = _mensaje_api_seguro(
             error_code,
             "El servicio rechazó la eliminación del usuario.",
