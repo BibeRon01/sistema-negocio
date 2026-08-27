@@ -132,7 +132,15 @@ En los secretos de la aplicación coloque solamente:
 ```toml
 SUPABASE_URL = "https://PROYECTO-STAGING.supabase.co"
 SUPABASE_KEY = "LLAVE_PUBLICA_O_ANON"
+SESSION_COOKIE_SECRET = "VALOR_PRIVADO_ALEATORIO_DE_32_O_MAS_CARACTERES"
 ```
+
+Genere `SESSION_COOKIE_SECRET` una sola vez en su computadora con
+`python -c "import secrets; print(secrets.token_urlsafe(48))"`, péguelo en
+**Streamlit → Manage app → Settings → Secrets** y consérvelo sin cambios. No lo
+suba a GitHub ni lo configure en Supabase. Este secreto cifra los tokens reales
+de Supabase que permiten recuperar en el mismo navegador una sesión todavía
+vigente; Auth y `api_my_session` siempre vuelven a validarla.
 
 Seleccione `app.py` como archivo principal.
 

@@ -22,6 +22,8 @@ transaccional dentro de PostgreSQL/Supabase.
   `api_my_session`, cerrándola ante cualquier error;
 - MFA nativo de Supabase con nivel `aal2` obligatorio para administradores,
   superadministradores y cuentas con permisos de alto riesgo;
+- recuperación cifrada de una sesión Supabase todavía vigente en el mismo
+  navegador, con revalidación remota y vencimiento de 24 horas para MFA;
 - cliente Supabase aislado por sesión de Streamlit;
 - separación por empresa y permisos de lectura por módulo mediante RLS;
 - los nombres completos pueden repetirse, pero los alias de acceso no; si un
@@ -43,7 +45,8 @@ transaccional dentro de PostgreSQL/Supabase.
 1. Cree un ambiente virtual con Python 3.12.
 2. Instale `requirements.txt`.
 3. Copie `.streamlit/secrets.example.toml` como `.streamlit/secrets.toml`.
-4. Coloque solo la URL de Supabase y la llave pública/anon.
+4. Coloque la URL de Supabase, la llave pública/anon y un
+   `SESSION_COOKIE_SECRET` privado de 32 caracteres o más.
 5. Ejecute `streamlit run app.py`.
 
 Nunca coloque la service-role, una contraseña, un certificado fiscal o una llave

@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import logging
+import hashlib
 import re
 import json
 import uuid
@@ -48,6 +49,12 @@ from utils import (
     agregar_columna_codigo_secuencial, mostrar_error_seguro,
     normalizar_usuario_acceso,
     PASSWORD_RULE_MESSAGE, password_usuario_valida
+)
+from session_cookie import (
+    borrar_sesion_navegador,
+    guardar_sesion_navegador,
+    leer_sesion_navegador,
+    persistencia_navegador_configurada,
 )
 def valor_simple(valor: Any):
     if isinstance(valor, pd.Series):
@@ -5132,6 +5139,7 @@ def cambiar_tenant_autorizado(tenant_id: str) -> dict:
     st.session_state["usuario_data"] = profile
     st.session_state["tenant_seleccionado"] = tenant
     st.session_state["_last_session_validation"] = datetime.now().timestamp()
+    _persistir_sesion_navegador(profile, force=True)
     limpiar_cache_datos()
     return profile
 
@@ -5283,6 +5291,7 @@ def _render_mfa_nativo() -> bool:
             st.session_state["last_activity"] = verified_at
             st.session_state["_last_session_validation"] = verified_at
             st.session_state.pop("login_pending_mfa", None)
+            _persistir_sesion_navegador(profile, force=True)
             st.rerun()
         except Exception as exc:
             LOGGER.warning("Falló la verificación MFA: %s", type(exc).__name__)
@@ -5313,6 +5322,88 @@ def _session_inactivity_seconds(profile: dict | None) -> int:
     if isinstance(profile, dict) and _perfil_es_privilegiado(profile):
         return PRIVILEGED_SESSION_INACTIVITY_SECONDS
     return SESSION_INACTIVITY_SECONDS
+
+
+def _persistir_sesion_navegador(profile: dict, *, force: bool = False) -> bool:
+    """Actualiza la cookie cifrada sin convertirla en una fuente de acceso."""
+    access_token = str(st.session_state.get("access_token") or "")
+    refresh_token = str(st.session_state.get("refresh_token") or "")
+    tenant_id = str(
+        profile.get("tenant_id")
+        or st.session_state.get("tenant_seleccionado")
+        or ""
+    ).strip()
+    now = datetime.now().timestamp()
+    privileged = _perfil_es_privilegiado(profile)
+    mfa_verified_at = float(st.session_state.get("mfa_verified_at") or 0.0)
+    fingerprint = hashlib.sha256(
+        f"{access_token}\0{refresh_token}\0{tenant_id}\0{mfa_verified_at}".encode("utf-8")
+    ).hexdigest()
+    last_write = float(st.session_state.get("_browser_cookie_last_write") or 0.0)
+    if (
+        not force
+        and st.session_state.get("_browser_cookie_fingerprint") == fingerprint
+        and now - last_write < 5 * 60
+    ):
+        return True
+
+    saved = guardar_sesion_navegador(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        tenant_id=tenant_id,
+        privileged=privileged,
+        mfa_verified_at=mfa_verified_at,
+        last_activity=now,
+    )
+    if saved:
+        st.session_state["_browser_cookie_fingerprint"] = fingerprint
+        st.session_state["_browser_cookie_last_write"] = now
+    return saved
+
+
+def _restaurar_sesion_navegador() -> bool:
+    """Reconstruye tokens cifrados y exige validación remota completa."""
+    payload = leer_sesion_navegador()
+    if not payload:
+        return False
+
+    try:
+        now = datetime.now().timestamp()
+        _guardar_tokens_auth({
+            "access_token": str(payload.get("access_token") or ""),
+            "refresh_token": str(payload.get("refresh_token") or ""),
+        })
+        tenant = str(payload.get("tenant_id") or "").strip()
+        st.session_state["tenant_seleccionado"] = tenant
+        profile = _cargar_perfil_verificado(tenant)
+
+        last_activity = float(payload.get("last_activity") or 0.0)
+        if last_activity <= 0 or now - last_activity > _session_inactivity_seconds(profile):
+            raise RuntimeError("BROWSER_SESSION_INACTIVE")
+
+        if _perfil_es_privilegiado(profile):
+            mfa_verified_at = float(payload.get("mfa_verified_at") or 0.0)
+            if str(profile.get("aal") or "").lower() != "aal2":
+                raise RuntimeError("MFA_AAL2_REQUIRED")
+            if (
+                mfa_verified_at <= 0
+                or now - mfa_verified_at > MFA_REAUTHENTICATION_SECONDS
+            ):
+                raise RuntimeError("MFA_REAUTHENTICATION_REQUIRED")
+            st.session_state["mfa_verified_at"] = mfa_verified_at
+        else:
+            st.session_state.pop("mfa_verified_at", None)
+
+        st.session_state["usuario_data"] = profile
+        st.session_state["last_activity"] = now
+        st.session_state["_last_session_validation"] = now
+        st.session_state.pop("login_pending_mfa", None)
+        _persistir_sesion_navegador(profile, force=True)
+        return True
+    except Exception as exc:
+        LOGGER.warning("La restauración de sesión fue rechazada: %s", type(exc).__name__)
+        limpiar_estado_sesion(cerrar_auth=True)
+        return False
 
 
 def _resolver_email_login_usuario(usuario: str) -> str:
@@ -5356,6 +5447,10 @@ def login_simple() -> bool:
     """Única entrada permitida: Supabase Auth, perfil SQL y MFA nativo."""
     if _render_recuperacion_password():
         return False
+
+    if not st.session_state.get("access_token") and not st.session_state.get("refresh_token"):
+        if _restaurar_sesion_navegador():
+            return True
 
     session_values = {
         "profile": st.session_state.get("usuario_data"),
@@ -5436,6 +5531,7 @@ def login_simple() -> bool:
             st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
             return False
         st.session_state["last_activity"] = ahora
+        _persistir_sesion_navegador(profile)
         return True
 
     if any(session_values.values()):
@@ -5450,6 +5546,13 @@ def login_simple() -> bool:
         """,
         unsafe_allow_html=True,
     )
+
+    if not persistencia_navegador_configurada():
+        st.info(
+            "La sesión segura de este navegador aún no está configurada. "
+            "Agregue SESSION_COOKIE_SECRET en los secretos de Streamlit para "
+            "recordar el MFA durante 24 horas."
+        )
 
     if st.session_state.get("login_pending_mfa"):
         try:
@@ -5530,6 +5633,7 @@ def login_simple() -> bool:
                     st.session_state.pop("mfa_verified_at", None)
                 st.session_state["last_activity"] = signed_in_at
                 st.session_state["_last_session_validation"] = signed_in_at
+                _persistir_sesion_navegador(profile, force=True)
                 auth_success = True
                 st.rerun()
         except Exception as exc:

@@ -20,4 +20,5 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: pytest
+      - run: pip-audit -r requirements.txt
       - run: bandit -q -lll -iii -r . -x ./tests,./modules,./core

@@ -25,6 +25,10 @@ _SESSION_KEYS = (
     "_last_session_validation",
     "_supabase_session_client",
     "_supabase_session_fingerprint",
+    "_ais_cookie_manager",
+    "_session_cookie_event",
+    "_browser_cookie_fingerprint",
+    "_browser_cookie_last_write",
     "session_cache_tablas",
 )
 
@@ -51,6 +55,11 @@ def limpiar_estado_sesion(*, cerrar_auth: bool = False) -> None:
             supabase.auth.sign_out()
         except Exception:
             pass
+    try:
+        from session_cookie import borrar_sesion_navegador
+        borrar_sesion_navegador()
+    except Exception:
+        pass
     for key in _SESSION_KEYS:
         st.session_state.pop(key, None)
     limpiar_cache_datos()

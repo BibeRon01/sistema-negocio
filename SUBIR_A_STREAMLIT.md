@@ -20,7 +20,12 @@
 ```toml
 SUPABASE_URL = "https://SU-PROYECTO.supabase.co"
 SUPABASE_KEY = "SU_LLAVE_PUBLISHABLE_O_ANON"
+SESSION_COOKIE_SECRET = "VALOR_PRIVADO_ALEATORIO_DE_32_O_MAS_CARACTERES"
 ```
+
+Genere `SESSION_COOKIE_SECRET` una sola vez con
+`python -c "import secrets; print(secrets.token_urlsafe(48))"`. Péguelo solo en
+los secretos de Streamlit; no lo suba a GitHub ni lo coloque en Supabase.
 
 `SUPABASE_KEY` debe ser la llave **Publishable** (`sb_publishable_...`) o la
 llave pública `anon` heredada. Nunca coloque `service_role`, `sb_secret_`, una

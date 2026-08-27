@@ -20,6 +20,12 @@
 - Durante esas 24 horas la aplicación sincroniza los access/refresh tokens que
   Supabase rota; crear, desactivar o eliminar usuarios no debe solicitar otro
   código mientras la misma sesión `aal2` continúe válida.
+- Para sobrevivir una reconexión o reinicio de Streamlit, la pareja de tokens
+  se conserva cifrada en una cookie `Secure`/`SameSite=Strict` durante el plazo
+  permitido. Requiere `SESSION_COOKIE_SECRET` en los secretos de Streamlit.
+  La cookie nunca autoriza por sí sola: al recuperarla se vuelven a consultar
+  Supabase Auth y `api_my_session`, y los administradores deben seguir en
+  `aal2`; cualquier error cierra y elimina la sesión.
 - Un navegador, dispositivo o ventana privada nuevos no tienen esa sesión y
   deben completar contraseña y MFA. La aplicación no confía en IP, ubicación,
   huellas del dispositivo ni cookies que sustituyan `aal2`.
@@ -90,6 +96,8 @@ el perfil y la membresía; el alias global queda disponible para otra persona.
 Si un intento antiguo ya borró Auth pero dejó el perfil visible, el bloque 6
 también elimina ese perfil huérfano y su membresía en una sola transacción,
 siempre después de confirmar que están inactivos y no tienen historial.
+Repetir la eliminación de una cuenta que ya desapareció se considera un éxito
+idempotente y no vuelve a mostrar un falso `HTTP_404`.
 
 ## Recuperación de acceso
 

@@ -45,6 +45,8 @@ _API_ERROR_MESSAGES = {
         "permitir mínimo 4 caracteres y exigir un símbolo."
     ),
     "INVALID_USER_DATA": "Revise el usuario, nombre, rol y contraseña indicados.",
+    "USER_NOT_FOUND": "Ese usuario ya no existe. Recargue la lista de usuarios.",
+    "PROFILE_LOOKUP_FAILED": "No se pudo comprobar el perfil del usuario de forma segura.",
     "USER_MANAGEMENT_PERMISSION_DENIED": "No tiene permiso para administrar usuarios de esa empresa.",
     "AUTH_USER_NOT_FOUND": (
         "La identidad de acceso ya no existe en Supabase Auth. Si el perfil está "

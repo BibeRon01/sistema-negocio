@@ -168,7 +168,22 @@ Deno.serve(async (request) => {
     .eq("id", profileId)
     .eq("empresa_id", tenantId)
     .maybeSingle();
-  if (targetError || !target?.user_id) return json(404, { success: false, error: "USER_NOT_FOUND" });
+  if (targetError) {
+    return json(400, { success: false, error: "PROFILE_LOOKUP_FAILED" });
+  }
+  if (!target?.user_id) {
+    // La eliminación es idempotente: una repetición causada por una vista
+    // desactualizada no debe convertirse en un falso HTTP 404.
+    if (action === "delete") {
+      return json(200, {
+        success: true,
+        deleted: true,
+        already_deleted: true,
+        username_available: true,
+      });
+    }
+    return json(404, { success: false, error: "USER_NOT_FOUND" });
+  }
   const { data: targetAuth, error: targetAuthError } = await admin.auth.admin.getUserById(target.user_id);
   const targetAuthUser = targetAuth?.user ?? null;
   const targetAuthMissing = Boolean(targetAuthError || !targetAuthUser);

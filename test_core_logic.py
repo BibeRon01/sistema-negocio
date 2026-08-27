@@ -1,5 +1,6 @@
 from pathlib import Path
 import ast
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -586,6 +587,7 @@ def test_login_publicable_unifica_identificador_y_revalida_la_sesion():
 def test_mfa_diario_conserva_aal2_sin_confiar_en_dispositivo_o_ubicacion():
     helpers = (ROOT / "helpers.py").read_text(encoding="utf-8")
     auth = (ROOT / "auth.py").read_text(encoding="utf-8")
+    cookie = (ROOT / "session_cookie.py").read_text(encoding="utf-8")
     guide = (ROOT / "GUIA_ACCESO_EMPRESAS.md").read_text(encoding="utf-8")
     mfa_flow = helpers[
         helpers.index("def _render_mfa_nativo"):
@@ -596,11 +598,74 @@ def test_mfa_diario_conserva_aal2_sin_confiar_en_dispositivo_o_ubicacion():
     assert mfa_flow.index("challenge_and_verify") < mfa_flow.index('["mfa_verified_at"]')
     assert "ahora - mfa_verified_at > MFA_REAUTHENTICATION_SECONDS" in secure_login
     assert "_cargar_perfil_verificado(tenant)" in secure_login
+    assert "_restaurar_sesion_navegador()" in secure_login
+    restore = helpers[
+        helpers.index("def _restaurar_sesion_navegador"):
+        helpers.index("def _resolver_email_login_usuario")
+    ]
+    assert restore.index("_guardar_tokens_auth") < restore.index("_cargar_perfil_verificado")
+    assert 'profile.get("aal")' in restore
+    assert "MFA_REAUTHENTICATION_SECONDS" in restore
+    assert "limpiar_estado_sesion(cerrar_auth=True)" in restore
     assert '"mfa_verified_at"' in auth
     assert "24 horas" in guide
     assert "no confía en IP, ubicación" in guide
+    assert "Fernet" in cookie
+    assert "SESSION_COOKIE_SECRET" in cookie
+    assert 'secure=_request_is_https()' in cookie
+    assert 'same_site="strict"' in cookie
+    assert "borrar_sesion_navegador" in auth
+    assert "extra-streamlit-components==0.1.81" in (
+        ROOT / "requirements.txt"
+    ).read_text(encoding="utf-8")
     assert "trusted_device" not in helpers
     assert "active_session" not in helpers
+
+
+def test_cookie_de_sesion_cifra_tokens_y_rechaza_manipulacion(monkeypatch):
+    import session_cookie
+
+    cookie_jar = {}
+
+    class FakeManager:
+        def __init__(self):
+            self.cookies = cookie_jar
+
+        def set(self, cookie, value, **_kwargs):
+            cookie_jar[cookie] = value
+
+        def delete(self, cookie, **_kwargs):
+            cookie_jar.pop(cookie, None)
+
+    manager = FakeManager()
+    monkeypatch.setenv("SESSION_COOKIE_SECRET", "s" * 48)
+    monkeypatch.setattr(session_cookie, "stx", object())
+    monkeypatch.setattr(session_cookie.st, "session_state", {})
+    monkeypatch.setattr(session_cookie, "_cookie_manager", lambda: manager)
+    monkeypatch.setattr(session_cookie, "_request_cookies", lambda: dict(cookie_jar))
+    monkeypatch.setattr(session_cookie, "_request_is_https", lambda: True)
+
+    now = datetime.now().timestamp()
+    assert session_cookie.guardar_sesion_navegador(
+        access_token="access-token-private",
+        refresh_token="refresh-token-private",
+        tenant_id="empresa01",
+        privileged=True,
+        mfa_verified_at=now,
+        last_activity=now,
+    )
+    encoded = cookie_jar[session_cookie.COOKIE_NAME]
+    assert "access-token-private" not in encoded
+    assert "refresh-token-private" not in encoded
+    payload = session_cookie.leer_sesion_navegador()
+    assert payload["access_token"] == "access-token-private"
+    assert payload["refresh_token"] == "refresh-token-private"
+
+    cookie_jar[session_cookie.COOKIE_NAME] = encoded[:-1] + (
+        "A" if encoded[-1] != "A" else "B"
+    )
+    assert session_cookie.leer_sesion_navegador() is None
+    assert session_cookie.COOKIE_NAME not in cookie_jar
 
 
 def test_token_aal2_rotado_se_sincroniza_antes_de_rpc_y_edge_functions():
@@ -821,8 +886,13 @@ def test_eliminacion_permanente_solo_admite_usuarios_inactivos_sin_historial():
     assert "username_available: true" in delete_branch
     assert 'targetAuthMissing && action !== "delete"' in edge
     assert 'error: "AUTH_USER_STATE_INCONSISTENT"' in delete_branch
+    assert 'error: "PROFILE_LOOKUP_FAILED"' in edge
+    assert 'action === "delete"' in edge
+    assert "already_deleted: true" in edge
     assert '"action": "delete"' in client
     assert "def eliminar_usuario_seguro" in client
+    assert '"USER_NOT_FOUND"' in client
+    assert '"PROFILE_LOOKUP_FAILED"' in client
     assert '"AUTH_USER_NOT_FOUND"' in client
     assert '"ORPHAN_PROFILE_NOT_DELETED"' in client
     assert "confirm_hard_delete_user" in view
