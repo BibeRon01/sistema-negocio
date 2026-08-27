@@ -311,6 +311,17 @@ def render_usuarios():
     if not es_admin():
         st.error("No tienes permiso para entrar aquí. Solo el administrador de la empresa puede gestionar los usuarios.")
     else:
+        usuarios_tab_labels = [
+            "👥 Lista de Usuarios",
+            "➕ Crear Usuario",
+            "✏️ Editar / Eliminar Usuario",
+        ]
+        tab_destino = st.session_state.pop("_usuarios_tab_destino", "")
+        if tab_destino in usuarios_tab_labels:
+            # Se establece antes de construir el widget. Así, un rerun causado
+            # por desactivar o eliminar no devuelve al usuario a la primera pestaña.
+            st.session_state["usuarios_tabs"] = tab_destino
+
         # Los widgets conservan su valor entre reruns. Después de actualizar o
         # desactivar una cuenta se reconstruyen antes de volver a dibujarlos,
         # para que no mantengan el estado activo anterior.
@@ -319,6 +330,9 @@ def render_usuarios():
                 if state_key.startswith("edit_usr_"):
                     st.session_state.pop(state_key, None)
             st.session_state.pop("confirm_hard_delete_user", None)
+        if st.session_state.pop("_reset_user_editor_selection", False):
+            st.session_state.pop("select_user_to_edit", None)
+            st.session_state.pop("prev_selected_user_id", None)
 
         # Esta vista usa el caché selectivo de tabla, no la copia global DATA.
         # invalidar_cache_tabla("usuarios") fuerza una consulta fresca en el
@@ -327,7 +341,12 @@ def render_usuarios():
         user_notice = st.session_state.pop("_usuarios_notice", "")
         if user_notice:
             st.success(user_notice)
-        tab_list, tab_create, tab_edit = st.tabs(["👥 Lista de Usuarios", "➕ Crear Usuario", "✏️ Editar / Eliminar Usuario"])
+        tab_list, tab_create, tab_edit = st.tabs(
+            usuarios_tab_labels,
+            default=usuarios_tab_labels[0],
+            key="usuarios_tabs",
+            on_change="rerun",
+        )
         
         with tab_list:
             if not df.empty:
@@ -481,6 +500,7 @@ def render_usuarios():
                             )
                             invalidar_cache_tabla("usuarios")
                             st.session_state["_reset_user_editor_widgets"] = True
+                            st.session_state["_usuarios_tab_destino"] = usuarios_tab_labels[2]
                             st.session_state["_usuarios_notice"] = (
                                 f"¡Usuario '{edit_username}' actualizado con éxito!"
                             )
@@ -504,9 +524,10 @@ def render_usuarios():
                                 )
                                 invalidar_cache_tabla("usuarios")
                                 st.session_state["_reset_user_editor_widgets"] = True
+                                st.session_state["_usuarios_tab_destino"] = usuarios_tab_labels[2]
                                 st.session_state["_usuarios_notice"] = (
                                     f"Usuario '{usr_sel['usuario']}' desactivado. "
-                                    "Ya puede seleccionarlo para comprobar si admite eliminación definitiva."
+                                    "Ya puede comprobar si admite eliminación definitiva."
                                 )
                                 st.rerun()
                             except ApiError as exc:
@@ -543,6 +564,8 @@ def render_usuarios():
                                 )
                             invalidar_cache_tabla("usuarios")
                             st.session_state["_reset_user_editor_widgets"] = True
+                            st.session_state["_reset_user_editor_selection"] = True
+                            st.session_state["_usuarios_tab_destino"] = usuarios_tab_labels[2]
                             st.session_state["_usuarios_notice"] = (
                                 "Usuario eliminado definitivamente. El nombre de acceso "
                                 "ya está disponible nuevamente."

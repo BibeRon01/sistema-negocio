@@ -900,6 +900,10 @@ def test_eliminacion_permanente_solo_admite_usuarios_inactivos_sin_historial():
     assert 'df = leer_tabla("usuarios").copy()' in view
     assert 'invalidar_cache_tabla("usuarios")' in view
     assert '"_reset_user_editor_widgets"' in view
+    assert 'key="usuarios_tabs"' in view
+    assert 'on_change="rerun"' in view
+    assert '"_usuarios_tab_destino"' in view
+    assert '"_reset_user_editor_selection"' in view
 
 
 def test_cliente_de_ventas_no_reintenta_otra_rpc():
