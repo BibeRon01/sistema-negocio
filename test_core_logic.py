@@ -897,6 +897,9 @@ def test_eliminacion_permanente_solo_admite_usuarios_inactivos_sin_historial():
     assert '"ORPHAN_PROFILE_NOT_DELETED"' in client
     assert "confirm_hard_delete_user" in view
     assert "Eliminar definitivamente y liberar usuario" in view
+    assert 'df = leer_tabla("usuarios").copy()' in view
+    assert 'invalidar_cache_tabla("usuarios")' in view
+    assert '"_reset_user_editor_widgets"' in view
 
 
 def test_cliente_de_ventas_no_reintenta_otra_rpc():
