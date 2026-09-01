@@ -70,11 +70,37 @@ def _component_key(prefix: str) -> str:
     return f"ais_session_{prefix}_{event}"
 
 
-def _request_cookies() -> dict[str, str]:
+def _context_cookies() -> dict[str, str]:
     try:
         return {str(key): str(value) for key, value in dict(st.context.cookies).items()}
     except Exception:
         return {}
+
+
+def _request_cookies() -> dict[str, str]:
+    """Lee cookies del request y, si hace falta, del componente del navegador.
+
+    ``st.context.cookies`` representa el request que abrió la sesión. Una cookie
+    escrita por JavaScript después de ese momento puede no aparecer allí hasta
+    otra conexión. El lector del componente evita perderla durante un rerun o un
+    reinicio de la aplicación.
+    """
+    cookies = _context_cookies()
+    if COOKIE_NAME in cookies or stx is None:
+        return cookies
+    try:
+        manager = _cookie_manager()
+        component_cookies = manager.get_all(key="ais_session_cookie_reader")
+        if isinstance(component_cookies, dict):
+            cookies.update(
+                {str(key): str(value) for key, value in component_cookies.items()}
+            )
+    except Exception as exc:
+        LOGGER.warning(
+            "No se pudieron consultar las cookies del navegador (%s).",
+            type(exc).__name__,
+        )
+    return cookies
 
 
 def _request_is_https() -> bool:

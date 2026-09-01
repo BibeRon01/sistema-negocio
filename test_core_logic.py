@@ -614,12 +614,30 @@ def test_mfa_diario_conserva_aal2_sin_confiar_en_dispositivo_o_ubicacion():
     assert "SESSION_COOKIE_SECRET" in cookie
     assert 'secure=_request_is_https()' in cookie
     assert 'same_site="strict"' in cookie
+    assert 'manager.get_all(key="ais_session_cookie_reader")' in cookie
     assert "borrar_sesion_navegador" in auth
     assert "extra-streamlit-components==0.1.81" in (
         ROOT / "requirements.txt"
     ).read_text(encoding="utf-8")
     assert "trusted_device" not in helpers
     assert "active_session" not in helpers
+
+    mfa_success = mfa_flow[
+        mfa_flow.index("challenge_and_verify"):
+        mfa_flow.index("except Exception as exc")
+    ]
+    assert "_persistir_sesion_navegador(profile, force=True)" in mfa_success
+    assert "st.rerun()" not in mfa_success
+
+    password_start = secure_login.index(
+        "auth_response = supabase.auth.sign_in_with_password"
+    )
+    password_success = secure_login[
+        password_start:
+        secure_login.index("except Exception as exc", password_start)
+    ]
+    persisted = password_success.index("_persistir_sesion_navegador(profile, force=True)")
+    assert "st.rerun()" not in password_success[persisted:]
 
 
 def test_cookie_de_sesion_cifra_tokens_y_rechaza_manipulacion(monkeypatch):
@@ -666,6 +684,22 @@ def test_cookie_de_sesion_cifra_tokens_y_rechaza_manipulacion(monkeypatch):
     )
     assert session_cookie.leer_sesion_navegador() is None
     assert session_cookie.COOKIE_NAME not in cookie_jar
+
+
+def test_cookie_de_sesion_usa_lector_del_navegador_si_el_request_no_la_trae(monkeypatch):
+    import session_cookie
+
+    expected = {session_cookie.COOKIE_NAME: "cookie-cifrada"}
+
+    class FakeManager:
+        def get_all(self, **_kwargs):
+            return expected
+
+    monkeypatch.setattr(session_cookie, "stx", object())
+    monkeypatch.setattr(session_cookie, "_context_cookies", lambda: {})
+    monkeypatch.setattr(session_cookie, "_cookie_manager", FakeManager)
+
+    assert session_cookie._request_cookies() == expected
 
 
 def test_token_aal2_rotado_se_sincroniza_antes_de_rpc_y_edge_functions():

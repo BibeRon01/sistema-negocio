@@ -5292,7 +5292,10 @@ def _render_mfa_nativo() -> bool:
             st.session_state["_last_session_validation"] = verified_at
             st.session_state.pop("login_pending_mfa", None)
             _persistir_sesion_navegador(profile, force=True)
-            st.rerun()
+            # CookieManager necesita completar la escritura en el navegador.
+            # Un st.rerun inmediato puede cancelar el componente antes de que
+            # guarde la cookie y provocar que MFA se solicite en cada entrada.
+            return True
         except Exception as exc:
             LOGGER.warning("Falló la verificación MFA: %s", type(exc).__name__)
             limpiar_estado_sesion(cerrar_auth=True)
@@ -5347,14 +5350,21 @@ def _persistir_sesion_navegador(profile: dict, *, force: bool = False) -> bool:
     ):
         return True
 
-    saved = guardar_sesion_navegador(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        tenant_id=tenant_id,
-        privileged=privileged,
-        mfa_verified_at=mfa_verified_at,
-        last_activity=now,
-    )
+    try:
+        saved = guardar_sesion_navegador(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            tenant_id=tenant_id,
+            privileged=privileged,
+            mfa_verified_at=mfa_verified_at,
+            last_activity=now,
+        )
+    except Exception as exc:
+        # La sesión real de Supabase continúa siendo válida aunque el
+        # navegador rechace la persistencia. No se debe convertir un fallo de
+        # cookie en un fallo de MFA ni conservar datos alternativos inseguros.
+        LOGGER.warning("No se pudo persistir la sesión cifrada (%s).", type(exc).__name__)
+        return False
     if saved:
         st.session_state["_browser_cookie_fingerprint"] = fingerprint
         st.session_state["_browser_cookie_last_write"] = now
@@ -5635,7 +5645,10 @@ def login_simple() -> bool:
                 st.session_state["_last_session_validation"] = signed_in_at
                 _persistir_sesion_navegador(profile, force=True)
                 auth_success = True
-                st.rerun()
+                # El componente de cookie provocará su propio rerun al terminar.
+                # Mientras tanto esta ejecución ya posee una sesión Supabase
+                # validada y puede continuar de forma segura.
+                return True
         except Exception as exc:
             LOGGER.warning("El inicio de sesión fue rechazado: %s", type(exc).__name__)
             auth_success = False
