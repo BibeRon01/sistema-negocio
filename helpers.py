@@ -5292,9 +5292,8 @@ def _render_mfa_nativo() -> bool:
             st.session_state["_last_session_validation"] = verified_at
             st.session_state.pop("login_pending_mfa", None)
             _persistir_sesion_navegador(profile, force=True)
-            # CookieManager necesita completar la escritura en el navegador.
-            # Un st.rerun inmediato puede cancelar el componente antes de que
-            # guarde la cookie y provocar que MFA se solicite en cada entrada.
+            # El componente v2 integrado completa la escritura cifrada en el
+            # navegador y provoca su propio rerun cuando cambia el estado.
             return True
         except Exception as exc:
             LOGGER.warning("Falló la verificación MFA: %s", type(exc).__name__)

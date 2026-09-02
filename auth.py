@@ -25,7 +25,6 @@ _SESSION_KEYS = (
     "_last_session_validation",
     "_supabase_session_client",
     "_supabase_session_fingerprint",
-    "_ais_cookie_manager",
     "_session_cookie_event",
     "_browser_cookie_fingerprint",
     "_browser_cookie_last_write",
@@ -75,7 +74,9 @@ def limpiar_estado_sesion(*, cerrar_auth: bool = False) -> None:
 
 def cerrar_sesion():
     limpiar_estado_sesion(cerrar_auth=True)
-    st.rerun()
+    # Permite que el componente integrado elimine primero la sesión cifrada
+    # del navegador. Un rerun inmediato podría interrumpir esa escritura.
+    st.stop()
 
 # =========================================================
 # PERMISOS GRANULARES POR MÓDULO Y ACCIÓN

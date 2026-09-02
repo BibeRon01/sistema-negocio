@@ -612,11 +612,16 @@ def test_mfa_diario_conserva_aal2_sin_confiar_en_dispositivo_o_ubicacion():
     assert "no confía en IP, ubicación" in guide
     assert "Fernet" in cookie
     assert "SESSION_COOKIE_SECRET" in cookie
-    assert 'secure=_request_is_https()' in cookie
-    assert 'same_site="strict"' in cookie
-    assert 'manager.get_all(key="ais_session_cookie_reader")' in cookie
+    assert "st.components.v2.component" in cookie
+    assert "window.localStorage.setItem" in cookie
+    assert "window.localStorage.getItem" in cookie
+    assert "window.localStorage.removeItem" in cookie
     assert "borrar_sesion_navegador" in auth
-    assert "extra-streamlit-components==0.1.81" in (
+    assert "def cerrar_sesion():" in auth
+    logout = auth[auth.index("def cerrar_sesion():"):auth.index("# =========================================================\n# PERMISOS")]
+    assert "st.stop()" in logout
+    assert "st.rerun()" not in logout
+    assert "extra-streamlit-components" not in (
         ROOT / "requirements.txt"
     ).read_text(encoding="utf-8")
     assert "trusted_device" not in helpers
@@ -643,25 +648,24 @@ def test_mfa_diario_conserva_aal2_sin_confiar_en_dispositivo_o_ubicacion():
 def test_cookie_de_sesion_cifra_tokens_y_rechaza_manipulacion(monkeypatch):
     import session_cookie
 
-    cookie_jar = {}
+    browser_storage = {}
 
-    class FakeManager:
-        def __init__(self):
-            self.cookies = cookie_jar
+    class FakeStorage:
+        def __call__(self, *, data, **_kwargs):
+            operation = data["operation"]
+            name = data["name"]
+            if operation == "write":
+                browser_storage[name] = data["value"]
+            elif operation == "delete":
+                browser_storage.pop(name, None)
+            return SimpleNamespace(
+                value=browser_storage.get(name, ""),
+                status="ok",
+            )
 
-        def set(self, cookie, value, **_kwargs):
-            cookie_jar[cookie] = value
-
-        def delete(self, cookie, **_kwargs):
-            cookie_jar.pop(cookie, None)
-
-    manager = FakeManager()
     monkeypatch.setenv("SESSION_COOKIE_SECRET", "s" * 48)
-    monkeypatch.setattr(session_cookie, "stx", object())
+    monkeypatch.setattr(session_cookie, "_browser_storage", FakeStorage())
     monkeypatch.setattr(session_cookie.st, "session_state", {})
-    monkeypatch.setattr(session_cookie, "_cookie_manager", lambda: manager)
-    monkeypatch.setattr(session_cookie, "_request_cookies", lambda: dict(cookie_jar))
-    monkeypatch.setattr(session_cookie, "_request_is_https", lambda: True)
 
     now = datetime.now().timestamp()
     assert session_cookie.guardar_sesion_navegador(
@@ -672,34 +676,43 @@ def test_cookie_de_sesion_cifra_tokens_y_rechaza_manipulacion(monkeypatch):
         mfa_verified_at=now,
         last_activity=now,
     )
-    encoded = cookie_jar[session_cookie.COOKIE_NAME]
+    encoded = browser_storage[session_cookie.COOKIE_NAME]
     assert "access-token-private" not in encoded
     assert "refresh-token-private" not in encoded
     payload = session_cookie.leer_sesion_navegador()
     assert payload["access_token"] == "access-token-private"
     assert payload["refresh_token"] == "refresh-token-private"
 
-    cookie_jar[session_cookie.COOKIE_NAME] = encoded[:-1] + (
+    browser_storage[session_cookie.COOKIE_NAME] = encoded[:-1] + (
         "A" if encoded[-1] != "A" else "B"
     )
     assert session_cookie.leer_sesion_navegador() is None
-    assert session_cookie.COOKIE_NAME not in cookie_jar
+    assert session_cookie.COOKIE_NAME not in browser_storage
 
 
-def test_cookie_de_sesion_usa_lector_del_navegador_si_el_request_no_la_trae(monkeypatch):
+def test_sesion_cifrada_usa_almacen_integrado_sin_iframe(monkeypatch):
     import session_cookie
 
-    expected = {session_cookie.COOKIE_NAME: "cookie-cifrada"}
+    calls = []
 
-    class FakeManager:
-        def get_all(self, **_kwargs):
-            return expected
+    class FakeStorage:
+        def __call__(self, *, data, **_kwargs):
+            calls.append(dict(data))
+            return SimpleNamespace(value="cookie-cifrada", status="ok")
 
-    monkeypatch.setattr(session_cookie, "stx", object())
-    monkeypatch.setattr(session_cookie, "_context_cookies", lambda: {})
-    monkeypatch.setattr(session_cookie, "_cookie_manager", FakeManager)
+    monkeypatch.setattr(session_cookie, "_browser_storage", FakeStorage())
 
-    assert session_cookie._request_cookies() == expected
+    stored, status = session_cookie._storage_operation(
+        "read",
+        key="reader",
+    )
+    assert stored == "cookie-cifrada"
+    assert status == "ok"
+    assert calls == [{
+        "operation": "read",
+        "name": session_cookie.COOKIE_NAME,
+        "value": "",
+    }]
 
 
 def test_token_aal2_rotado_se_sincroniza_antes_de_rpc_y_edge_functions():
@@ -724,7 +737,7 @@ def test_token_aal2_rotado_se_sincroniza_antes_de_rpc_y_edge_functions():
     )
     assert "def _access_token_vigente" in client
     assert client.count("access_token = _access_token_vigente()") == 4
-    assert 'VERSION_SISTEMA = "v3.0.1-secure"' in db
+    assert 'VERSION_SISTEMA = "v3.0.2-secure"' in db
     assert 'Código: {support_code}' in client
 
 

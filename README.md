@@ -23,7 +23,8 @@ transaccional dentro de PostgreSQL/Supabase.
 - MFA nativo de Supabase con nivel `aal2` obligatorio para administradores,
   superadministradores y cuentas con permisos de alto riesgo;
 - recuperación cifrada de una sesión Supabase todavía vigente en el mismo
-  navegador, con revalidación remota y vencimiento de 24 horas para MFA;
+  navegador mediante un componente Streamlit v2 sin iframe, con revalidación
+  remota y vencimiento de 24 horas para MFA;
 - cliente Supabase aislado por sesión de Streamlit;
 - separación por empresa y permisos de lectura por módulo mediante RLS;
 - los nombres completos pueden repetirse, pero los alias de acceso no; si un

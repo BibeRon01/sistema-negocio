@@ -9,4 +9,3 @@ requests==2.33.0
 openpyxl==3.1.5
 cryptography==50.0.0
 toml==0.10.2
-extra-streamlit-components==0.1.81

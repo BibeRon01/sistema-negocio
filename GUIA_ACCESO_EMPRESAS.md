@@ -21,14 +21,16 @@
   Supabase rota; crear, desactivar o eliminar usuarios no debe solicitar otro
   código mientras la misma sesión `aal2` continúe válida.
 - Para sobrevivir una reconexión o reinicio de Streamlit, la pareja de tokens
-  se conserva cifrada en una cookie `Secure`/`SameSite=Strict` durante el plazo
-  permitido. Requiere `SESSION_COOKIE_SECRET` en los secretos de Streamlit.
-  La cookie nunca autoriza por sí sola: al recuperarla se vuelven a consultar
-  Supabase Auth y `api_my_session`, y los administradores deben seguir en
-  `aal2`; cualquier error cierra y elimina la sesión.
+  se conserva cifrada en el almacenamiento del mismo navegador durante el plazo
+  permitido. Se usa un componente Streamlit v2 integrado en la página, sin el
+  iframe que podía bloquear las cookies en la vista compartida. Requiere
+  `SESSION_COOKIE_SECRET` en los secretos de Streamlit. El valor guardado nunca
+  autoriza por sí solo: al recuperarlo se vuelven a consultar Supabase Auth y
+  `api_my_session`, y los administradores deben seguir en `aal2`; cualquier
+  error cierra y elimina la sesión.
 - Un navegador, dispositivo o ventana privada nuevos no tienen esa sesión y
   deben completar contraseña y MFA. La aplicación no confía en IP, ubicación,
-  huellas del dispositivo ni cookies que sustituyan `aal2`.
+  huellas del dispositivo ni datos locales que sustituyan `aal2`.
 
 ## Orden de publicación
 

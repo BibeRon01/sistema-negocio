@@ -1,8 +1,13 @@
 """Persistencia cifrada y breve de una sesión real de Supabase en el navegador.
 
-La cookie no concede acceso por sí sola: solo permite reconstruir la pareja de
-tokens para que Supabase Auth y ``api_my_session`` vuelvan a validarla. Ante un
-error de firma, vencimiento o validación remota, la aplicación la elimina.
+El valor se guarda en ``localStorage`` mediante un componente Streamlit v2 que
+se ejecuta en la propia página, no dentro del iframe usado por los antiguos
+administradores de cookies. Esto evita que la vista compartida de Streamlit
+bloquee la persistencia como una cookie de terceros.
+
+El dato del navegador no concede acceso por sí solo: únicamente reconstruye la
+pareja de tokens para que Supabase Auth y ``api_my_session`` vuelvan a validarla.
+Ante un error de firma, vencimiento o validación remota, la aplicación lo borra.
 """
 
 from __future__ import annotations
@@ -13,16 +18,10 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import streamlit as st
 from cryptography.fernet import Fernet, InvalidToken
-
-try:
-    import extra_streamlit_components as stx
-except Exception:  # La aplicación seguirá cerrando de forma segura.
-    stx = None
 
 
 LOGGER = logging.getLogger("ais")
@@ -32,6 +31,35 @@ COOKIE_SECRET_NAME = "SESSION_COOKIE_SECRET"
 COOKIE_SECRET_MIN_LENGTH = 32
 EMPLOYEE_SESSION_SECONDS = 60 * 60
 PRIVILEGED_SESSION_SECONDS = 24 * 60 * 60
+
+_BROWSER_STORAGE_JS = """
+export default function(component) {
+    const { data, setStateValue } = component;
+    let value = "";
+    let status = "ok";
+    try {
+        if (data.operation === "write") {
+            window.localStorage.setItem(data.name, data.value);
+        } else if (data.operation === "delete") {
+            window.localStorage.removeItem(data.name);
+        }
+        value = window.localStorage.getItem(data.name) || "";
+    } catch (_error) {
+        value = "";
+        status = "unavailable";
+    }
+    setStateValue("value", value);
+    setStateValue("status", status);
+}
+"""
+
+try:
+    _browser_storage = st.components.v2.component(
+        "ais_secure_browser_session_storage",
+        js=_BROWSER_STORAGE_JS,
+    )
+except Exception:  # La aplicación seguirá cerrando de forma segura.
+    _browser_storage = None
 
 
 def _secret_value() -> str:
@@ -45,23 +73,15 @@ def _secret_value() -> str:
 
 def persistencia_navegador_configurada() -> bool:
     """Indica si existe componente y un secreto privado suficientemente largo."""
-    return stx is not None and len(_secret_value()) >= COOKIE_SECRET_MIN_LENGTH
+    return _browser_storage is not None and len(_secret_value()) >= COOKIE_SECRET_MIN_LENGTH
 
 
 def _cipher() -> Fernet:
     secret = _secret_value()
-    if stx is None or len(secret) < COOKIE_SECRET_MIN_LENGTH:
+    if _browser_storage is None or len(secret) < COOKIE_SECRET_MIN_LENGTH:
         raise RuntimeError("BROWSER_SESSION_NOT_CONFIGURED")
     key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
     return Fernet(key)
-
-
-def _cookie_manager():
-    manager = st.session_state.get("_ais_cookie_manager")
-    if manager is None:
-        manager = stx.CookieManager(key="ais_session_cookie_manager")
-        st.session_state["_ais_cookie_manager"] = manager
-    return manager
 
 
 def _component_key(prefix: str) -> str:
@@ -70,44 +90,28 @@ def _component_key(prefix: str) -> str:
     return f"ais_session_{prefix}_{event}"
 
 
-def _context_cookies() -> dict[str, str]:
-    try:
-        return {str(key): str(value) for key, value in dict(st.context.cookies).items()}
-    except Exception:
-        return {}
+def _storage_operation(operation: str, value: str = "", *, key: str) -> tuple[str, str]:
+    """Monta el almacén integrado y retorna únicamente valor y estado.
 
-
-def _request_cookies() -> dict[str, str]:
-    """Lee cookies del request y, si hace falta, del componente del navegador.
-
-    ``st.context.cookies`` representa el request que abrió la sesión. Una cookie
-    escrita por JavaScript después de ese momento puede no aparecer allí hasta
-    otra conexión. El lector del componente evita perderla durante un rerun o un
-    reinicio de la aplicación.
+    El valor procedente del navegador nunca se considera confiable. La firma
+    Fernet se valida después en Python antes de reconstruir una sesión.
     """
-    cookies = _context_cookies()
-    if COOKIE_NAME in cookies or stx is None:
-        return cookies
-    try:
-        manager = _cookie_manager()
-        component_cookies = manager.get_all(key="ais_session_cookie_reader")
-        if isinstance(component_cookies, dict):
-            cookies.update(
-                {str(key): str(value) for key, value in component_cookies.items()}
-            )
-    except Exception as exc:
-        LOGGER.warning(
-            "No se pudieron consultar las cookies del navegador (%s).",
-            type(exc).__name__,
-        )
-    return cookies
-
-
-def _request_is_https() -> bool:
-    try:
-        return str(st.context.url or "").lower().startswith("https://")
-    except Exception:
-        return True
+    if _browser_storage is None:
+        return "", "unavailable"
+    result = _browser_storage(
+        data={
+            "operation": str(operation),
+            "name": COOKIE_NAME,
+            "value": str(value or ""),
+        },
+        default={"value": "", "status": "pending"},
+        on_value_change=lambda: None,
+        on_status_change=lambda: None,
+        key=key,
+    )
+    stored = str(getattr(result, "value", "") or "")
+    status = str(getattr(result, "status", "pending") or "pending")
+    return stored, status
 
 
 def guardar_sesion_navegador(
@@ -139,7 +143,6 @@ def guardar_sesion_navegador(
     else:
         expires_at = activity + EMPLOYEE_SESSION_SECONDS
 
-    max_age = max(1, int(expires_at - now))
     payload = {
         "v": COOKIE_VERSION,
         "access_token": access,
@@ -153,25 +156,20 @@ def guardar_sesion_navegador(
     encrypted = _cipher().encrypt(
         json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     ).decode("ascii")
-    manager = _cookie_manager()
-    manager.set(
-        COOKIE_NAME,
-        encrypted,
-        key=_component_key("set"),
-        path="/",
-        expires_at=datetime.now(timezone.utc) + timedelta(seconds=max_age),
-        max_age=max_age,
-        secure=_request_is_https(),
-        same_site="strict",
-    )
+    _storage_operation("write", encrypted, key=_component_key("write"))
     return True
 
 
 def leer_sesion_navegador() -> dict[str, Any] | None:
-    """Descifra una cookie vigente; nunca acepta datos sin firma del servidor."""
+    """Descifra una sesión vigente; nunca acepta datos sin firma del servidor."""
     if not persistencia_navegador_configurada():
         return None
-    encoded = _request_cookies().get(COOKIE_NAME, "")
+    encoded, status = _storage_operation(
+        "read",
+        key="ais_session_storage_reader",
+    )
+    if status == "unavailable":
+        LOGGER.warning("El navegador no permitió guardar la sesión cifrada.")
     if not encoded:
         return None
     try:
@@ -198,20 +196,10 @@ def leer_sesion_navegador() -> dict[str, Any] | None:
 
 
 def borrar_sesion_navegador() -> None:
-    """Retira la cookie sin fallar cuando ya no existe."""
-    if stx is None:
-        return
-    cookies = _request_cookies()
-    manager = st.session_state.get("_ais_cookie_manager")
-    if COOKIE_NAME not in cookies and (
-        manager is None or COOKIE_NAME not in (getattr(manager, "cookies", {}) or {})
-    ):
+    """Retira la sesión cifrada sin fallar cuando ya no existe."""
+    if _browser_storage is None:
         return
     try:
-        manager = manager or _cookie_manager()
-        current = dict(getattr(manager, "cookies", {}) or {})
-        current.update(cookies)
-        manager.cookies = current
-        manager.delete(COOKIE_NAME, key=_component_key("delete"))
+        _storage_operation("delete", key=_component_key("delete"))
     except Exception as exc:
-        LOGGER.warning("No se pudo retirar la cookie de sesión (%s).", type(exc).__name__)
+        LOGGER.warning("No se pudo retirar la sesión del navegador (%s).", type(exc).__name__)
