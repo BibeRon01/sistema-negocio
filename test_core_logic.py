@@ -683,6 +683,9 @@ def test_cookie_de_sesion_cifra_tokens_y_rechaza_manipulacion(monkeypatch):
     assert payload["access_token"] == "access-token-private"
     assert payload["refresh_token"] == "refresh-token-private"
 
+    # Simula una reconexión del servidor: la copia de memoria desaparece y el
+    # navegador vuelve a ser la fuente cifrada que debe verificarse.
+    session_cookie.st.session_state.pop("_browser_session_encrypted", None)
     browser_storage[session_cookie.COOKIE_NAME] = encoded[:-1] + (
         "A" if encoded[-1] != "A" else "B"
     )
@@ -737,8 +740,49 @@ def test_token_aal2_rotado_se_sincroniza_antes_de_rpc_y_edge_functions():
     )
     assert "def _access_token_vigente" in client
     assert client.count("access_token = _access_token_vigente()") == 4
-    assert 'VERSION_SISTEMA = "v3.0.2-secure"' in db
+    assert 'VERSION_SISTEMA = "v3.0.3-secure"' in db
     assert 'Código: {support_code}' in client
+
+
+def test_fallo_temporal_no_destruye_sesion_cifrada_y_sigue_bloqueando(monkeypatch):
+    import auth
+    import helpers
+
+    state = {
+        "usuario_data": {"rol": "superadmin"},
+        "access_token": "access",
+        "refresh_token": "refresh",
+        "mfa_verified_at": 123.0,
+        "_browser_session_encrypted": "valor-cifrado",
+        "ais_session_storage_reader": {"value": "valor-cifrado"},
+    }
+    monkeypatch.setattr(auth.st, "session_state", state)
+    monkeypatch.setattr(auth, "limpiar_cache_datos", lambda: None)
+    monkeypatch.setattr(auth, "renovar_cliente_sesion", lambda: None)
+    monkeypatch.setattr(auth.st.cache_data, "clear", lambda: None)
+
+    auth.limpiar_estado_sesion_temporal()
+
+    assert "usuario_data" not in state
+    assert "access_token" not in state
+    assert "refresh_token" not in state
+    assert "mfa_verified_at" not in state
+    assert state["_browser_session_encrypted"] == "valor-cifrado"
+    assert "ais_session_storage_reader" in state
+    assert helpers._es_error_transitorio_sesion(TimeoutError("timed out")) is True
+    assert helpers._es_error_transitorio_sesion(
+        RuntimeError("MFA_AAL2_REQUIRED")
+    ) is False
+
+
+def test_cliente_no_oculta_error_al_restaurar_refresh_token():
+    db = (ROOT / "db.py").read_text(encoding="utf-8")
+    create_session = db[
+        db.index("def _crear_cliente_sesion"):
+        db.index("def obtener_cliente_sesion")
+    ]
+    assert "client.auth.set_session(access_token, refresh_token)" in create_session
+    assert "except Exception" not in create_session
 
 
 def test_sincronizacion_copia_ambos_tokens_rotados(monkeypatch):

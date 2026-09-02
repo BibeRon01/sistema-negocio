@@ -19,7 +19,8 @@ transaccional dentro de PostgreSQL/Supabase.
   sin exigir correo personal;
 - correo visible reservado al superadministrador de plataforma A&M;
 - validación obligatoria de cada sesión mediante Supabase Auth y
-  `api_my_session`, cerrándola ante cualquier error;
+  `api_my_session`; un rechazo real la cierra, mientras una demora o HTTP 5xx
+  bloquea el acceso y permite reintentar sin destruir la sesión `aal2`;
 - MFA nativo de Supabase con nivel `aal2` obligatorio para administradores,
   superadministradores y cuentas con permisos de alto riesgo;
 - recuperación cifrada de una sesión Supabase todavía vigente en el mismo

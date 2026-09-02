@@ -28,8 +28,21 @@ _SESSION_KEYS = (
     "_session_cookie_event",
     "_browser_cookie_fingerprint",
     "_browser_cookie_last_write",
+    "_browser_session_encrypted",
+    "_browser_storage_status",
+    "_session_restore_transient",
+    "ais_session_storage_reader",
     "session_cache_tablas",
 )
+
+_BROWSER_SESSION_KEYS = {
+    "_session_cookie_event",
+    "_browser_cookie_fingerprint",
+    "_browser_cookie_last_write",
+    "_browser_session_encrypted",
+    "_browser_storage_status",
+    "ais_session_storage_reader",
+}
 
 def es_admin() -> bool:
     if es_superadmin_plataforma():
@@ -61,6 +74,28 @@ def limpiar_estado_sesion(*, cerrar_auth: bool = False) -> None:
         pass
     for key in _SESSION_KEYS:
         st.session_state.pop(key, None)
+    limpiar_cache_datos()
+    try:
+        renovar_cliente_sesion()
+    except Exception:
+        pass
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+
+def limpiar_estado_sesion_temporal() -> None:
+    """Bloquea la app sin destruir una sesión cifrada por un fallo de red.
+
+    Esta ruta nunca concede acceso: elimina el perfil y los tokens de la
+    memoria de Streamlit. Conserva únicamente el valor cifrado del navegador
+    para que Supabase pueda volver a validarlo cuando se restablezca la
+    conexión. No llama ``sign_out`` ni revoca el refresh token.
+    """
+    for key in _SESSION_KEYS:
+        if key not in _BROWSER_SESSION_KEYS:
+            st.session_state.pop(key, None)
     limpiar_cache_datos()
     try:
         renovar_cliente_sesion()

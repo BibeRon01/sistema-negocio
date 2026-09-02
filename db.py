@@ -16,7 +16,7 @@ except Exception:
     Client = Any
     create_client = None
 
-VERSION_SISTEMA = "v3.0.2-secure"
+VERSION_SISTEMA = "v3.0.3-secure"
 LOGGER = logging.getLogger("ais")
 
 # =========================================================
@@ -104,14 +104,16 @@ def _crear_cliente_sesion() -> Client | None:
     access_token = str(st.session_state.get("access_token") or "")
     refresh_token = str(st.session_state.get("refresh_token") or "")
     if access_token:
-        try:
-            if refresh_token:
-                auth_response = client.auth.set_session(access_token, refresh_token)
-                if getattr(auth_response, "session", None):
-                    _guardar_tokens_sesion_actual(auth_response.session)
-            else:
-                client.postgrest.auth(access_token)
-        except Exception:
+        if refresh_token:
+            # No ocultar los fallos de set_session. Un error temporal debe
+            # conservar la sesión cifrada para reintentar; un token realmente
+            # inválido debe llegar a la validación y cerrarse de forma segura.
+            auth_response = client.auth.set_session(access_token, refresh_token)
+            session = getattr(auth_response, "session", None)
+            if session is None:
+                raise RuntimeError("AUTH_SESSION_REQUIRED")
+            _guardar_tokens_sesion_actual(session)
+        else:
             client.postgrest.auth(access_token)
     return client
 

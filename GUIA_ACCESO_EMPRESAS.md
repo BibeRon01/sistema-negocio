@@ -26,8 +26,9 @@
   iframe que podía bloquear las cookies en la vista compartida. Requiere
   `SESSION_COOKIE_SECRET` en los secretos de Streamlit. El valor guardado nunca
   autoriza por sí solo: al recuperarlo se vuelven a consultar Supabase Auth y
-  `api_my_session`, y los administradores deben seguir en `aal2`; cualquier
-  error cierra y elimina la sesión.
+  `api_my_session`, y los administradores deben seguir en `aal2`. Un rechazo
+  real cierra y elimina la sesión; una demora, desconexión o HTTP 5xx bloquea
+  temporalmente la aplicación y permite reintentar sin revocar el `aal2`.
 - Un navegador, dispositivo o ventana privada nuevos no tienen esa sesión y
   deben completar contraseña y MFA. La aplicación no confía en IP, ubicación,
   huellas del dispositivo ni datos locales que sustituyan `aal2`.

@@ -28,6 +28,7 @@ from db import (
 
 from auth import (
     es_admin, es_cajera, tiene_permiso, cerrar_sesion, limpiar_estado_sesion,
+    limpiar_estado_sesion_temporal,
     puede_editar_global, puede_ver_utilidad_global, puede_vender, puede_abrir_caja,
     puede_cerrar_caja, puede_ver_ventas_propias, puede_ver_todas_ventas,
     puede_editar_ventas, puede_anular_ventas, puede_eliminar_ventas,
@@ -5318,6 +5319,70 @@ SESSION_INACTIVITY_SECONDS = 60 * 60
 PRIVILEGED_SESSION_INACTIVITY_SECONDS = 24 * 60 * 60
 MFA_REAUTHENTICATION_SECONDS = 24 * 60 * 60
 
+_SESSION_REJECTION_CODES = {
+    "AUTH_SESSION_REQUIRED",
+    "AUTH_USER_REQUIRED",
+    "PROFILE_REQUIRED",
+    "PROFILE_AUTH_MISMATCH",
+    "INACTIVE_PROFILE",
+    "BROWSER_SESSION_INACTIVE",
+    "MFA_AAL2_REQUIRED",
+    "MFA_REAUTHENTICATION_REQUIRED",
+    "AUTH_REQUIRED",
+    "NO_ACTIVE_MEMBERSHIP",
+    "PROFILE_NOT_LINKED",
+    "TENANT_NOT_ACTIVE_OR_NOT_FOUND",
+    "TENANT_AUTH_MISMATCH",
+}
+
+
+def _es_error_transitorio_sesion(exc: Exception) -> bool:
+    """Distingue indisponibilidad remota de una sesión realmente rechazada.
+
+    En ambos casos el acceso se bloquea. La diferencia es que una demora,
+    desconexión o HTTP 5xx no revoca ni borra un refresh token todavía válido.
+    """
+    text = str(exc or "").strip().lower()
+    code = str(getattr(exc, "code", "") or "").strip().upper()
+    status = getattr(exc, "status", None)
+    if status is None:
+        status = getattr(exc, "status_code", None)
+    try:
+        status_int = int(status)
+    except (TypeError, ValueError):
+        status_int = 0
+
+    if any(marker.lower() in text for marker in _SESSION_REJECTION_CODES):
+        return False
+    if code in _SESSION_REJECTION_CODES:
+        return False
+    if status_int in {400, 401, 403, 404, 409, 422}:
+        return False
+    if status_int in {408, 425, 429} or status_int >= 500:
+        return True
+
+    class_name = type(exc).__name__.lower()
+    transient_markers = (
+        "timeout",
+        "timed out",
+        "connection",
+        "network",
+        "temporarily unavailable",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "remote protocol",
+    )
+    if isinstance(exc, requests.RequestException):
+        return True
+    if any(marker in class_name or marker in text for marker in transient_markers):
+        return True
+
+    # Falla cerrada: nunca autoriza sin validación. Cuando Supabase no entregó
+    # un rechazo identificable, conservar el dato cifrado permite reintentar
+    # sin obligar al usuario a repetir MFA por un problema de infraestructura.
+    return True
+
 
 def _session_inactivity_seconds(profile: dict | None) -> int:
     """Una hora para empleados y hasta un día para una sesión AAL2 privilegiada."""
@@ -5411,7 +5476,11 @@ def _restaurar_sesion_navegador() -> bool:
         return True
     except Exception as exc:
         LOGGER.warning("La restauración de sesión fue rechazada: %s", type(exc).__name__)
-        limpiar_estado_sesion(cerrar_auth=True)
+        if _es_error_transitorio_sesion(exc):
+            limpiar_estado_sesion_temporal()
+            st.session_state["_session_restore_transient"] = True
+        else:
+            limpiar_estado_sesion(cerrar_auth=True)
         return False
 
 
@@ -5460,6 +5529,14 @@ def login_simple() -> bool:
     if not st.session_state.get("access_token") and not st.session_state.get("refresh_token"):
         if _restaurar_sesion_navegador():
             return True
+        if st.session_state.pop("_session_restore_transient", False):
+            st.warning(
+                "Supabase tardó en validar la sesión guardada. No se cerró ni se "
+                "borró su acceso. Pulse Reintentar; no escriba nuevamente la contraseña."
+            )
+            if st.button("Reintentar sesión segura", type="primary", use_container_width=True):
+                st.rerun()
+            return False
 
     session_values = {
         "profile": st.session_state.get("usuario_data"),
@@ -5536,8 +5613,22 @@ def login_simple() -> bool:
             st.session_state["_last_session_validation"] = ahora
         except Exception as exc:
             LOGGER.warning("La revalidación de sesión fue rechazada: %s", type(exc).__name__)
-            limpiar_estado_sesion(cerrar_auth=True)
-            st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
+            if _es_error_transitorio_sesion(exc):
+                limpiar_estado_sesion_temporal()
+                st.warning(
+                    "Supabase tardó en responder. Su sesión segura no fue eliminada; "
+                    "pulse Reintentar para continuar."
+                )
+                if st.button(
+                    "Reintentar sesión segura",
+                    type="primary",
+                    use_container_width=True,
+                    key="retry_validated_session",
+                ):
+                    st.rerun()
+            else:
+                limpiar_estado_sesion(cerrar_auth=True)
+                st.error("La sesión ya no es válida. Inicie sesión nuevamente.")
             return False
         st.session_state["last_activity"] = ahora
         _persistir_sesion_navegador(profile)

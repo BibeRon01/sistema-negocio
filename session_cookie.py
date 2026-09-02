@@ -31,6 +31,7 @@ COOKIE_SECRET_NAME = "SESSION_COOKIE_SECRET"
 COOKIE_SECRET_MIN_LENGTH = 32
 EMPLOYEE_SESSION_SECONDS = 60 * 60
 PRIVILEGED_SESSION_SECONDS = 24 * 60 * 60
+_MEMORY_STORAGE_KEY = "_browser_session_encrypted"
 
 _BROWSER_STORAGE_JS = """
 export default function(component) {
@@ -156,7 +157,16 @@ def guardar_sesion_navegador(
     encrypted = _cipher().encrypt(
         json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     ).decode("ascii")
-    _storage_operation("write", encrypted, key=_component_key("write"))
+    # Mantener en memoria exactamente la última pareja cifrada evita que un
+    # lector ya montado entregue el refresh token anterior después de que
+    # Supabase lo haya rotado. El navegador continúa siendo la persistencia
+    # que sobrevive a una reconexión o reinicio de Streamlit.
+    st.session_state[_MEMORY_STORAGE_KEY] = encrypted
+    _, status = _storage_operation("write", encrypted, key="ais_session_storage_writer")
+    st.session_state["_browser_storage_status"] = status
+    if status == "unavailable":
+        st.session_state.pop(_MEMORY_STORAGE_KEY, None)
+        return False
     return True
 
 
@@ -164,10 +174,16 @@ def leer_sesion_navegador() -> dict[str, Any] | None:
     """Descifra una sesión vigente; nunca acepta datos sin firma del servidor."""
     if not persistencia_navegador_configurada():
         return None
-    encoded, status = _storage_operation(
+    browser_value, status = _storage_operation(
         "read",
         key="ais_session_storage_reader",
     )
+    # La copia de memoria siempre corresponde a la rotación más reciente de
+    # esta ejecución. En una sesión nueva no existe y se usa localStorage.
+    encoded = str(st.session_state.get(_MEMORY_STORAGE_KEY) or browser_value or "")
+    if browser_value and not st.session_state.get(_MEMORY_STORAGE_KEY):
+        st.session_state[_MEMORY_STORAGE_KEY] = browser_value
+    st.session_state["_browser_storage_status"] = status
     if status == "unavailable":
         LOGGER.warning("El navegador no permitió guardar la sesión cifrada.")
     if not encoded:
@@ -197,9 +213,11 @@ def leer_sesion_navegador() -> dict[str, Any] | None:
 
 def borrar_sesion_navegador() -> None:
     """Retira la sesión cifrada sin fallar cuando ya no existe."""
+    st.session_state.pop(_MEMORY_STORAGE_KEY, None)
+    st.session_state.pop("_browser_storage_status", None)
     if _browser_storage is None:
         return
     try:
-        _storage_operation("delete", key=_component_key("delete"))
+        _storage_operation("delete", key="ais_session_storage_deleter")
     except Exception as exc:
         LOGGER.warning("No se pudo retirar la sesión del navegador (%s).", type(exc).__name__)
