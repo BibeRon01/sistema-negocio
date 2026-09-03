@@ -785,6 +785,18 @@ def test_cliente_no_oculta_error_al_restaurar_refresh_token():
     assert "except Exception" not in create_session
 
 
+def test_exportacion_excel_genera_un_archivo_valido():
+    import io
+    import pandas as pd
+    from openpyxl import load_workbook
+    from helpers import df_to_excel_bytes
+
+    content = df_to_excel_bytes(pd.DataFrame([{"producto": "Demo", "precio": 10}]))
+    assert content.startswith(b"PK")
+    workbook = load_workbook(io.BytesIO(content), read_only=True)
+    assert workbook["datos"]["A2"].value == "Demo"
+
+
 def test_sincronizacion_copia_ambos_tokens_rotados(monkeypatch):
     import db
 

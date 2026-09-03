@@ -8,6 +8,7 @@ import re
 import json
 import uuid
 import base64
+import io
 import requests
 import plotly.express as px
 import streamlit.components.v1 as components
