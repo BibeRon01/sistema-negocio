@@ -30,6 +30,8 @@ transaccional dentro de PostgreSQL/Supabase.
 - separación por empresa y permisos de lectura por módulo mediante RLS;
 - los nombres completos pueden repetirse, pero los alias de acceso no; si un
   alias está ocupado, la administración recibe opciones numéricas disponibles;
+- panel exclusivo `Licencias y pagos` para que A&M registre demostraciones,
+  cortesías, pagos y renovaciones sin mezclarlos con la contabilidad del cliente;
 - service-role únicamente en Edge Functions y scripts locales;
 - ventas, cuentas abiertas, anulaciones, abonos, caja, compras y nómina mediante
   funciones transaccionales;

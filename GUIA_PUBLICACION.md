@@ -108,6 +108,12 @@ ser único en toda la plataforma. Cada administrador empresarial debe configurar
 MFA. Los cajeros y demás empleados se crean desde **Usuarios** dentro de su
 empresa.
 
+Desde la pestaña **Licencias y pagos**, la superadministradora registra la
+licencia inicial y cada renovación. Para pruebas puede elegir `Demostración`,
+monto `RD$0.00`, método `Cortesía / sin cobro` y el vencimiento deseado. Estos
+registros se guardan únicamente en `suscripciones_empresas`; no crean ventas,
+movimientos de caja ni asientos dentro de la contabilidad del cliente.
+
 ### Recuperación de contraseña del correo A&M
 
 En **Supabase → Authentication → URL Configuration**, configure **Site URL** con

@@ -739,8 +739,8 @@ def test_token_aal2_rotado_se_sincroniza_antes_de_rpc_y_edge_functions():
         "client.auth.get_user(access_token)"
     )
     assert "def _access_token_vigente" in client
-    assert client.count("access_token = _access_token_vigente()") == 4
-    assert 'VERSION_SISTEMA = "v3.0.3-secure"' in db
+    assert client.count("access_token = _access_token_vigente()") == 5
+    assert 'VERSION_SISTEMA = "v3.0.4-secure"' in db
     assert 'Código: {support_code}' in client
 
 
@@ -1059,3 +1059,25 @@ def test_cache_de_datos_usa_el_tenant_seleccionado():
     for name in ("db.py", "helpers.py"):
         code = (ROOT / name).read_text(encoding="utf-8")
         assert "t_id = obtener_tenant_actual() or \"anon\"" in code
+
+
+def test_superadmin_registra_licencias_sin_mezclarlas_con_contabilidad():
+    view = (ROOT / "central_am_view.py").read_text(encoding="utf-8")
+    client = (ROOT / "api_client.py").read_text(encoding="utf-8")
+    edge = (ROOT / "supabase/functions/manage-company/index.ts").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"💳 Licencias y pagos"' in view
+    assert "registrar_licencia_empresa_seguro(" in view
+    assert 'supabase.table("suscripciones_empresas")' in view
+    assert "No se mezcla con ventas, caja, gastos ni contabilidad" in view
+    assert "def registrar_licencia_empresa_seguro(" in client
+    assert '"action": "register_license"' in client
+    assert 'action === "register_license"' in edge
+    assert 'verifiedAal(token) !== "aal2"' in edge
+    assert 'callerData.user.app_metadata?.role !== "superadmin"' in edge
+    assert '.from("suscripciones_empresas")' in edge
+    assert 'accion: "licencia_registrada"' in edge
+    assert '.from("ventas")' not in edge
+    assert '.from("gastos")' not in edge

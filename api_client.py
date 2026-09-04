@@ -39,6 +39,9 @@ _API_ERROR_MESSAGES = {
     "RESERVED_TENANT_ID": "Ese identificador de empresa está reservado.",
     "COMPANY_ALREADY_EXISTS": "Ya existe una empresa con ese identificador.",
     "COMPANY_NOT_FOUND": "No se encontró la empresa solicitada.",
+    "INVALID_LICENSE_DATA": "Revise las fechas y los datos de la licencia.",
+    "LICENSE_TABLE_NOT_AVAILABLE": "La tabla de licencias todavía no está disponible en Supabase.",
+    "LICENSE_NOT_CREATED": "Supabase no pudo registrar la licencia de la empresa.",
     "PASSWORD_POLICY_INVALID": PASSWORD_RULE_MESSAGE,
     "AUTH_PASSWORD_POLICY_REJECTED": (
         "Supabase Auth rechazó la contraseña. Ajuste Password Security para "
@@ -475,4 +478,66 @@ def gestionar_empresa_seguro(
         body = {}
     if response.status_code >= 400 or body.get("success") is False:
         raise ApiError(_mensaje_api_seguro(body.get("error"), "El servicio rechazó el cambio de empresa."))
+    return body
+
+
+def registrar_licencia_empresa_seguro(
+    *,
+    tenant_id: str,
+    fecha_inicio: str,
+    fecha_vencimiento: str,
+    monto_pagado: float,
+    periodo: str,
+    metodo_pago: str,
+    dias_gracia: int = 5,
+    observacion: str = "",
+) -> dict:
+    """Registra una licencia desde la Edge Function exclusiva de A&M."""
+    access_token = _access_token_vigente()
+    url = f"{SUPABASE_URL.rstrip('/')}/functions/v1/manage-company"
+    payload = {
+        "action": "register_license",
+        "tenant_id": str(tenant_id).strip(),
+        "licencia": {
+            "fecha_inicio": str(fecha_inicio),
+            "fecha_vencimiento": str(fecha_vencimiento),
+            "monto_pagado": float(monto_pagado),
+            "periodo": str(periodo).strip().lower(),
+            "metodo_pago": str(metodo_pago).strip().lower(),
+            "dias_gracia": int(dias_gracia),
+            "observacion": str(observacion).strip(),
+        },
+    }
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "apikey": SUPABASE_KEY,
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        LOGGER.error(
+            "Servicio de licencias no disponible (%s)",
+            type(exc).__name__,
+            exc_info=exc,
+        )
+        raise ApiError("No se pudo contactar el servicio de licencias.") from exc
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    if response.status_code >= 400 or body.get("success") is False:
+        raise ApiError(
+            _mensaje_api_seguro(
+                body.get("error"),
+                "El servicio rechazó el registro de la licencia.",
+            )
+        )
     return body

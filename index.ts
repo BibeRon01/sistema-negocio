@@ -34,46 +34,6 @@ const verifiedAal = (token: string) => {
   }
 };
 
-const normalizeUsername = (value: unknown) => String(value ?? "").trim().toLowerCase();
-const PASSWORD_MIN_LENGTH = 4;
-const passwordIsValid = (value: string) =>
-  value.length >= PASSWORD_MIN_LENGTH &&
-  /[^\p{L}\p{N}\s]/u.test(value);
-
-const technicalEmail = async (tenantId: string, username: string) => {
-  const source = new TextEncoder().encode(`${tenantId}\n${username}`);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", source));
-  const hex = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `u${hex.slice(0, 48)}@access.ais.invalid`;
-};
-
-const availableUsernameSuggestions = async (
-  admin: ReturnType<typeof createClient>,
-  username: string,
-) => {
-  const stem = (username.replace(/\d+$/, "") || "usuario").slice(0, 29);
-  const suggestions: string[] = [];
-  for (let number = 1; number <= 60 && suggestions.length < 3; number += 1) {
-    const candidate = `${stem}${String(number).padStart(2, "0")}`.slice(0, 32);
-    const { data } = await admin
-      .from("usuarios")
-      .select("id")
-      .ilike("usuario", candidate)
-      .limit(1);
-    if (!data?.length) suggestions.push(candidate);
-  }
-  return suggestions;
-};
-
-const usernameConflict = async (
-  admin: ReturnType<typeof createClient>,
-  username: string,
-) => json(409, {
-  success: false,
-  error: "USERNAME_ALREADY_EXISTS",
-  suggestions: await availableUsernameSuggestions(admin, username),
-});
-
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return json(405, { success: false, error: "METHOD_NOT_ALLOWED" });
@@ -95,15 +55,18 @@ Deno.serve(async (request) => {
     return json(500, { success: false, error: "SERVER_NOT_CONFIGURED" });
   }
 
-  const admin = createClient(url, secretKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-  const callerClient = createClient(url, publishableKey, {
+  const caller = createClient(url, publishableKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  const { data: callerData, error: callerError } = await callerClient.auth.getUser(token);
-  if (callerError || !callerData.user) return json(401, { success: false, error: "INVALID_SESSION" });
+  const { data: callerData, error: callerError } = await caller.auth.getUser(token);
+  if (
+    callerError ||
+    !callerData.user ||
+    callerData.user.app_metadata?.role !== "superadmin"
+  ) {
+    return json(403, { success: false, error: "PLATFORM_SUPERADMIN_REQUIRED" });
+  }
   if (verifiedAal(token) !== "aal2") {
     return json(403, { success: false, error: "MFA_AAL2_REQUIRED" });
   }
@@ -115,289 +78,204 @@ Deno.serve(async (request) => {
     return json(400, { success: false, error: "INVALID_JSON" });
   }
 
-  const action = String(input.action ?? "update").trim().toLowerCase();
-  const profileId = String(input.profile_id ?? "");
-  const tenantId = String(input.tenant_id ?? "").trim();
-  const username = normalizeUsername(input.username);
+  const action = String(input.action ?? "").trim().toLowerCase();
+  const tenantId = String(input.tenant_id ?? "").trim().toLowerCase();
   const nombre = String(input.nombre ?? "").trim();
-  const role = String(input.rol ?? "").trim().toLowerCase();
-  const active = input.activo === true;
-  const password = input.new_password ? String(input.new_password) : "";
-  const permissions =
-    input.permissions && typeof input.permissions === "object" ? input.permissions : {};
-  const validRoles = new Set(["admin", "gerente", "supervisor", "cajero", "cajera", "consulta"]);
-  if (!new Set(["update", "delete"]).has(action)) {
-    return json(400, { success: false, error: "INVALID_USER_ACTION" });
-  }
-  if (action === "update" && password && !passwordIsValid(password)) {
-    return json(400, { success: false, error: "PASSWORD_POLICY_INVALID" });
-  }
+  const active = input.activo !== false;
+  const config =
+    input.configuracion && typeof input.configuracion === "object"
+      ? (input.configuracion as Record<string, unknown>)
+      : {};
   if (
-    !profileId ||
     !/^[a-z0-9][a-z0-9_-]{2,49}$/.test(tenantId) ||
-    tenantId === "global"
+    !["create", "update", "register_license"].includes(action)
   ) {
-    return json(400, { success: false, error: "INVALID_USER_DATA" });
+    return json(400, { success: false, error: "INVALID_COMPANY_DATA" });
   }
-  if (
-    action === "update" &&
-    (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username) ||
-      !nombre ||
-      !validRoles.has(role))
-  ) {
-    return json(400, { success: false, error: "INVALID_USER_DATA" });
+  if (tenantId === "global") {
+    return json(400, { success: false, error: "RESERVED_TENANT_ID" });
   }
 
-  const isPlatformSuperadmin = callerData.user.app_metadata?.role === "superadmin";
-  if (!isPlatformSuperadmin) {
-    const { data: membership } = await admin
-      .from("tenant_memberships")
-      .select("role,permissions,active")
-      .eq("user_id", callerData.user.id)
-      .eq("tenant_id", tenantId)
-      .maybeSingle();
-    const canManage =
-      membership?.active === true &&
-      membership.role === "admin";
-    if (!canManage) return json(403, { success: false, error: "USER_MANAGEMENT_PERMISSION_DENIED" });
-  }
-
-  const { data: target, error: targetError } = await admin
-    .from("usuarios")
-    .select("id,user_id,empresa_id,usuario,email_login,nombre,rol,activo,permissions")
-    .eq("id", profileId)
-    .eq("empresa_id", tenantId)
-    .maybeSingle();
-  if (targetError) {
-    return json(400, { success: false, error: "PROFILE_LOOKUP_FAILED" });
-  }
-  if (!target?.user_id) {
-    // La eliminación es idempotente: una repetición causada por una vista
-    // desactualizada no debe convertirse en un falso HTTP 404.
-    if (action === "delete") {
-      return json(200, {
-        success: true,
-        deleted: true,
-        already_deleted: true,
-        username_available: true,
-      });
-    }
-    return json(404, { success: false, error: "USER_NOT_FOUND" });
-  }
-  const { data: targetAuth, error: targetAuthError } = await admin.auth.admin.getUserById(target.user_id);
-  const targetAuthUser = targetAuth?.user ?? null;
-  const targetAuthMissing = Boolean(targetAuthError || !targetAuthUser);
-  if (targetAuthMissing && action !== "delete") {
-    return json(404, { success: false, error: "AUTH_USER_NOT_FOUND" });
-  }
-  if (targetAuthUser?.app_metadata?.role === "superadmin" && !isPlatformSuperadmin) {
-    return json(403, { success: false, error: "PLATFORM_SUPERADMIN_PROTECTED" });
-  }
-  if (targetAuthUser?.app_metadata?.role === "superadmin") {
-    return json(403, { success: false, error: "PLATFORM_SUPERADMIN_USES_EMAIL" });
-  }
-
-  const { data: oldMembership, error: oldMembershipError } = await admin
-    .from("tenant_memberships")
-    .select("role,active,permissions")
-    .eq("user_id", target.user_id)
+  const admin = createClient(url, secretKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data: previousCompany, error: companyLookupError } = await admin
+    .from("empresas")
+    .select("tenant_id,nombre,activo")
     .eq("tenant_id", tenantId)
     .maybeSingle();
-  if (oldMembershipError || !oldMembership) {
-    return json(400, { success: false, error: "MEMBERSHIP_NOT_FOUND" });
+  if (companyLookupError) {
+    return json(400, { success: false, error: "COMPANY_LOOKUP_FAILED" });
   }
 
-  if (action === "delete") {
-    if (target.user_id === callerData.user.id) {
-      return json(400, { success: false, error: "CANNOT_DELETE_SELF" });
+  if (action === "register_license") {
+    if (!previousCompany) {
+      return json(404, { success: false, error: "COMPANY_NOT_FOUND" });
     }
-    if (target.activo === true || oldMembership.active === true) {
-      return json(400, { success: false, error: "USER_MUST_BE_INACTIVE" });
+    const license =
+      input.licencia && typeof input.licencia === "object"
+        ? (input.licencia as Record<string, unknown>)
+        : {};
+    const startDate = String(license.fecha_inicio ?? "").trim();
+    const endDate = String(license.fecha_vencimiento ?? "").trim();
+    const amount = Number(license.monto_pagado);
+    const period = String(license.periodo ?? "").trim().toLowerCase();
+    const paymentMethod = String(license.metodo_pago ?? "").trim().toLowerCase();
+    const graceDays = Number(license.dias_gracia ?? 5);
+    const observation = String(license.observacion ?? "").trim();
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const allowedPeriods = ["demostracion", "cortesia", "mensual", "trimestral", "anual", "personalizado"];
+    const allowedMethods = ["cortesia", "efectivo", "transferencia", "tarjeta", "otro"];
+    if (
+      !datePattern.test(startDate) ||
+      !datePattern.test(endDate) ||
+      Number.isNaN(Date.parse(`${startDate}T00:00:00Z`)) ||
+      Number.isNaN(Date.parse(`${endDate}T00:00:00Z`)) ||
+      endDate < startDate ||
+      !Number.isFinite(amount) ||
+      amount < 0 ||
+      amount > 1000000000 ||
+      !allowedPeriods.includes(period) ||
+      !allowedMethods.includes(paymentMethod) ||
+      !Number.isInteger(graceDays) ||
+      graceDays < 0 ||
+      graceDays > 60 ||
+      observation.length > 500
+    ) {
+      return json(400, { success: false, error: "INVALID_LICENSE_DATA" });
     }
 
-    const { data: preparation, error: preparationError } = await callerClient.rpc(
-      "api_prepare_delete_unused_user",
-      { p_profile_id: profileId, p_tenant_id: tenantId },
-    );
-    if (preparationError) {
-      const message = String(preparationError.message ?? "");
-      const knownError = [
-        "AUTH_REQUIRED",
-        "MFA_AAL2_REQUIRED",
-        "USER_MANAGEMENT_PERMISSION_DENIED",
-        "USER_NOT_FOUND",
-        "CANNOT_DELETE_SELF",
-        "PLATFORM_SUPERADMIN_PROTECTED",
-        "ORPHAN_PROFILE_NOT_DELETED",
-      ].find((code) => message.includes(code));
+    // La tabla histórica recibida por AIS usa bigint sin valor por defecto.
+    // Solo la superadministradora A&M llega a esta ruta; calculamos el próximo
+    // identificador y reintentamos una vez si otro registro se adelantó.
+    const { data: latestLicense, error: latestError } = await admin
+      .from("suscripciones_empresas")
+      .select("id")
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestError) {
+      const errorCode = String(latestError.code ?? "");
       return json(400, {
         success: false,
-        error: knownError ?? "DELETE_PRECHECK_FAILED",
-      });
-    }
-    if (!preparation || preparation.success !== true) {
-      return json(409, {
-        success: false,
-        error: String(preparation?.error ?? "DELETE_PRECHECK_FAILED"),
+        error: errorCode === "42P01" ? "LICENSE_TABLE_NOT_AVAILABLE" : "LICENSE_NOT_CREATED",
       });
     }
 
-    if (preparation.orphan_cleaned === true) {
-      await admin.from("auditoria_eventos").insert({
-        empresa_id: tenantId,
-        usuario_id: callerData.user.id,
-        accion: "perfil_huerfano_sin_actividad_eliminado",
-        modulo: "Usuarios",
-        tabla: "usuarios",
-        registro_id: profileId,
-        detalle: "Limpieza transaccional de perfil inactivo sin identidad Auth ni historial",
-        metadata: { username: target.usuario, former_role: target.rol },
-      });
-
-      return json(200, {
-        success: true,
-        deleted: true,
-        orphan_cleaned: true,
-        username: target.usuario,
-        username_available: true,
-      });
+    let nextId = Math.trunc(Number(latestLicense?.id ?? 0)) + 1;
+    const licensePayload = {
+      empresa_id: tenantId,
+      fecha_inicio: startDate,
+      fecha_vencimiento: endDate,
+      monto_pagado: Math.round(amount * 100) / 100,
+      periodo: period,
+      metodo_pago: paymentMethod,
+      dias_gracia: graceDays,
+      observacion: observation || null,
+    };
+    let insertedLicense: Record<string, unknown> | null = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const { data, error } = await admin
+        .from("suscripciones_empresas")
+        .insert({ id: nextId, ...licensePayload })
+        .select("id,empresa_id,fecha_inicio,fecha_vencimiento,monto_pagado,periodo,metodo_pago,dias_gracia,observacion,created_at")
+        .single();
+      if (!error) {
+        insertedLicense = data as Record<string, unknown>;
+        break;
+      }
+      if (String(error.code ?? "") !== "23505" || attempt > 0) {
+        return json(400, { success: false, error: "LICENSE_NOT_CREATED" });
+      }
+      nextId += 1;
     }
-    if (targetAuthMissing) {
-      return json(409, { success: false, error: "AUTH_USER_STATE_INCONSISTENT" });
-    }
-
-    // Auth es la identidad raíz. Sus FK con ON DELETE CASCADE eliminan perfil
-    // y membresía únicamente después de que la RPC confirmó que no hay historia.
-    const { error: deleteError } = await admin.auth.admin.deleteUser(
-      target.user_id,
-      false,
-    );
-    if (deleteError) {
-      return json(400, { success: false, error: "AUTH_USER_NOT_DELETED" });
+    if (!insertedLicense) {
+      return json(400, { success: false, error: "LICENSE_NOT_CREATED" });
     }
 
     await admin.from("auditoria_eventos").insert({
       empresa_id: tenantId,
       usuario_id: callerData.user.id,
-      accion: "usuario_sin_actividad_eliminado",
-      modulo: "Usuarios",
-      tabla: "usuarios",
-      registro_id: profileId,
-      detalle: "Eliminación permanente de cuenta inactiva sin historial",
-      metadata: { username: target.usuario, former_role: target.rol },
+      accion: "licencia_registrada",
+      modulo: "Licencias",
+      tabla: "suscripciones_empresas",
+      registro_id: String(insertedLicense.id ?? nextId),
+      detalle: "Licencia registrada por la superadministradora A&M",
+      metadata: {
+        fecha_inicio: startDate,
+        fecha_vencimiento: endDate,
+        monto_pagado: licensePayload.monto_pagado,
+        periodo: period,
+        metodo_pago: paymentMethod,
+        dias_gracia: graceDays,
+      },
     });
 
     return json(200, {
       success: true,
-      deleted: true,
-      username: target.usuario,
-      username_available: true,
+      tenant_id: tenantId,
+      licencia: insertedLicense,
     });
   }
 
-  const { data: usernameOwner } = await admin
-    .from("usuarios")
+  if (action === "update" && !previousCompany) {
+    return json(404, { success: false, error: "COMPANY_NOT_FOUND" });
+  }
+  if (action === "create" && previousCompany) {
+    return json(409, { success: false, error: "COMPANY_ALREADY_EXISTS" });
+  }
+  const companyPayload = {
+    tenant_id: tenantId,
+    nombre: nombre || tenantId,
+    activo: active,
+  };
+  const { error: companyError } =
+    action === "create"
+      ? await admin.from("empresas").insert(companyPayload)
+      : await admin.from("empresas").update(companyPayload).eq("tenant_id", tenantId);
+  if (companyError) return json(400, { success: false, error: companyError.message });
+
+  const allowedConfig = {
+    empresa_id: tenantId,
+    propietario: tenantId,
+    negocio_nombre: nombre || tenantId,
+    telefono: String(config.telefono ?? ""),
+    rnc: String(config.rnc ?? ""),
+    direccion: String(config.direccion ?? ""),
+    slogan: String(config.slogan ?? ""),
+  };
+  const { data: existingConfig, error: lookupError } = await admin
+    .from("configuracion_sistema")
     .select("id")
-    .ilike("usuario", username)
-    .neq("id", profileId)
+    .eq("empresa_id", tenantId)
     .limit(1)
     .maybeSingle();
-  if (usernameOwner) {
-    return await usernameConflict(admin, username);
-  }
-  if (target.user_id === callerData.user.id && (!active || role !== "admin") && !isPlatformSuperadmin) {
-    return json(400, { success: false, error: "CANNOT_REMOVE_OWN_ADMIN_ACCESS" });
-  }
-  if (oldMembership.role === "admin" && oldMembership.active && (!active || role !== "admin")) {
-    const { count } = await admin
-      .from("tenant_memberships")
-      .select("user_id", { count: "exact", head: true })
-      .eq("tenant_id", tenantId)
-      .eq("role", "admin")
-      .eq("active", true)
-      .neq("user_id", target.user_id);
-    if ((count ?? 0) < 1) {
-      return json(400, { success: false, error: "TENANT_MUST_KEEP_ONE_ACTIVE_ADMIN" });
+  if (lookupError) return json(400, { success: false, error: lookupError.message });
+  const { error: configError } = existingConfig?.id
+    ? await admin.from("configuracion_sistema").update(allowedConfig).eq("id", existingConfig.id)
+    : await admin.from("configuracion_sistema").insert(allowedConfig);
+  if (configError) {
+    if (action === "create" && !previousCompany) {
+      await admin.from("empresas").delete().eq("tenant_id", tenantId);
+    } else if (previousCompany) {
+      await admin.from("empresas").update({
+        nombre: previousCompany.nombre,
+        activo: previousCompany.activo,
+      }).eq("tenant_id", tenantId);
     }
-  }
-
-  const loginEmail = await technicalEmail(tenantId, username);
-  const { error: profileError } = await admin
-    .from("usuarios")
-    .update({
-      usuario: username,
-      email_login: loginEmail,
-      nombre,
-      rol: role,
-      activo: active,
-      permissions,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", profileId);
-  if (profileError) {
-    if (String(profileError.code ?? "") === "23505") {
-      return await usernameConflict(admin, username);
-    }
-    return json(400, { success: false, error: "PROFILE_NOT_UPDATED" });
-  }
-
-  const { error: membershipError } = await admin
-    .from("tenant_memberships")
-    .update({ role, active, permissions, updated_at: new Date().toISOString() })
-    .eq("user_id", target.user_id)
-    .eq("tenant_id", tenantId);
-  if (membershipError) {
-    await admin.from("usuarios").update({
-      usuario: target.usuario,
-      email_login: target.email_login,
-      nombre: target.nombre,
-      rol: target.rol,
-      activo: target.activo,
-      permissions: target.permissions,
-    }).eq("id", profileId);
-    return json(400, { success: false, error: "MEMBERSHIP_NOT_UPDATED" });
-  }
-
-  const authUpdate: Record<string, unknown> = {
-    ban_duration: active ? "none" : "876000h",
-    email: loginEmail,
-    email_confirm: true,
-  };
-  if (password) authUpdate.password = password;
-  const { error: authError } = await admin.auth.admin.updateUserById(target.user_id, authUpdate);
-  if (authError) {
-    await admin.from("usuarios").update({
-      usuario: target.usuario,
-      email_login: target.email_login,
-      nombre: target.nombre,
-      rol: target.rol,
-      activo: target.activo,
-      permissions: target.permissions,
-    }).eq("id", profileId);
-    await admin.from("tenant_memberships").update({
-      role: oldMembership.role,
-      active: oldMembership.active,
-      permissions: oldMembership.permissions,
-    }).eq("user_id", target.user_id).eq("tenant_id", tenantId);
-    const authCode = String(authError.code ?? "").toLowerCase();
-    const authMessage = String(authError.message ?? "").toLowerCase();
-    const errorCode =
-      authCode === "weak_password" || authMessage.includes("password") || authMessage.includes("weak")
-        ? "AUTH_PASSWORD_POLICY_REJECTED"
-        : "AUTH_USER_NOT_UPDATED";
-    return json(400, { success: false, error: errorCode });
+    return json(400, { success: false, error: configError.message });
   }
 
   await admin.from("auditoria_eventos").insert({
     empresa_id: tenantId,
     usuario_id: callerData.user.id,
-    accion: active ? "usuario_actualizado" : "usuario_desactivado",
-    modulo: "Usuarios",
-    tabla: "usuarios",
-    registro_id: profileId,
-    detalle: "Cambio administrativo de perfil y membresía",
-    metadata: { username, role, active },
+    accion: action === "create" ? "empresa_creada" : active ? "empresa_actualizada" : "empresa_suspendida",
+    modulo: "Empresas",
+    tabla: "empresas",
+    registro_id: tenantId,
+    detalle: "Operación administrativa de empresa",
+    metadata: { nombre: companyPayload.nombre, active },
   });
 
-  return json(200, { success: true, profile_id: profileId, username, active, role });
+  return json(200, { success: true, tenant_id: tenantId, active });
 });

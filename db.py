@@ -16,7 +16,7 @@ except Exception:
     Client = Any
     create_client = None
 
-VERSION_SISTEMA = "v3.0.3-secure"
+VERSION_SISTEMA = "v3.0.4-secure"
 LOGGER = logging.getLogger("ais")
 
 # =========================================================
