@@ -74,6 +74,18 @@ _API_ERROR_MESSAGES = {
     "AUTH_USER_NOT_DELETED": "Supabase Auth no pudo eliminar la identidad del usuario.",
     "AUTH_USER_NOT_CREATED": "Supabase Auth no pudo crear la cuenta del usuario.",
     "PROFILE_NOT_CREATED": "La cuenta no se guardó porque el perfil empresarial fue rechazado.",
+    "INVALID_INITIAL_CASH": "El fondo inicial de la caja no puede ser negativo.",
+    "OPEN_CASH_PERMISSION_DENIED": (
+        "Esta cuenta no puede abrir la caja. Entre con el usuario administrador "
+        "o cajera de la empresa y confirme que tenga permiso para vender o abrir caja."
+    ),
+    "CASH_REGISTER_ALREADY_OPEN": "Este usuario ya tiene una caja abierta en la empresa.",
+    "CASH_REGISTER_NOT_OPEN": "La caja seleccionada ya no está abierta. Recargue la pantalla.",
+    "OPEN_CASH_REGISTER_REQUIRED": "Debe abrir una caja antes de registrar esta operación.",
+    "PGRST202": (
+        "Supabase no encuentra la función segura para abrir la caja. Aplique el SQL "
+        "transaccional de A&M en Supabase y vuelva a intentarlo."
+    ),
     "PURCHASE_PERMISSION_DENIED": "No tiene permiso para registrar compras en esta empresa.",
     "PRODUCT_NOT_FOUND_OR_FORBIDDEN": "Uno de los productos no existe o no pertenece a la empresa activa.",
     "INVALID_PURCHASE_ITEM": "Revise las cantidades y costos de los productos.",

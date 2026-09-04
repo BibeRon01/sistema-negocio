@@ -2814,20 +2814,35 @@ def render_caja():
 
     if not caja_abierta:
         st.subheader("🔓 Abrir caja")
+        cuenta_plataforma = es_superadmin_plataforma()
+        if cuenta_plataforma:
+            st.info(
+                "La cuenta superadministradora A&M supervisa la plataforma, pero no "
+                "registra operaciones de caja de las empresas. Cierre esta sesión y "
+                "entre con el usuario administrador o cajera de la empresa seleccionada."
+            )
         c1, c2 = st.columns(2)
         with c1:
             monto_inicial = st.number_input("Caja inicial / fondo inicial", min_value=0.0, step=1.0, value=0.0, key="caja_apertura_monto")
         with c2:
             obs_apertura = st.text_input("Observación apertura", key="caja_apertura_obs")
 
-        if st.button("Abrir caja", key="btn_abrir_caja_pro"):
+        if st.button(
+            "Abrir caja",
+            key="btn_abrir_caja_pro",
+            disabled=cuenta_plataforma,
+        ):
             try:
-                from api_client import abrir_caja as abrir_caja_api
+                from api_client import ApiError, abrir_caja as abrir_caja_api
 
                 abrir_caja_api(float(monto_inicial), obs_apertura)
                 limpiar_cache_datos()
                 st.success("Caja abierta correctamente.")
                 st.rerun()
+            except ApiError as exc:
+                # ApiError contiene únicamente mensajes controlados por A&M; se
+                # muestra la causa útil sin revelar detalles internos de Supabase.
+                st.error(str(exc))
             except Exception as exc:
                 mostrar_error_seguro("No se pudo abrir la caja.", exc)
     else:

@@ -1081,3 +1081,15 @@ def test_superadmin_registra_licencias_sin_mezclarlas_con_contabilidad():
     assert 'accion: "licencia_registrada"' in edge
     assert '.from("ventas")' not in edge
     assert '.from("gastos")' not in edge
+
+
+def test_apertura_caja_distingue_cuenta_plataforma_y_errores_controlados():
+    view = (ROOT / "pos_view.py").read_text(encoding="utf-8")
+    client = (ROOT / "api_client.py").read_text(encoding="utf-8")
+
+    assert "cuenta_plataforma = es_superadmin_plataforma()" in view
+    assert "disabled=cuenta_plataforma" in view
+    assert "except ApiError as exc:" in view
+    assert '"OPEN_CASH_PERMISSION_DENIED"' in client
+    assert '"CASH_REGISTER_ALREADY_OPEN"' in client
+    assert '"PGRST202"' in client
