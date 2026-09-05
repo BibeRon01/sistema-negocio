@@ -637,12 +637,73 @@ create table if not exists public.auditoria_eventos (
     created_at timestamptz not null default now()
 );
 
--- La versión anterior usaba tabla_afectada/descripcion y usuario_id TEXT.
--- Se conservan esas columnas y se agregan las canónicas sin borrar evidencia.
+-- Las versiones anteriores usaron combinaciones distintas de
+-- evento/accion, detalles/metadata y usuario_id UUID/TEXT. Se conservan todas
+-- las columnas históricas y se completa el contrato canónico sin borrar
+-- evidencia. usuario_id se normaliza a TEXT porque también se utiliza para
+-- actores técnicos y todas las API guardan el UUID como texto.
+alter table public.auditoria_eventos add column if not exists empresa_id text;
+alter table public.auditoria_eventos add column if not exists usuario text;
+alter table public.auditoria_eventos add column if not exists accion text;
+alter table public.auditoria_eventos add column if not exists modulo text;
 alter table public.auditoria_eventos add column if not exists tabla text;
+alter table public.auditoria_eventos add column if not exists registro_id text;
 alter table public.auditoria_eventos add column if not exists detalle text;
 alter table public.auditoria_eventos add column if not exists metadata jsonb not null default '{}'::jsonb;
 alter table public.auditoria_eventos add column if not exists created_at timestamptz not null default now();
+do $$
+declare
+    v_usuario_id_type text;
+begin
+    select c.udt_name into v_usuario_id_type
+    from information_schema.columns c
+    where c.table_schema='public'
+      and c.table_name='auditoria_eventos'
+      and c.column_name='usuario_id';
+
+    if v_usuario_id_type is null then
+        alter table public.auditoria_eventos add column usuario_id text;
+    elsif v_usuario_id_type <> 'text' then
+        alter table public.auditoria_eventos
+            alter column usuario_id type text using usuario_id::text;
+    end if;
+
+    -- Los alias antiguos dejan de ser obligatorios para que los eventos
+    -- canónicos puedan insertarse. Sus valores históricos permanecen intactos.
+    if exists (
+        select 1 from information_schema.columns
+        where table_schema='public' and table_name='auditoria_eventos'
+          and column_name='evento'
+    ) then
+        alter table public.auditoria_eventos alter column evento drop not null;
+        execute $backfill$
+            update public.auditoria_eventos
+            set accion=coalesce(nullif(accion,''),nullif(evento,''),'evento_legacy')
+            where accion is null or accion=''
+        $backfill$;
+    end if;
+    if exists (
+        select 1 from information_schema.columns
+        where table_schema='public' and table_name='auditoria_eventos'
+          and column_name='detalles'
+    ) then
+        alter table public.auditoria_eventos alter column detalles drop not null;
+        execute $backfill$
+            update public.auditoria_eventos
+            set metadata=case
+                when metadata is null or metadata='{}'::jsonb
+                then coalesce(detalles,'{}'::jsonb)
+                else metadata
+            end
+        $backfill$;
+    end if;
+    alter table public.auditoria_eventos alter column modulo drop not null;
+end
+$$;
+update public.auditoria_eventos
+set accion=coalesce(nullif(accion,''),'evento_legacy')
+where accion is null or accion='';
+alter table public.auditoria_eventos alter column accion set not null;
 
 create table if not exists public.system_test_runs (
     id uuid primary key default gen_random_uuid(),

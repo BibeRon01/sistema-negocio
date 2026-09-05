@@ -1093,3 +1093,21 @@ def test_apertura_caja_distingue_cuenta_plataforma_y_errores_controlados():
     assert '"OPEN_CASH_PERMISSION_DENIED"' in client
     assert '"CASH_REGISTER_ALREADY_OPEN"' in client
     assert '"PGRST202"' in client
+
+
+def test_auditoria_legacy_no_revierte_apertura_de_caja():
+    foundation = (
+        ROOT / "supabase/migrations/202607250001_secure_foundation.sql"
+    ).read_text(encoding="utf-8")
+    repair = (
+        ROOT / "supabase/migrations/202609040001_audit_cash_compatibility.sql"
+    ).read_text(encoding="utf-8")
+
+    for sql in (foundation, repair):
+        assert "add column if not exists accion text" in sql
+        assert "add column if not exists usuario text" in sql
+        assert "add column if not exists registro_id text" in sql
+        assert "alter column usuario_id type text using usuario_id::text" in sql
+        assert "alter column evento drop not null" in sql
+        assert "alter column modulo drop not null" in sql
+        assert "alter column accion set not null" in sql
