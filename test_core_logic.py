@@ -1111,3 +1111,17 @@ def test_auditoria_legacy_no_revierte_apertura_de_caja():
         assert "alter column evento drop not null" in sql
         assert "alter column modulo drop not null" in sql
         assert "alter column accion set not null" in sql
+
+
+def test_apertura_caja_usa_fecha_compatible_con_columna_date():
+    transactional = (
+        ROOT / "supabase/migrations/202607250002_transactional_api.sql"
+    ).read_text(encoding="utf-8")
+    repair = (
+        ROOT / "supabase/migrations/202609050001_cash_operating_date_compatibility.sql"
+    ).read_text(encoding="utf-8")
+
+    for sql in (transactional, repair):
+        opening = sql[sql.index("create or replace function public.api_abrir_caja"):]
+        assert "'abierta',current_date," in opening
+        assert "'abierta',current_date::text," not in opening

@@ -2509,7 +2509,7 @@ begin
         efectivo_inicial,estado,dia_operativo,observacion,anulado
     ) values (
         v_tenant,v_uid,v_usuario,now(),round(p_monto_inicial,2),
-        round(p_monto_inicial,2),'abierta',current_date::text,
+        round(p_monto_inicial,2),'abierta',current_date,
         left(coalesce(p_observacion,''),1000),false
     ) returning id into v_caja_id;
     insert into public.auditoria_eventos(
