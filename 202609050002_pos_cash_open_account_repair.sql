@@ -1,6 +1,265 @@
--- A&M v3.0 — API transaccional de ventas, créditos, caja y auditoría
+-- A&M: reparación compatible de Caja, Cobrar y cuentas abiertas.
+-- Revisión RLS/IDENTITY: 2026-09-16-r2.
+-- Basada en el diagnóstico real ejecutado el 5 de septiembre de 2026.
+-- Conserva el historial y aborta toda la transacción si encuentra un ID legado inválido.
 
 begin;
+
+create extension if not exists pgcrypto;
+
+-- Columnas que faltaban en la instalación real.
+alter table public.inventario_lotes
+    add column if not exists created_at timestamptz not null default now();
+alter table public.ventas
+    add column if not exists descuento numeric(18,2) not null default 0;
+alter table public.ventas
+    add column if not exists descuento_total numeric(18,2) not null default 0;
+alter table public.detalle_venta
+    add column if not exists descuento numeric(18,2) not null default 0;
+alter table public.productos
+    add column if not exists usa_inventario boolean not null default true;
+alter table public.productos
+    add column if not exists usar_en_inventario boolean not null default true;
+alter table public.caja
+    add column if not exists total_efectivo numeric(18,2) not null default 0;
+alter table public.caja
+    add column if not exists total_transferencia numeric(18,2) not null default 0;
+alter table public.caja
+    add column if not exists total_tarjeta numeric(18,2) not null default 0;
+alter table public.caja
+    add column if not exists total_credito numeric(18,2) not null default 0;
+alter table public.caja
+    add column if not exists total_ventas numeric(18,2) not null default 0;
+
+alter table public.cierre_caja
+    add column if not exists monto_inicial numeric(18,2) not null default 0;
+alter table public.cierre_caja
+    add column if not exists fondo_inicial numeric(18,2) not null default 0;
+alter table public.cierre_caja add column if not exists usuario text;
+alter table public.cierre_caja
+    add column if not exists estado text not null default 'cerrada';
+alter table public.cierre_caja
+    add column if not exists dia_operativo date default current_date;
+alter table public.cierre_caja
+    add column if not exists total_efectivo numeric(18,2) not null default 0;
+alter table public.cierre_caja
+    add column if not exists total_transferencia numeric(18,2) not null default 0;
+alter table public.cierre_caja
+    add column if not exists total_tarjeta numeric(18,2) not null default 0;
+alter table public.cierre_caja
+    add column if not exists total_credito numeric(18,2) not null default 0;
+alter table public.cierre_caja
+    add column if not exists total_ventas numeric(18,2) not null default 0;
+alter table public.cierre_caja
+    add column if not exists faltante numeric(18,2) not null default 0;
+alter table public.cierre_caja
+    add column if not exists sobrante numeric(18,2) not null default 0;
+alter table public.cierre_caja alter column fecha set default current_date;
+
+-- Se conserva BIGINT. Si ya es IDENTITY, PostgreSQL administra su secuencia y
+-- no debe cambiarse su propiedad. Solo las columnas realmente no automáticas
+-- reciben un DEFAULT de compatibilidad.
+do $$
+declare
+    v_next bigint;
+begin
+    if exists (
+        select 1
+        from information_schema.columns
+        where table_schema='public' and table_name='cierre_caja'
+          and column_name='id' and udt_name='int8' and column_default is null
+          and coalesce(is_identity,'NO')='NO'
+    ) then
+        create sequence if not exists public.cierre_caja_id_seq;
+        select coalesce(max(id),0)+1 into v_next from public.cierre_caja;
+        perform setval('public.cierre_caja_id_seq'::regclass,greatest(v_next,1),false);
+        alter table public.cierre_caja
+            alter column id set default nextval('public.cierre_caja_id_seq'::regclass);
+    end if;
+end
+$$;
+
+-- Los cuatro campos contienen identificadores de public.caja/auth.users. Se
+-- valida antes de convertir; si aparece un valor no UUID, no se cambia nada.
+do $$
+declare
+    v_target record;
+    v_bad text;
+begin
+    for v_target in
+        select * from (values
+            ('cierre_caja','caja_id'),
+            ('cierre_caja','usuario_id'),
+            ('movimientos_caja','caja_id'),
+            ('ventas_pagos','caja_id')
+        ) as x(table_name,column_name)
+    loop
+        if exists (
+            select 1 from information_schema.columns c
+            where c.table_schema='public'
+              and c.table_name=v_target.table_name
+              and c.column_name=v_target.column_name
+              and c.udt_name<>'uuid'
+        ) then
+            execute format(
+                'select %1$I::text from public.%2$I '
+                'where nullif(trim(%1$I::text),'''') is not null '
+                'and trim(%1$I::text) !~* '
+                '''^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'' limit 1',
+                v_target.column_name,v_target.table_name
+            ) into v_bad;
+            if v_bad is not null then
+                raise exception 'INVALID_LEGACY_UUID %.%=%',
+                    v_target.table_name,v_target.column_name,v_bad;
+            end if;
+        end if;
+    end loop;
+end
+$$;
+
+-- PostgreSQL impide cambiar el tipo de una columna usada por RLS. Las tablas
+-- permanecen protegidas por la misma transacción: se retiran sus políticas,
+-- se convierte el tipo y se reconstruyen antes del COMMIT.
+do $$
+declare
+    v_policy record;
+begin
+    for v_policy in
+        select schemaname,tablename,policyname
+        from pg_policies
+        where schemaname='public'
+          and tablename in ('cierre_caja','movimientos_caja','ventas_pagos')
+    loop
+        execute format(
+            'drop policy if exists %I on %I.%I',
+            v_policy.policyname,v_policy.schemaname,v_policy.tablename
+        );
+    end loop;
+end
+$$;
+
+do $$
+declare
+    v_target record;
+begin
+    for v_target in
+        select * from (values
+            ('cierre_caja','caja_id'),
+            ('cierre_caja','usuario_id'),
+            ('movimientos_caja','caja_id'),
+            ('ventas_pagos','caja_id')
+        ) as x(table_name,column_name)
+    loop
+        if exists (
+            select 1 from information_schema.columns c
+            where c.table_schema='public'
+              and c.table_name=v_target.table_name
+              and c.column_name=v_target.column_name
+              and c.udt_name<>'uuid'
+        ) then
+            execute format(
+                'alter table public.%I alter column %I type uuid '
+                'using nullif(trim(%I::text),'''')::uuid',
+                v_target.table_name,v_target.column_name,v_target.column_name
+            );
+        end if;
+    end loop;
+end
+$$;
+
+alter table public.cierre_caja enable row level security;
+create policy ais_select on public.cierre_caja
+for select to authenticated
+using (
+    public.has_tenant_access(empresa_id)
+    and (
+        usuario_id=auth.uid()
+        or public.has_tenant_permission(empresa_id,'puede_cerrar_caja')
+        or public.has_tenant_permission(empresa_id,'puede_ver_reportes')
+    )
+);
+
+alter table public.movimientos_caja enable row level security;
+create policy ais_select on public.movimientos_caja
+for select to authenticated
+using (
+    public.has_tenant_access(empresa_id)
+    and (
+        public.has_tenant_permission(empresa_id,'puede_cerrar_caja')
+        or public.has_tenant_permission(empresa_id,'puede_ver_reportes')
+        or exists (
+            select 1 from public.caja c
+            where c.id=movimientos_caja.caja_id
+              and c.empresa_id=movimientos_caja.empresa_id
+              and c.usuario_id=auth.uid()
+        )
+    )
+);
+
+alter table public.ventas_pagos enable row level security;
+create policy ais_select on public.ventas_pagos
+for select to authenticated
+using (
+    public.has_tenant_access(empresa_id)
+    and exists (
+        select 1 from public.ventas v
+        where v.id=ventas_pagos.venta_id
+          and v.empresa_id=ventas_pagos.empresa_id
+    )
+);
+
+grant select on public.cierre_caja,public.movimientos_caja,public.ventas_pagos
+to authenticated;
+revoke insert,update,delete on
+    public.cierre_caja,public.movimientos_caja,public.ventas_pagos
+from authenticated,anon;
+
+-- Borra solamente membresías que apuntan a identidades ya inexistentes. No
+-- toca perfiles, ventas, auditoría ni operaciones contables.
+delete from public.tenant_memberships tm
+where not exists (select 1 from auth.users au where au.id=tm.user_id);
+
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_constraint c
+        join pg_attribute a
+          on a.attrelid=c.conrelid and a.attnum=any(c.conkey)
+        where c.conrelid='public.tenant_memberships'::regclass
+          and c.contype='f'
+          and c.confrelid='auth.users'::regclass
+          and a.attname='user_id'
+    ) then
+        alter table public.tenant_memberships
+            add constraint tenant_memberships_user_id_fkey
+            foreign key (user_id) references auth.users(id)
+            on delete cascade not valid;
+    end if;
+end
+$$;
+
+do $$
+declare
+    v_constraint text;
+begin
+    for v_constraint in
+        select c.conname
+        from pg_constraint c
+        join pg_attribute a
+          on a.attrelid=c.conrelid and a.attnum=any(c.conkey)
+        where c.conrelid='public.tenant_memberships'::regclass
+          and c.contype='f'
+          and c.confrelid='auth.users'::regclass
+          and a.attname='user_id'
+    loop
+        execute format(
+            'alter table public.tenant_memberships validate constraint %I',
+            v_constraint
+        );
+    end loop;
+end
+$$;
 
 create or replace function public.api_registrar_venta(p jsonb)
 returns jsonb
@@ -517,139 +776,7 @@ $$;
 revoke all on function public.api_registrar_venta(jsonb) from public, anon;
 grant execute on function public.api_registrar_venta(jsonb) to authenticated;
 
--- Anulación completa. Una venta completada se conserva y se revierte; nunca se borra.
-create or replace function public.api_anular_venta(p_venta_id text, p_motivo text)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public, auth
-as $$
-declare
-    v_uid uuid := auth.uid();
-    v_venta public.ventas%rowtype;
-    v_det record;
-    v_cons record;
-    v_usuario text;
-begin
-    if v_uid is null then raise exception 'AUTH_REQUIRED'; end if;
-    if coalesce(auth.jwt()->>'aal','aal1') <> 'aal2' then
-        raise exception 'MFA_AAL2_REQUIRED';
-    end if;
-    if length(trim(coalesce(p_motivo,''))) < 10 then raise exception 'VOID_REASON_REQUIRED'; end if;
-
-    select * into v_venta from public.ventas
-    where id = p_venta_id::uuid for update;
-    if not found then raise exception 'SALE_NOT_FOUND'; end if;
-    if not (
-        public.has_tenant_permission(v_venta.empresa_id,'puede_anular')
-        or public.has_tenant_permission(v_venta.empresa_id,'puede_editar_todo')
-    ) then
-        raise exception 'VOID_PERMISSION_DENIED';
-    end if;
-    if coalesce(v_venta.anulado,false) then
-        return jsonb_build_object('success',true,'already_voided',true,'venta_id',v_venta.id);
-    end if;
-    select coalesce(u.nombre,u.usuario,v_uid::text) into v_usuario
-    from public.usuarios u where u.user_id=v_uid limit 1;
-
-    for v_cons in
-        select * from public.inventario_consumos
-        where venta_id=v_venta.id and not restaurado
-        for update
-    loop
-        if v_cons.lote_id is not null then
-            update public.inventario_lotes
-            set cantidad_restante=cantidad_restante+v_cons.cantidad, activo=true
-            where id=v_cons.lote_id;
-        end if;
-        update public.productos
-        set stock=coalesce(stock,0)+v_cons.cantidad,
-            existencia=coalesce(existencia,stock,0)+v_cons.cantidad,
-            cantidad=coalesce(cantidad,stock,0)+v_cons.cantidad,
-            updated_at=now()
-        where id=v_cons.producto_id and empresa_id=v_venta.empresa_id;
-        update public.inventario_consumos set restaurado=true where id=v_cons.id;
-    end loop;
-
-    -- Compatibilidad con ventas históricas sin asignaciones FIFO: restaurar detalle una sola vez.
-    if not exists(select 1 from public.inventario_consumos where venta_id=v_venta.id) then
-        for v_det in
-            select * from public.detalle_venta where venta_id=v_venta.id and not coalesce(anulado,false)
-        loop
-            update public.productos
-            set stock=coalesce(stock,0)+v_det.cantidad,
-                existencia=coalesce(existencia,stock,0)+v_det.cantidad,
-                cantidad=coalesce(cantidad,stock,0)+v_det.cantidad,
-                updated_at=now()
-            where id=v_det.producto_id and empresa_id=v_venta.empresa_id;
-        end loop;
-    end if;
-
-    update public.ventas_pagos set anulado=true where venta_id=v_venta.id;
-    update public.movimientos_caja set anulado=true
-    where empresa_id=v_venta.empresa_id and origen='venta' and referencia_id=v_venta.id::text;
-    update public.cuentas_por_cobrar
-    set anulado=true, estado='anulada', saldo_pendiente=0
-    where empresa_id=v_venta.empresa_id and venta_id=v_venta.id;
-    update public.detalle_venta
-    set anulado=true, motivo_anulacion=left(trim(p_motivo),1000)
-    where venta_id=v_venta.id;
-
-    insert into public.movimientos_contables(
-        empresa_id,fecha,modulo,referencia_id,cuenta_codigo,cuenta_nombre,
-        tipo_cuenta,debito,credito,descripcion,usuario,usuario_id
-    )
-    select empresa_id,now(),'anulacion_venta',v_venta.id::text,cuenta_codigo,cuenta_nombre,
-           tipo_cuenta,credito,debito,'Reverso: '||left(coalesce(descripcion,''),400),v_usuario,v_uid
-    from public.movimientos_contables
-    where empresa_id=v_venta.empresa_id and modulo='ventas' and referencia_id=v_venta.id::text;
-
-    perform set_config('app.ais_authorized_ncf_transition','1',true);
-    update public.ventas
-    set anulado=true, estado='anulada', motivo_anulacion=left(trim(p_motivo),1000),
-        anulada_por=v_uid, anulada_at=now(), updated_at=now()
-    where id=v_venta.id;
-
-    insert into public.auditoria_eventos(
-        empresa_id,usuario_id,usuario,accion,modulo,tabla,registro_id,detalle,metadata
-    ) values (
-        v_venta.empresa_id,v_uid::text,v_usuario,'venta_anulada','POS','ventas',
-        v_venta.id::text,left(trim(p_motivo),2000),
-        jsonb_build_object('total',v_venta.total,'numero_factura',v_venta.numero_factura,'ncf',v_venta.ncf)
-    );
-    return jsonb_build_object('success',true,'venta_id',v_venta.id);
-end;
-$$;
-
-revoke all on function public.api_anular_venta(text,text) from public, anon;
-grant execute on function public.api_anular_venta(text,text) to authenticated;
-
--- Permite únicamente la transición controlada de anulación; el contenido fiscal
--- de una venta con NCF sigue siendo inmutable.
-create or replace function public.protect_ncf_sale()
-returns trigger language plpgsql as $$
-begin
-    if old.ncf is not null and trim(old.ncf) <> '' then
-        if current_setting('app.ais_authorized_ncf_transition',true) = '1'
-           and old.anulado is distinct from true and new.anulado is true
-           and new.ncf is not distinct from old.ncf
-           and new.total is not distinct from old.total
-           and new.empresa_id is not distinct from old.empresa_id then
-            return new;
-        end if;
-        raise exception 'NCF_IMMUTABLE';
-    end if;
-    return new;
-end;
-$$;
-
-drop trigger if exists trg_ventas_ncf_immutable on public.ventas;
-drop trigger if exists trg_ncf_immutable on public.ventas;
-create trigger trg_ventas_ncf_immutable
-before update or delete on public.ventas
-for each row execute function public.protect_ncf_sale();
-
--- Abonos: distribuye de forma FIFO con bloqueo y registra caja/contabilidad.
+-- El cobro de créditos usa la caja abierta del propio usuario y conserva DATE.
 create or replace function public.api_registrar_abono(
     p_cuenta_id bigint,
     p_cliente_id bigint,
@@ -682,8 +809,10 @@ begin
         raise exception 'INVALID_PAYMENT_METHOD';
     end if;
 
-    select c.empresa_id,c.usuario_id into v_tenant,v_caja_owner from public.caja c
-    where c.id=v_caja and lower(c.estado)='abierta' for update;
+    select c.empresa_id,c.usuario_id into v_tenant,v_caja_owner
+    from public.caja c
+    where c.id=v_caja and lower(c.estado)='abierta'
+    for update;
     if v_tenant is null or not public.has_tenant_permission(v_tenant,'ver_credito') then
         raise exception 'CREDIT_PAYMENT_PERMISSION_DENIED';
     end if;
@@ -761,10 +890,9 @@ $$;
 revoke all on function public.api_registrar_abono(bigint,bigint,numeric,text,text,text) from public, anon;
 grant execute on function public.api_registrar_abono(bigint,bigint,numeric,text,text,text) to authenticated;
 
--- Apertura de caja única por usuario y empresa.
-create or replace function public.api_abrir_caja(
-    p_monto_inicial numeric,
-    p_observacion text default ''
+create or replace function public.api_reemplazar_cuenta_abierta(
+    p_venta_id text,
+    p_payload jsonb
 ) returns jsonb
 language plpgsql
 security definer
@@ -772,55 +900,120 @@ set search_path = public, auth
 as $$
 declare
     v_uid uuid := auth.uid();
-    v_tenant text;
-    v_usuario text;
-    v_caja_id uuid;
+    v_old public.ventas%rowtype;
+    v_cons record;
+    v_det record;
+    v_result jsonb;
+    v_payload jsonb;
+    v_new_caja_id uuid;
 begin
     if v_uid is null then raise exception 'AUTH_REQUIRED'; end if;
-    if p_monto_inicial < 0 then raise exception 'INVALID_INITIAL_CASH'; end if;
-    select tm.tenant_id into v_tenant
-    from public.tenant_memberships tm
-    where tm.user_id=v_uid and tm.active
-      and (
-          tm.role='admin'
-          or coalesce(tm.permissions->'puede_abrir_caja','false'::jsonb)='true'::jsonb
-          or coalesce(tm.permissions->'puede_vender','false'::jsonb)='true'::jsonb
-      )
-    order by tm.created_at limit 1;
-    if v_tenant is null then raise exception 'OPEN_CASH_PERMISSION_DENIED'; end if;
-    perform pg_advisory_xact_lock(hashtext(v_tenant||':'||v_uid::text||':caja'));
-    if exists (
-        select 1 from public.caja c
-        where c.empresa_id=v_tenant and c.usuario_id=v_uid
-          and lower(coalesce(c.estado,''))='abierta'
+    select * into v_old
+    from public.ventas
+    where id=p_venta_id::uuid
+    for update;
+    if not found then raise exception 'SALE_NOT_FOUND'; end if;
+    if not (
+        public.has_tenant_permission(v_old.empresa_id,'puede_vender')
+        or public.has_tenant_permission(v_old.empresa_id,'puede_editar_ventas')
+        or public.has_tenant_permission(v_old.empresa_id,'puede_editar_todo')
     ) then
-        raise exception 'CASH_REGISTER_ALREADY_OPEN';
+        raise exception 'EDIT_SALE_PERMISSION_DENIED';
     end if;
-    select coalesce(u.nombre,u.usuario,v_uid::text) into v_usuario
-    from public.usuarios u where u.user_id=v_uid limit 1;
-    insert into public.caja(
-        empresa_id,usuario_id,usuario,fecha_apertura,monto_inicial,
-        efectivo_inicial,estado,dia_operativo,observacion,anulado
-    ) values (
-        v_tenant,v_uid,v_usuario,now(),round(p_monto_inicial,2),
-        round(p_monto_inicial,2),'abierta',current_date,
-        left(coalesce(p_observacion,''),1000),false
-    ) returning id into v_caja_id;
-    insert into public.auditoria_eventos(
-        empresa_id,usuario_id,usuario,accion,modulo,tabla,registro_id,detalle,metadata
-    ) values (
-        v_tenant,v_uid::text,v_usuario,'caja_abierta','Caja','caja',v_caja_id::text,
-        'Apertura transaccional',
-        jsonb_build_object('monto_inicial',round(p_monto_inicial,2))
+    if coalesce(v_old.anulado,false) then raise exception 'SALE_ALREADY_VOIDED'; end if;
+    if lower(coalesce(v_old.estado,'')) <> 'abierta' then
+        raise exception 'ONLY_OPEN_SALES_CAN_BE_REPLACED';
+    end if;
+    if coalesce(trim(v_old.ncf),'')<>'' then raise exception 'NCF_IMMUTABLE'; end if;
+    if exists (
+        select 1 from public.ventas_pagos vp
+        where vp.venta_id=v_old.id and not coalesce(vp.anulado,false)
+    ) then
+        raise exception 'OPEN_SALE_HAS_PAYMENTS: anule los pagos mediante un flujo autorizado';
+    end if;
+
+    for v_cons in
+        select * from public.inventario_consumos
+        where venta_id=v_old.id and not restaurado
+        for update
+    loop
+        if v_cons.lote_id is not null then
+            update public.inventario_lotes
+            set cantidad_restante=cantidad_restante+v_cons.cantidad, activo=true
+            where id=v_cons.lote_id;
+        end if;
+        update public.productos
+        set stock=coalesce(stock,0)+v_cons.cantidad,
+            existencia=coalesce(existencia,stock,0)+v_cons.cantidad,
+            cantidad=coalesce(cantidad,stock,0)+v_cons.cantidad,
+            updated_at=now()
+        where id=v_cons.producto_id and empresa_id=v_old.empresa_id;
+        update public.inventario_consumos set restaurado=true where id=v_cons.id;
+    end loop;
+
+    if not exists (
+        select 1 from public.inventario_consumos where venta_id=v_old.id
+    ) then
+        for v_det in
+            select * from public.detalle_venta
+            where venta_id=v_old.id and not coalesce(anulado,false)
+        loop
+            update public.productos
+            set stock=coalesce(stock,0)+v_det.cantidad,
+                existencia=coalesce(existencia,stock,0)+v_det.cantidad,
+                cantidad=coalesce(cantidad,stock,0)+v_det.cantidad,
+                updated_at=now()
+            where id=v_det.producto_id and empresa_id=v_old.empresa_id;
+        end loop;
+    end if;
+
+    begin
+        v_new_caja_id := nullif(trim(p_payload ->> 'caja_id'),'')::uuid;
+    exception when others then
+        raise exception 'OPEN_CASH_REGISTER_REQUIRED';
+    end;
+    if v_new_caja_id is null then raise exception 'OPEN_CASH_REGISTER_REQUIRED'; end if;
+    perform 1
+    from public.caja c
+    where c.id=v_new_caja_id
+      and c.empresa_id=v_old.empresa_id
+      and c.usuario_id=v_uid
+      and lower(coalesce(c.estado,''))='abierta'
+    for update;
+    if not found then raise exception 'OPEN_CASH_REGISTER_REQUIRED'; end if;
+
+    v_payload := coalesce(p_payload,'{}'::jsonb) || jsonb_build_object(
+        'empresa_id',v_old.empresa_id,
+        'caja_id',v_new_caja_id,
+        'es_factura_fiscal',false
     );
-    return jsonb_build_object('success',true,'caja_id',v_caja_id);
+    v_result := public.api_registrar_venta(v_payload);
+
+    update public.detalle_venta
+    set anulado=true,motivo_anulacion='Cuenta abierta reemplazada'
+    where venta_id=v_old.id;
+    update public.ventas
+    set anulado=true,estado='reemplazada',
+        motivo_anulacion='Reemplazada por '||(v_result->>'venta_id'),
+        anulada_por=v_uid,anulada_at=now(),updated_at=now()
+    where id=v_old.id;
+    insert into public.auditoria_eventos(
+        empresa_id,usuario_id,accion,modulo,tabla,registro_id,detalle,metadata
+    ) values (
+        v_old.empresa_id,v_uid::text,'cuenta_abierta_reemplazada','POS','ventas',v_old.id::text,
+        'Cuenta abierta reemplazada o cobrada de forma atómica',
+        jsonb_build_object(
+            'venta_nueva',v_result->>'venta_id',
+            'estado_nuevo',v_payload->>'estado'
+        )
+    );
+    return v_result || jsonb_build_object('replaced_sale_id',v_old.id);
 end;
 $$;
 
-revoke all on function public.api_abrir_caja(numeric,text) from public, anon;
-grant execute on function public.api_abrir_caja(numeric,text) to authenticated;
+revoke all on function public.api_reemplazar_cuenta_abierta(text,jsonb) from public, anon;
+grant execute on function public.api_reemplazar_cuenta_abierta(text,jsonb) to authenticated;
 
--- Cierre de caja calculado desde movimientos persistidos.
 create or replace function public.api_cerrar_caja(
     p_caja_id text,
     p_efectivo_contado numeric,
@@ -926,5 +1119,17 @@ $$;
 
 revoke all on function public.api_cerrar_caja(text,numeric,text) from public, anon;
 grant execute on function public.api_cerrar_caja(text,numeric,text) to authenticated;
+
+-- Verificación final: si una condición crítica no quedó corregida, revierte todo.
+do $$
+begin
+    if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='inventario_lotes' and column_name='created_at') then
+        raise exception 'REPAIR_INVENTORY_TIMESTAMP_FAILED';
+    end if;
+    if exists (select 1 from information_schema.columns where table_schema='public' and table_name in ('cierre_caja','movimientos_caja','ventas_pagos') and column_name in ('caja_id','usuario_id') and ((table_name='cierre_caja' and column_name in ('caja_id','usuario_id')) or (table_name in ('movimientos_caja','ventas_pagos') and column_name='caja_id')) and udt_name<>'uuid') then
+        raise exception 'REPAIR_CASH_UUID_FAILED';
+    end if;
+end
+$$;
 
 commit;

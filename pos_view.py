@@ -958,23 +958,14 @@ def render_pos():
 
             st.session_state["pos_carrito"] = nuevo_carrito
             carrito = st.session_state["pos_carrito"]
-            # 1. Configuración de ITBIS en Venta
-            st.markdown("### 🧮 Configuración de ITBIS en Venta")
-            es_autorizado_itbis = es_admin() or tiene_permiso("puede_configurar") or tiene_permiso("puede_editar_todo")
-            
-            col_itb1, col_itb2 = st.columns(2)
-            with col_itb1:
-                aplicar_itbis_toggle = st.toggle("Aplicar ITBIS a la venta", value=True, disabled=not es_autorizado_itbis, key="pos_aplicar_itbis_toggle")
-            with col_itb2:
-                itbis_incluido_global = st.selectbox(
-                    "Tratamiento de precios",
-                    ["Precios YA incluyen ITBIS (Desglosar)", "Precios NO incluyen ITBIS (Sumar)"],
-                    index=0 if bool(cfg.get("precios_incluyen_itbis", True)) else 1,
-                    disabled=not es_autorizado_itbis,
-                    key="pos_itbis_incluido_global_sel"
-                )
-                pos_itbis_incluido_global = (itbis_incluido_global == "Precios YA incluyen ITBIS (Desglosar)")
-                st.session_state["pos_itbis_incluido_global"] = pos_itbis_incluido_global
+            # El servidor calcula y valida el ITBIS desde cada producto. El precio
+            # del catálogo es siempre el precio final al cliente, con el impuesto
+            # incluido cuando el producto está marcado como gravado.
+            st.markdown("### 🧮 ITBIS de la venta")
+            st.info("El sistema desglosa automáticamente el ITBIS de cada producto gravado.")
+            aplicar_itbis_toggle = True
+            pos_itbis_incluido_global = True
+            st.session_state["pos_itbis_incluido_global"] = True
 
             # Calcular subtotales e ITBIS por producto
             subtotal_gravado = 0.0
@@ -1014,7 +1005,23 @@ def render_pos():
             subtotal = subtotal_gravado + subtotal_exento
             st.markdown(f"### Total carrito: RD$ {total_carrito:,.2f}")
 
-            descuento_global = st.number_input("Descuento global", min_value=0.0, step=1.0, key="pos_desc_global")
+            puede_descontar = (
+                es_admin()
+                or tiene_permiso("puede_aplicar_descuento")
+                or tiene_permiso("puede_editar_todo")
+            )
+            descuento_global = st.number_input(
+                "Descuento global",
+                min_value=0.0,
+                step=1.0,
+                disabled=not puede_descontar,
+                key="pos_desc_global",
+            )
+            if not puede_descontar:
+                st.caption("Su usuario no tiene permiso para aplicar descuentos.")
+            if descuento_global > 0 and descuento_global >= total_carrito:
+                st.error("El descuento debe ser menor que el total de la venta.")
+                st.stop()
             
             # Recalcular proporcionalmente con descuento
             total_real_venta = max(total_carrito - descuento_global, 0.0)
@@ -1626,11 +1633,12 @@ def render_pos():
                                 "cliente_id": cliente_id,
                                 "cliente_nombre": alias_cuenta if (estado_final == "abierta" and alias_cuenta) else cliente_nombre,
                                 "usuario": nombre_usuario_actual(),
-                                "dia_operativo": ahora_str(),
+                                "dia_operativo": str(date.today()),
                                 "caja_id": str(caja_activa.get("id")),
                                 "numero_factura": numero_factura_pos,
                                 "estado": estado_final,
                                 "observacion": json.dumps({"participantes": st.session_state.get("pos_nuevo_cuenta_participantes", []), "descuento": descuento_global, "recargo": 0, "nota_factura": nota_factura}),
+                                "descuento_global": float(descuento_global),
                                 "metodo_pago": metodo_pago_final,
                                 "empresa_id": obtener_tenant_actual(),
                                 "items": items_payload,
@@ -2657,68 +2665,6 @@ def render_caja():
         except Exception as exc:
             mostrar_error_seguro("No se pudo cerrar la caja.", exc)
             return False
-
-        usuario_cierre = usuario_cierre or usuario_act
-        resumen = _calcular_resumen_caja(caja)
-
-        diferencia = float(efectivo_contado) - float(resumen["efectivo_esperado"])
-        faltante = abs(diferencia) if diferencia < 0 else 0.0
-        sobrante = diferencia if diferencia > 0 else 0.0
-
-        cierre_payload = {
-            "fecha_cierre": datetime.now().isoformat(),
-            "estado": "cerrada",
-            "efectivo_contado": float(efectivo_contado),
-            "efectivo_esperado": float(resumen["efectivo_esperado"]),
-            "total_efectivo": float(resumen.get("efectivo_caja", resumen["venta_efectivo"])),
-            "total_transferencia": float(resumen.get("transferencia_caja", resumen["venta_transferencia"])),
-            "total_tarjeta": float(resumen.get("tarjeta_caja", resumen["venta_tarjeta"])),
-            "total_credito": float(resumen["venta_credito"]),
-            "total_ventas": float(resumen["total_ventas"]),
-            "faltante": float(faltante),
-            "sobrante": float(sobrante),
-            "diferencia": float(diferencia),
-            "observacion": obs_cierre,
-        }
-
-        ok_update = actualizar("caja", caja.get("id"), cierre_payload)
-
-        # C-05: Si hay descuadre (diferencia != 0), registrar evento de auditoría de seguridad
-        if abs(diferencia) > 0.01:
-            try:
-                registrar_auditoria_pro(
-                    accion="descuadre_caja_cierre",
-                    modulo="Caja",
-                    tabla_afectada="caja",
-                    registro_id=caja.get("id"),
-                    impacto_economico=float(diferencia),
-                    nivel_riesgo="alto",
-                    riesgo_score=75.0,
-                    descripcion=f"Cierre de caja descuadrado (Usuario: {caja.get('usuario')}). Esperado: RD$ {float(resumen['efectivo_esperado']):,.2f}, Contado: RD$ {float(efectivo_contado):,.2f}, Diferencia: RD$ {diferencia:,.2f}. Justificación: {obs_cierre}"
-                )
-            except Exception:
-                pass
-
-        cierre_reg = {
-            "caja_id": str(caja.get("id")),
-            "usuario": caja.get("usuario") or usuario_cierre,
-            "usuario_id": str(caja.get("usuario_id") or usuario_sesion().get("id", "")),
-            "fecha": datetime.now().isoformat(),
-            "monto_inicial": float(resumen["fondo_inicial"]),
-            "efectivo_contado": float(efectivo_contado),
-            "efectivo_esperado": float(resumen["efectivo_esperado"]),
-            "total_efectivo": float(resumen.get("efectivo_caja", resumen["venta_efectivo"])),
-            "total_transferencia": float(resumen.get("transferencia_caja", resumen["venta_transferencia"])),
-            "total_tarjeta": float(resumen.get("tarjeta_caja", resumen["venta_tarjeta"])),
-            "total_credito": float(resumen["venta_credito"]),
-            "total_ventas": float(resumen["total_ventas"]),
-            "faltante": float(faltante),
-            "sobrante": float(sobrante),
-            "diferencia": float(diferencia),
-            "observacion": obs_cierre,
-        }
-        insertar("cierre_caja", cierre_reg)
-        return ok_update
 
     def _tabla_cajas_limpia(cajas_df):
         if cajas_df.empty:

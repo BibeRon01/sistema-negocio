@@ -81,7 +81,12 @@ _API_ERROR_MESSAGES = {
     ),
     "CASH_REGISTER_ALREADY_OPEN": "Este usuario ya tiene una caja abierta en la empresa.",
     "CASH_REGISTER_NOT_OPEN": "La caja seleccionada ya no está abierta. Recargue la pantalla.",
+    "CASH_REGISTER_NOT_OWNED": "La caja abierta pertenece a otro usuario. Abra o seleccione su propia caja.",
+    "CLOSE_OTHER_CASH_PERMISSION_DENIED": "Solo la administradora o gerente puede cerrar la caja de otro usuario.",
     "OPEN_CASH_REGISTER_REQUIRED": "Debe abrir una caja antes de registrar esta operación.",
+    "INVALID_OPERATION_DATE": "La fecha operativa de la venta no es válida. Recargue la pantalla.",
+    "INVALID_GLOBAL_DISCOUNT": "El descuento debe ser menor que el total de la venta.",
+    "DISCOUNT_PERMISSION_DENIED": "Esta cuenta no tiene permiso para aplicar descuentos.",
     "PGRST202": (
         "Supabase no encuentra la función segura para abrir la caja. Aplique el SQL "
         "transaccional de A&M en Supabase y vuelva a intentarlo."

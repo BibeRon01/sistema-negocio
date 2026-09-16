@@ -21,13 +21,11 @@ declare
     v_payload jsonb;
 begin
     if v_uid is null then raise exception 'AUTH_REQUIRED'; end if;
-    if coalesce(auth.jwt()->>'aal','aal1') <> 'aal2' then
-        raise exception 'MFA_AAL2_REQUIRED';
-    end if;
     select * into v_old from public.ventas where id=p_venta_id::uuid for update;
     if not found then raise exception 'SALE_NOT_FOUND'; end if;
     if not (
-        public.has_tenant_permission(v_old.empresa_id,'puede_editar_ventas')
+        public.has_tenant_permission(v_old.empresa_id,'puede_vender')
+        or public.has_tenant_permission(v_old.empresa_id,'puede_editar_ventas')
         or public.has_tenant_permission(v_old.empresa_id,'puede_editar_todo')
     ) then
         raise exception 'EDIT_SALE_PERMISSION_DENIED';
@@ -116,18 +114,17 @@ declare
     v_det record;
     v_result jsonb;
     v_payload jsonb;
+    v_new_caja_id uuid;
 begin
     if v_uid is null then raise exception 'AUTH_REQUIRED'; end if;
-    if coalesce(auth.jwt()->>'aal','aal1') <> 'aal2' then
-        raise exception 'MFA_AAL2_REQUIRED';
-    end if;
     select * into v_old
     from public.ventas
     where id=p_venta_id::uuid
     for update;
     if not found then raise exception 'SALE_NOT_FOUND'; end if;
     if not (
-        public.has_tenant_permission(v_old.empresa_id,'puede_editar_ventas')
+        public.has_tenant_permission(v_old.empresa_id,'puede_vender')
+        or public.has_tenant_permission(v_old.empresa_id,'puede_editar_ventas')
         or public.has_tenant_permission(v_old.empresa_id,'puede_editar_todo')
     ) then
         raise exception 'EDIT_SALE_PERMISSION_DENIED';
@@ -179,9 +176,24 @@ begin
         end loop;
     end if;
 
+    begin
+        v_new_caja_id := nullif(trim(p_payload ->> 'caja_id'),'')::uuid;
+    exception when others then
+        raise exception 'OPEN_CASH_REGISTER_REQUIRED';
+    end;
+    if v_new_caja_id is null then raise exception 'OPEN_CASH_REGISTER_REQUIRED'; end if;
+    perform 1
+    from public.caja c
+    where c.id=v_new_caja_id
+      and c.empresa_id=v_old.empresa_id
+      and c.usuario_id=v_uid
+      and lower(coalesce(c.estado,''))='abierta'
+    for update;
+    if not found then raise exception 'OPEN_CASH_REGISTER_REQUIRED'; end if;
+
     v_payload := coalesce(p_payload,'{}'::jsonb) || jsonb_build_object(
         'empresa_id',v_old.empresa_id,
-        'caja_id',v_old.caja_id,
+        'caja_id',v_new_caja_id,
         'es_factura_fiscal',false
     );
     v_result := public.api_registrar_venta(v_payload);

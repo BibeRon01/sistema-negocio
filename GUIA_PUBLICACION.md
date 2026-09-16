@@ -31,15 +31,25 @@ uno por uno y en este orden:
 1. Base segura, Supabase Auth, tenants, RLS y tablas canónicas.
 2. API transaccional de ventas, caja, créditos e inventario.
 3. Mantenimiento, contabilidad, nómina y factura de compra atómica.
-4. Usuario empresarial único por empresa.
-5. Usuario único en toda la plataforma.
-6. Validación para eliminar usuarios inactivos sin historial y limpiar de forma
-   transaccional perfiles huérfanos heredados.
-7. Verificación posterior de solo lectura.
+4. Acceso empresarial por usuario.
+5. Preflight de alias globales.
+6. Alias único en toda la plataforma.
+7. Eliminación segura de usuarios inactivos sin historial.
+8. Compatibilidad de auditoría para Caja.
+9. Compatibilidad de fecha operativa al abrir Caja.
+10. Reparación de Caja, Cobrar, abonos y cuentas abiertas.
+11. Verificación específica de esa reparación.
+12. Verificación general posterior de solo lectura.
 
-Los bloques 1 al 6 usan transacciones. Si aparece un error, no continúe con el
-siguiente: conserve el mensaje en un canal privado y corrija primero la causa.
-El bloque 7 no reemplaza las pruebas RLS con usuarios reales.
+Los bloques de migración usan transacciones. Si aparece un error, no continúe
+con el siguiente: conserve el mensaje en un canal privado y corrija primero la
+causa. Las verificaciones 11 y 12 no reemplazan las pruebas RLS con usuarios
+reales.
+
+Si la base actual ya está instalada y solo necesita esta reparación, ejecute
+directamente `supabase/migrations/202609050002_pos_cash_open_account_repair.sql`
+y luego `supabase/checks/004_pos_cash_repair_readonly.sql`. No repita los
+bloques de instalación completa en producción.
 
 ## 4. Publicar las cuatro Edge Functions
 

@@ -219,6 +219,76 @@ def test_api_critica_es_transaccional_y_recalcula():
     assert "DGII_EDUCATIONAL_ONLY" in sql
 
 
+def test_reparacion_pos_caja_cubre_esquema_real_y_flujos_de_cobro():
+    repair = (
+        ROOT
+        / "supabase/migrations/202609050002_pos_cash_open_account_repair.sql"
+    ).read_text(encoding="utf-8")
+    sale = (ROOT / "supabase/migrations/202607250002_transactional_api.sql").read_text(
+        encoding="utf-8"
+    )
+    maintenance = (
+        ROOT / "supabase/migrations/202607250003_maintenance_and_accounting_api.sql"
+    ).read_text(encoding="utf-8")
+    pos = (ROOT / "pos_view.py").read_text(encoding="utf-8")
+    readonly_check = (
+        ROOT / "supabase/checks/004_pos_cash_repair_readonly.sql"
+    ).read_text(encoding="utf-8")
+
+    assert repair.strip().startswith("--")
+    assert repair.strip().endswith("commit;")
+    assert "add column if not exists created_at" in repair
+    assert "cierre_caja_id_seq" in repair
+    assert "coalesce(is_identity,'NO')='NO'" in repair
+    assert "owned by public.cierre_caja.id" not in repair.lower()
+    assert "INVALID_LEGACY_UUID" in repair
+    assert "alter column %I type uuid" in repair
+    policy_drop = repair.index("PostgreSQL impide cambiar el tipo")
+    type_change = repair.index("alter table public.%I alter column %I type uuid")
+    policy_restore = repair.index("create policy ais_select on public.cierre_caja")
+    assert policy_drop < type_change < policy_restore
+    assert "tablename in ('cierre_caja','movimientos_caja','ventas_pagos')" in repair
+    assert "delete from public.tenant_memberships" in repair.lower()
+    assert "references auth.users(id)" in repair
+    assert "create or replace function public.api_registrar_venta" in repair
+    assert "create or replace function public.api_registrar_abono" in repair
+    assert "create or replace function public.api_reemplazar_cuenta_abierta" in repair
+    assert "create or replace function public.api_cerrar_caja" in repair
+
+    assert "select c.usuario_id into v_caja_owner" in sale
+    assert "CASH_REGISTER_NOT_OWNED" in sale
+    assert "v_caja_owner is distinct from v_uid" in readonly_check
+    abono = sale[
+        sale.index("create or replace function public.api_registrar_abono"):
+        sale.index("grant execute on function public.api_registrar_abono")
+    ]
+    assert "v_caja_owner is distinct from v_uid" in abono
+    assert "current_date::text" not in abono
+    assert "v_descuento_global" in sale
+    assert "descuento_global" in pos
+    assert '"dia_operativo": str(date.today())' in pos
+    assert "El sistema desglosa automáticamente" in pos
+
+    replacement = maintenance[
+        maintenance.index("create or replace function public.api_reemplazar_cuenta_abierta"):
+        maintenance.index(
+            "grant execute on function public.api_reemplazar_cuenta_abierta"
+        )
+    ]
+    assert "MFA_AAL2_REQUIRED" not in replacement
+    assert "puede_vender" in replacement
+    assert "v_new_caja_id" in replacement
+    assert "c.usuario_id=v_uid" in replacement
+
+    close = sale[
+        sale.index("create or replace function public.api_cerrar_caja"):
+        sale.index("grant execute on function public.api_cerrar_caja")
+    ]
+    assert "cierre_caja_id_seq" not in close
+    assert "total_transferencia" in close
+    assert "CLOSE_OTHER_CASH_PERMISSION_DENIED" in close
+
+
 def test_api_mantenimiento_cubre_cuenta_compra_nomina_y_cierre():
     foundation = (
         ROOT / "supabase/migrations/202607250001_secure_foundation.sql"
@@ -301,12 +371,16 @@ def test_sql_consolidado_contiene_las_fuentes_en_orden_sin_divergencias():
         "supabase/checks/001_preflight_readonly.sql",
         "supabase/migrations/202607250001_secure_foundation.sql",
         "supabase/migrations/202607250002_transactional_api.sql",
-            "supabase/migrations/202607250003_maintenance_and_accounting_api.sql",
-            "supabase/migrations/202608150002_company_username_auth.sql",
-            "supabase/checks/003_global_username_preflight.sql",
-            "supabase/migrations/202608220001_global_unique_usernames.sql",
-            "supabase/migrations/202608250001_safe_unused_user_deletion.sql",
-            "supabase/checks/002_postdeploy_readonly.sql",
+        "supabase/migrations/202607250003_maintenance_and_accounting_api.sql",
+        "supabase/migrations/202608150002_company_username_auth.sql",
+        "supabase/checks/003_global_username_preflight.sql",
+        "supabase/migrations/202608220001_global_unique_usernames.sql",
+        "supabase/migrations/202608250001_safe_unused_user_deletion.sql",
+        "supabase/migrations/202609040001_audit_cash_compatibility.sql",
+        "supabase/migrations/202609050001_cash_operating_date_compatibility.sql",
+        "supabase/migrations/202609050002_pos_cash_open_account_repair.sql",
+        "supabase/checks/004_pos_cash_repair_readonly.sql",
+        "supabase/checks/002_postdeploy_readonly.sql",
     ]
     assert blocks == [
         (ROOT / source).read_text(encoding="utf-8").strip()
@@ -740,7 +814,7 @@ def test_token_aal2_rotado_se_sincroniza_antes_de_rpc_y_edge_functions():
     )
     assert "def _access_token_vigente" in client
     assert client.count("access_token = _access_token_vigente()") == 5
-    assert 'VERSION_SISTEMA = "v3.0.4-secure"' in db
+    assert 'VERSION_SISTEMA = "v3.0.5-secure"' in db
     assert 'Código: {support_code}' in client
 
 

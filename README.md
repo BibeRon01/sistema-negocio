@@ -72,11 +72,20 @@ ejecutarse completos y por separado en el orden indicado:
 1. base segura, Supabase Auth, tenants, RLS y tablas;
 2. API transaccional de ventas, caja, créditos e inventario;
 3. mantenimiento, contabilidad, nómina y factura de compra atómica;
-4. unicidad de usuarios por empresa para el acceso empresarial;
-5. alias de usuario único en toda la plataforma;
-6. validación para eliminar cuentas inactivas sin historial y limpiar perfiles
-   huérfanos heredados sin liberar cuentas que tengan operaciones;
-7. verificación posterior de solo lectura.
+4. acceso empresarial por usuario;
+5. preflight de alias globales;
+6. alias de usuario único en toda la plataforma;
+7. eliminación segura de usuarios sin historial;
+8. compatibilidad de auditoría requerida por Caja;
+9. compatibilidad de la fecha operativa al abrir Caja;
+10. reparación comprobada de Caja, Cobrar, abonos y cuentas abiertas;
+11. verificación específica de esa reparación;
+12. verificación general posterior de solo lectura.
+
+En una base ya instalada, para corregir Caja y Cobrar ejecute solamente
+`supabase/migrations/202609050002_pos_cash_open_account_repair.sql` y después
+`supabase/checks/004_pos_cash_repair_readonly.sql`. No vuelva a ejecutar toda la
+instalación sobre producción.
 
 `SQL_PARA_PEGAR.md` es histórico y está obsoleto: no lo ejecute. Los archivos de
 `supabase/migrations/` y `supabase/checks/` se conservan como fuentes trazables

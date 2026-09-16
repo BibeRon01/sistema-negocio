@@ -265,6 +265,8 @@ alter table if exists public.productos add column if not exists costo numeric(18
 alter table if exists public.productos add column if not exists costo_unitario numeric(18,4);
 alter table if exists public.productos add column if not exists itbis_gravado boolean not null default true;
 alter table if exists public.productos add column if not exists itbis_tasa numeric(6,3) not null default 18;
+alter table if exists public.productos add column if not exists usa_inventario boolean not null default true;
+alter table if exists public.productos add column if not exists usar_en_inventario boolean not null default true;
 alter table if exists public.productos add column if not exists precio_minimo numeric(18,2);
 alter table if exists public.productos add column if not exists updated_at timestamptz not null default now();
 
@@ -275,11 +277,13 @@ alter table if exists public.ventas add column if not exists subtotal numeric(18
 alter table if exists public.ventas add column if not exists subtotal_gravado numeric(18,2) not null default 0;
 alter table if exists public.ventas add column if not exists subtotal_exento numeric(18,2) not null default 0;
 alter table if exists public.ventas add column if not exists itbis_total numeric(18,2) not null default 0;
+alter table if exists public.ventas add column if not exists descuento numeric(18,2) not null default 0;
+alter table if exists public.ventas add column if not exists descuento_total numeric(18,2) not null default 0;
 alter table if exists public.ventas add column if not exists numero_factura text;
 alter table if exists public.ventas add column if not exists cliente_id bigint;
 alter table if exists public.ventas add column if not exists cliente_nombre text;
 alter table if exists public.ventas add column if not exists usuario text;
-alter table if exists public.ventas add column if not exists dia_operativo text;
+alter table if exists public.ventas add column if not exists dia_operativo date default current_date;
 alter table if exists public.ventas add column if not exists caja_id uuid;
 alter table if exists public.ventas add column if not exists tipo_venta text;
 alter table if exists public.ventas add column if not exists metodo_pago text;
@@ -305,6 +309,7 @@ alter table if exists public.detalle_venta add column if not exists cantidad num
 alter table if exists public.detalle_venta add column if not exists precio numeric(18,2) not null default 0;
 alter table if exists public.detalle_venta add column if not exists precio_unitario numeric(18,2) not null default 0;
 alter table if exists public.detalle_venta add column if not exists total_linea numeric(18,2) not null default 0;
+alter table if exists public.detalle_venta add column if not exists descuento numeric(18,2) not null default 0;
 alter table if exists public.detalle_venta add column if not exists costo numeric(18,4) not null default 0;
 alter table if exists public.detalle_venta add column if not exists costo_unitario numeric(18,4) not null default 0;
 alter table if exists public.detalle_venta add column if not exists ganancia_linea numeric(18,2) not null default 0;
@@ -325,12 +330,12 @@ alter table if exists public.ventas_pagos add column if not exists monto numeric
 alter table if exists public.ventas_pagos add column if not exists usuario text;
 alter table if exists public.ventas_pagos add column if not exists usuario_id uuid;
 alter table if exists public.ventas_pagos add column if not exists caja_id uuid;
-alter table if exists public.ventas_pagos add column if not exists dia_operativo text;
+alter table if exists public.ventas_pagos add column if not exists dia_operativo date default current_date;
 alter table if exists public.ventas_pagos add column if not exists anulado boolean not null default false;
 
 alter table if exists public.movimientos_caja add column if not exists empresa_id text;
 alter table if exists public.movimientos_caja add column if not exists fecha timestamptz not null default now();
-alter table if exists public.movimientos_caja add column if not exists dia_operativo text;
+alter table if exists public.movimientos_caja add column if not exists dia_operativo date default current_date;
 alter table if exists public.movimientos_caja add column if not exists caja_id uuid;
 alter table if exists public.movimientos_caja add column if not exists tipo_movimiento text;
 alter table if exists public.movimientos_caja add column if not exists origen text;
@@ -347,7 +352,7 @@ alter table if exists public.caja add column if not exists usuario_id uuid;
 alter table if exists public.caja add column if not exists usuario text;
 alter table if exists public.caja add column if not exists fecha_apertura timestamptz not null default now();
 alter table if exists public.caja add column if not exists fecha_cierre timestamptz;
-alter table if exists public.caja add column if not exists dia_operativo text;
+alter table if exists public.caja add column if not exists dia_operativo date default current_date;
 alter table if exists public.caja add column if not exists monto_inicial numeric(18,2) not null default 0;
 alter table if exists public.caja add column if not exists efectivo_inicial numeric(18,2) not null default 0;
 alter table if exists public.caja add column if not exists efectivo_contado numeric(18,2);
@@ -355,6 +360,11 @@ alter table if exists public.caja add column if not exists efectivo_esperado num
 alter table if exists public.caja add column if not exists diferencia numeric(18,2);
 alter table if exists public.caja add column if not exists faltante numeric(18,2);
 alter table if exists public.caja add column if not exists sobrante numeric(18,2);
+alter table if exists public.caja add column if not exists total_efectivo numeric(18,2) not null default 0;
+alter table if exists public.caja add column if not exists total_transferencia numeric(18,2) not null default 0;
+alter table if exists public.caja add column if not exists total_tarjeta numeric(18,2) not null default 0;
+alter table if exists public.caja add column if not exists total_credito numeric(18,2) not null default 0;
+alter table if exists public.caja add column if not exists total_ventas numeric(18,2) not null default 0;
 alter table if exists public.caja add column if not exists estado text not null default 'abierta';
 alter table if exists public.caja add column if not exists observacion text;
 alter table if exists public.caja add column if not exists anulado boolean not null default false;
@@ -521,6 +531,7 @@ create table if not exists public.inventario_lotes (
 -- inventario_lotes.id=BIGINT y compras.id/inventario_lotes.compra_id=UUID.
 alter table public.inventario_lotes add column if not exists compra_id uuid;
 alter table public.inventario_lotes add column if not exists producto text;
+alter table public.inventario_lotes add column if not exists created_at timestamptz not null default now();
 do $$
 begin
     -- Primero se hereda la empresa de la compra relacionada.
@@ -581,6 +592,23 @@ create table if not exists public.cierre_caja (
     observacion text,
     unique (caja_id)
 );
+
+-- La tabla histórica de algunas instalaciones ya existía con ID BIGINT y
+-- campos adicionales. Se completan únicamente las columnas y valores por
+-- defecto que necesita la API, sin cambiar ni eliminar el historial.
+alter table public.cierre_caja add column if not exists monto_inicial numeric(18,2) not null default 0;
+alter table public.cierre_caja add column if not exists fondo_inicial numeric(18,2) not null default 0;
+alter table public.cierre_caja add column if not exists usuario text;
+alter table public.cierre_caja add column if not exists estado text not null default 'cerrada';
+alter table public.cierre_caja add column if not exists dia_operativo date default current_date;
+alter table public.cierre_caja add column if not exists total_efectivo numeric(18,2) not null default 0;
+alter table public.cierre_caja add column if not exists total_transferencia numeric(18,2) not null default 0;
+alter table public.cierre_caja add column if not exists total_tarjeta numeric(18,2) not null default 0;
+alter table public.cierre_caja add column if not exists total_credito numeric(18,2) not null default 0;
+alter table public.cierre_caja add column if not exists total_ventas numeric(18,2) not null default 0;
+alter table public.cierre_caja add column if not exists faltante numeric(18,2) not null default 0;
+alter table public.cierre_caja add column if not exists sobrante numeric(18,2) not null default 0;
+alter table public.cierre_caja alter column fecha set default current_date;
 
 create table if not exists public.periodos_contables (
     id uuid primary key default gen_random_uuid(),
