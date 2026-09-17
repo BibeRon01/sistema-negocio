@@ -1199,3 +1199,42 @@ def test_apertura_caja_usa_fecha_compatible_con_columna_date():
         opening = sql[sql.index("create or replace function public.api_abrir_caja"):]
         assert "'abierta',current_date," in opening
         assert "'abierta',current_date::text," not in opening
+
+
+def test_diagnostico_total_cubre_reparacion_y_anomalias_criticas():
+    sql = (ROOT / "DIAGNOSTICO_TOTAL_SUPABASE_SOLO_LECTURA.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Revisión posterior a Caja/Cobrar: 2026-09-17-r4" in sql
+    assert "v_caja_owner is distinct from v_uid" in sql
+    assert "api_registrar_abono_caja_y_fecha" in sql
+    assert "dml_directo_authenticated" in sql
+    assert "usuarios_de_acceso_duplicados" in sql
+    assert "meses_contables_descuadrados" in sql
+    assert "empresa_activa_sin_licencia:" in sql
+    assert "caja_abierta:" in sql
+    assert "stock_negativo:" in sql
+    assert "resultado_general" in sql
+    assert "create temporary table ais_diagnostico" in sql
+    assert "create table public." not in sql.lower()
+    assert "truncate table" not in sql.lower()
+
+
+def test_correccion_diagnostico_es_puntual_idempotente_y_no_toca_biberon():
+    sql = (ROOT / "CORREGIR_DATOS_DIAGNOSTICO_20260917.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "not exists" in sql.lower()
+    assert "empresa_id='amcontable'" in sql
+    assert "'cortesia'" in sql
+    assert "date '2099-12-31'" in sql
+    assert "22e84ac0-004e-46ec-8776-77b5f983e0bf" in sql
+    assert "p.empresa_id='demo01'" in sql
+    assert "DEMO_PRODUCT_HAS_OPERATIONAL_HISTORY" in sql
+    assert "greatest(coalesce(p.stock,0),0)" in sql
+    assert "insert into public.auditoria_eventos" in sql.lower()
+    assert "biberon01" not in sql.lower()
+    assert "update public.ventas" not in sql.lower()
+    assert "update public.caja" not in sql.lower()
